@@ -185,12 +185,20 @@ function renderSplitPanes(t: Ticket, comments: Comment[]): HTMLElement {
   const received = comments.filter(c => c.type === 'received');
   const notes = comments.filter(c => c.type === 'note');
 
-  const leftPane = el('div', { class: 'spira-split-pane', style: 'flex:1 1 50%;min-width:0;overflow:auto;padding:var(--s-5) var(--s-7)' }, [
+  const leftPane = el('div', {
+    class: 'spira-split-pane',
+    'data-bg': 'paper',
+    style: 'flex:1 1 50%;min-width:0;overflow:auto;padding:0 var(--s-7) var(--s-7);background:var(--paper)',
+  }, [
     paneTitle('📧 メールスレッド', `${received.length} 件`),
     renderReceivedThread(t, received),
   ]);
 
-  const rightPane = el('div', { class: 'spira-split-pane', style: 'flex:1 1 50%;min-width:0;overflow:auto;padding:var(--s-5) var(--s-7);background:var(--paper-2)' }, [
+  const rightPane = el('div', {
+    class: 'spira-split-pane',
+    'data-bg': 'paper-2',
+    style: 'flex:1 1 50%;min-width:0;overflow:auto;padding:0 var(--s-7) var(--s-7);background:var(--paper-2)',
+  }, [
     paneTitle('📝 内部メモ', `${notes.length} 件`),
     renderNotesPane(t, notes),
   ]);
@@ -221,12 +229,36 @@ function renderSplitPanes(t: Ticket, comments: Comment[]): HTMLElement {
 }
 
 function paneTitle(title: string, sub: string): HTMLElement {
-  return el('div', {
-    style: 'display:flex;align-items:baseline;gap:var(--s-3);margin-bottom:var(--s-3);position:sticky;top:0;background:inherit;padding-bottom:var(--s-2)',
-  }, [
+  return el('div', { class: 'spira-pane-title' }, [
     el('h3', { style: 'font-size:var(--fs-md);font-weight:600;color:var(--ink);margin:0' }, [title]),
     el('span', { style: 'font-size:var(--fs-xs);color:var(--ink-3)' }, [sub]),
   ]);
+}
+
+// ============================================================ helpers
+
+const expandedReceived = new Set<number>();
+const expandedNotes = new Set<number>();
+const COLLAPSE_THRESHOLD = 200; // chars of textContent
+
+function shouldCollapse(text: string): boolean {
+  return text.length > COLLAPSE_THRESHOLD || text.split('\n').length > 4;
+}
+
+/** Auto-grow a textarea with content, capped at maxRatio of viewport, with bottom padding. */
+function autoSizeTextarea(ta: HTMLTextAreaElement, maxRatio = 0.55): void {
+  const adjust = () => {
+    ta.style.height = 'auto';
+    const max = Math.max(120, Math.floor(window.innerHeight * maxRatio));
+    const desired = Math.min(ta.scrollHeight, max);
+    ta.style.height = `${desired}px`;
+    ta.style.overflowY = ta.scrollHeight > max ? 'auto' : 'hidden';
+  };
+  ta.addEventListener('input', adjust);
+  // ensure bottom padding so cursor doesn't sit at the edge
+  ta.style.paddingBottom = '14px';
+  // initial sizing after attach
+  setTimeout(adjust, 0);
 }
 
 function attachResizer(resizer: HTMLElement, left: HTMLElement, right: HTMLElement): void {
@@ -303,17 +335,36 @@ function renderReceivedCard(t: Ticket, c: Comment): HTMLElement {
     'OWA で返信',
   ]);
 
-  const head = el('div', { class: 'spira-th-card-head' }, [
+  const head = el('div', { class: 'spira-th-card-head', style: 'flex-wrap:wrap;gap:var(--s-2)' }, [
     el('span', { html: icon('mail') }),
     el('span', { class: 'spira-th-card-from' }, [c.fromName ?? c.fromEmail ?? '(unknown)']),
-    c.fromEmail ? ` <${c.fromEmail}>` : '',
+    c.fromEmail ? el('span', { style: 'color:var(--ink-3)' }, [` <${c.fromEmail}>`]) : '',
     el('span', { style: 'margin-left:auto;color:var(--ink-3);font-size:var(--fs-sm)' }, [fmtDate(c.sentAt)]),
     replyBtn,
   ]);
+
   const body = el('div', { class: 'spira-th-card-body' });
   if (c.isHtml) body.innerHTML = sanitizeMailHtml(c.content);
   else { body.style.whiteSpace = 'pre-wrap'; body.textContent = c.content; }
-  return el('div', { class: 'spira-th-card spira-th-card--received' }, [head, body]);
+
+  const card = el('div', { class: 'spira-th-card spira-th-card--received' }, [head, body]);
+
+  const plain = body.textContent ?? '';
+  if (shouldCollapse(plain)) {
+    const isExpanded = expandedReceived.has(c.id);
+    if (!isExpanded) body.classList.add('spira-th-card-body--collapsed');
+    const toggle = el('button', {
+      class: 'spira-th-toggle',
+      onclick: () => {
+        if (expandedReceived.has(c.id)) expandedReceived.delete(c.id);
+        else expandedReceived.add(c.id);
+        setState({});
+      },
+    }, [isExpanded ? '折りたたむ' : '詳細を表示']);
+    card.appendChild(toggle);
+  }
+
+  return card;
 }
 
 // ============================================================ right: notes pane (editable)
@@ -330,13 +381,26 @@ function renderNotesPane(t: Ticket, notes: Comment[]): HTMLElement {
 }
 
 function renderNoteCard(c: Comment): HTMLElement {
-  const headLabel = el('div', { class: 'spira-th-card-head' }, [
-    el('span', { html: icon('note') }),
-    el('span', { class: 'spira-th-card-from' }, [c.fromName ?? c.fromEmail ?? '(unknown)']),
-    el('span', { style: 'margin-left:auto;color:var(--ink-3);font-size:var(--fs-sm)' }, [fmtDate(c.sentAt)]),
-  ]);
-
   const card = el('div', { class: 'spira-th-card spira-th-card--note', 'data-comment-id': String(c.id) });
+
+  const onDelete = () => {
+    confirmModal(getRoot(), {
+      title: 'メモを削除',
+      message: 'このメモを削除します。元に戻せません。',
+      primaryLabel: '削除',
+      primaryVariant: 'danger',
+      onConfirm: async () => {
+        try {
+          await getRepo().deleteComment(c.id);
+          expandedNotes.delete(c.id);
+          toast(getRoot(), 'メモを削除しました', 'ok');
+          setState({});
+        } catch (e) {
+          toast(getRoot(), `削除失敗: ${(e as Error).message}`, 'error');
+        }
+      },
+    });
+  };
 
   const showView = () => {
     clear(card);
@@ -345,26 +409,46 @@ function renderNoteCard(c: Comment): HTMLElement {
       style: 'flex-shrink:0',
       onclick: showEdit,
     }, ['編集']);
-    const headRow = el('div', { class: 'spira-th-card-head' }, [
+    const deleteBtn = el('button', {
+      class: 'spira-btn spira-btn--danger spira-btn--sm',
+      style: 'flex-shrink:0',
+      onclick: onDelete,
+    }, ['削除']);
+    const headRow = el('div', { class: 'spira-th-card-head', style: 'flex-wrap:wrap;gap:var(--s-2)' }, [
       el('span', { html: icon('note') }),
       el('span', { class: 'spira-th-card-from' }, [c.fromName ?? c.fromEmail ?? '(unknown)']),
       el('span', { style: 'margin-left:auto;color:var(--ink-3);font-size:var(--fs-sm)' }, [fmtDate(c.sentAt)]),
       editBtn,
+      deleteBtn,
     ]);
     const body = el('div', { class: 'spira-th-card-body' });
     if (c.isHtml) body.innerHTML = sanitizeMailHtml(c.content);
     else { body.style.whiteSpace = 'pre-wrap'; body.textContent = c.content; }
+
     card.appendChild(headRow);
     card.appendChild(body);
+
+    const plain = body.textContent ?? '';
+    if (shouldCollapse(plain)) {
+      const isExpanded = expandedNotes.has(c.id);
+      if (!isExpanded) body.classList.add('spira-th-card-body--collapsed');
+      const toggle = el('button', {
+        class: 'spira-th-toggle',
+        onclick: () => {
+          if (expandedNotes.has(c.id)) expandedNotes.delete(c.id);
+          else expandedNotes.add(c.id);
+          setState({});
+        },
+      }, [isExpanded ? '折りたたむ' : '詳細を表示']);
+      card.appendChild(toggle);
+    }
   };
 
   const showEdit = () => {
     clear(card);
-    const ta = el('textarea', {
-      class: 'spira-textarea',
-      rows: '4',
-    }) as HTMLTextAreaElement;
+    const ta = el('textarea', { class: 'spira-textarea', rows: '4' }) as HTMLTextAreaElement;
     ta.value = c.content;
+    autoSizeTextarea(ta);
 
     const saveBtn = el('button', {
       class: 'spira-btn spira-btn--primary spira-btn--sm',
@@ -397,7 +481,13 @@ function renderNoteCard(c: Comment): HTMLElement {
       if (e.key === 'Escape') { e.preventDefault(); showView(); }
     });
 
-    card.appendChild(headLabel.cloneNode(true) as HTMLElement);
+    const headRow = el('div', { class: 'spira-th-card-head' }, [
+      el('span', { html: icon('note') }),
+      el('span', { class: 'spira-th-card-from' }, [c.fromName ?? c.fromEmail ?? '(unknown)']),
+      el('span', { style: 'margin-left:auto;color:var(--ink-3);font-size:var(--fs-sm)' }, [fmtDate(c.sentAt)]),
+    ]);
+
+    card.appendChild(headRow);
     card.appendChild(ta);
     card.appendChild(el('div', { style: 'display:flex;gap:var(--s-3);justify-content:flex-end;margin-top:var(--s-3)' }, [cancelBtn, saveBtn]));
 
@@ -414,6 +504,7 @@ function renderNewNoteForm(t: Ticket): HTMLElement {
     placeholder: '内部メモを追加  (Cmd/Ctrl + Enter で保存)',
     rows: '3',
   }) as HTMLTextAreaElement;
+  autoSizeTextarea(ta);
 
   const saveBtn = el('button', {
     class: 'spira-btn spira-btn--primary',

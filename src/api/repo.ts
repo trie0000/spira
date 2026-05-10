@@ -60,6 +60,7 @@ export interface Repository {
   listComments(ticketId: number): Promise<Comment[]>;
   addComment(input: AddCommentInput): Promise<Comment>;
   updateComment(id: number, patch: { content: string }): Promise<void>;
+  deleteComment(id: number): Promise<void>;
 
   // inbox
   listInbox(opts?: { unprocessedOnly?: boolean }): Promise<InboxMail[]>;

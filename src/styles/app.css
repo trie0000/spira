@@ -740,6 +740,51 @@
 .spira-th-card-head svg { width: 14px; height: 14px; stroke: currentColor; fill: none; stroke-width: 1.7; }
 .spira-th-card-from { color: var(--ink); font-weight: 500; }
 .spira-th-card-body { font-size: var(--fs-md); line-height: 1.7; word-break: break-word; }
+.spira-th-card-body--collapsed {
+  position: relative;
+  max-height: 5.6em; /* approx 3 lines */
+  overflow: hidden;
+}
+.spira-th-card-body--collapsed::after {
+  content: '';
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: 2.2em;
+  background: linear-gradient(rgba(250,250,247,0), var(--paper-2));
+  pointer-events: none;
+}
+.spira-th-card--note .spira-th-card-body--collapsed::after {
+  background: linear-gradient(rgba(250,250,247,0), var(--paper));
+}
+.spira-th-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: var(--s-2);
+  background: transparent;
+  border: none;
+  padding: 0;
+  font-size: var(--fs-sm);
+  color: var(--accent-strong);
+  cursor: pointer;
+  text-decoration: underline;
+}
+.spira-th-toggle:hover { color: var(--ink); }
+
+/* Pane title: solid background so cards don't bleed through when scrolling */
+.spira-pane-title {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-3);
+  margin: 0 0 var(--s-4);
+  padding: var(--s-3) 0;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  border-bottom: 1px solid var(--line);
+}
+.spira-split-pane[data-bg="paper"]  .spira-pane-title { background: var(--paper); }
+.spira-split-pane[data-bg="paper-2"] .spira-pane-title { background: var(--paper-2); }
 .spira-th-card-body img { max-width: 100%; height: auto; border-radius: var(--r-2); }
 .spira-th-card-body a { color: var(--accent-strong); text-decoration: underline; }
 

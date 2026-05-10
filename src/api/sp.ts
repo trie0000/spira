@@ -396,6 +396,10 @@ export class SpRepository implements Repository {
     });
   }
 
+  async deleteComment(id: number): Promise<void> {
+    await this.tx.remove(this.listPath(this.cfg.listComments), id);
+  }
+
   async addComment(input: AddCommentInput): Promise<Comment> {
     const body: Record<string, unknown> = {
       Title: `c-${input.ticketId}-${Date.now()}`, // SP requires Title; not displayed

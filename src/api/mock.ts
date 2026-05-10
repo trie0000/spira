@@ -236,6 +236,15 @@ export class MockRepository implements Repository {
     if (t) t.updatedAt = now();
   }
 
+  async deleteComment(id: number): Promise<void> {
+    const c = store.comments.find(x => x.id === id);
+    if (!c) return;
+    const ticketId = c.ticketId;
+    store.comments = store.comments.filter(x => x.id !== id);
+    const t = store.tickets.find(x => x.id === ticketId);
+    if (t) t.updatedAt = now();
+  }
+
   async addComment(input: AddCommentInput): Promise<Comment> {
     const id = store.nextCommentId++;
     const c: Comment = {
