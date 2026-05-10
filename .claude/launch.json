@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "spira-dev",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["build.js", "--watch", "--serve"],
+      "port": 5176
+    }
+  ]
+}

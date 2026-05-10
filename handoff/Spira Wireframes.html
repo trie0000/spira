@@ -1,0 +1,1646 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<title>Spira — Wireframes</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Kalam:wght@300;400;700&family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#f7f4ec;
+  --paper-2:#efebe0;
+  --paper-3:#e4dfd0;
+  --ink:#262420;
+  --ink-2:#5a564d;
+  --ink-3:#8a857a;
+  --line:#2a2a26;
+  --line-soft:rgba(42,42,38,.35);
+  --accent:#7a8a78;
+  --accent-soft:rgba(122,138,120,.22);
+  --accent-strong:#5e6f5c;
+  --danger:#b8534a;
+  --warn:#c47f1c;
+  --hand:'Kalam',cursive;
+  --mono:'IBM Plex Mono',monospace;
+  --ui:'Inter',system-ui,sans-serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  font-family:var(--ui);
+  background:
+    repeating-linear-gradient(0deg, transparent 0 31px, rgba(42,42,38,.05) 31px 32px),
+    var(--paper);
+  color:var(--ink);
+  min-height:100vh;
+  font-size:13px;
+}
+
+/* ===== top nav ===== */
+.top{
+  position:sticky; top:0; z-index:20;
+  background:var(--paper);
+  border-bottom:1.5px solid var(--line);
+  padding:14px 28px 0;
+}
+.top-row1{display:flex;align-items:baseline;gap:18px;margin-bottom:10px}
+.brand{font-family:var(--hand);font-weight:700;font-size:28px;letter-spacing:-.5px}
+.brand .dot{display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--accent);margin-right:6px;vertical-align:middle;box-shadow:0 0 0 3px var(--accent-soft)}
+.tagline{font-family:var(--hand);color:var(--ink-2);font-size:15px}
+.stamp{
+  margin-left:auto;
+  font-family:var(--hand);
+  font-size:13px; color:var(--ink-2);
+  border:1.5px solid var(--line-soft);
+  padding:4px 10px;
+  transform:rotate(-1.5deg);
+  border-radius:3px;
+}
+.tabs{display:flex;gap:0;flex-wrap:wrap}
+.tab{
+  font-family:var(--hand);
+  font-size:16px;
+  background:transparent;
+  border:none;
+  border-bottom:3px solid transparent;
+  padding:10px 16px 12px;
+  cursor:pointer;
+  color:var(--ink-2);
+  position:relative;
+}
+.tab:hover{color:var(--ink)}
+.tab.active{color:var(--ink);border-bottom-color:var(--accent)}
+.tab .num{font-family:var(--mono);font-size:11px;color:var(--ink-3);margin-right:6px}
+.tab.active .num{color:var(--accent);font-weight:500}
+
+/* ===== layout ===== */
+main{padding:28px}
+.page{display:none}
+.page.active{display:block}
+.page-head{margin-bottom:22px;display:flex;align-items:flex-end;gap:18px}
+.page-head h2{font-family:var(--hand);font-weight:700;font-size:34px;margin:0;line-height:1}
+.page-head p{font-family:var(--hand);color:var(--ink-2);margin:0;font-size:15px;max-width:560px}
+
+/* row of variations */
+.variants{display:grid;gap:36px}
+.variants.cols-2{grid-template-columns:1fr 1fr}
+.variants.cols-3{grid-template-columns:1fr 1fr 1fr}
+@media (max-width:1280px){.variants.cols-3{grid-template-columns:1fr 1fr}}
+@media (max-width:900px){.variants.cols-2,.variants.cols-3{grid-template-columns:1fr}}
+
+.variant{position:relative}
+.variant-label{
+  font-family:var(--hand);
+  font-size:18px;font-weight:700;
+  margin-bottom:6px;
+  display:flex;align-items:baseline;gap:10px;
+}
+.variant-label .v{
+  font-family:var(--hand);
+  font-size:14px;font-weight:400;
+  background:var(--accent); color:var(--paper);
+  padding:1px 8px;border-radius:3px;
+  transform:rotate(-2deg);
+}
+.variant-note{font-family:var(--hand);color:var(--ink-2);font-size:14px;margin:0 0 12px;line-height:1.5}
+.variant-note .pro{color:var(--accent)}
+.variant-note .con{color:var(--danger)}
+
+/* ===== sketchy frame ===== */
+.frame{
+  background:var(--paper);
+  border:1.5px solid var(--line);
+  border-radius:6px;
+  position:relative;
+  overflow:hidden;
+}
+.frame.tall{aspect-ratio:4/3}
+.frame.short{aspect-ratio:16/9}
+.frame.modal-frame{aspect-ratio:auto}
+.frame::before{
+  /* sketchy double-line corner accents */
+  content:"";
+  position:absolute; inset:3px;
+  border:1px dashed rgba(42,42,38,.18);
+  border-radius:4px;
+  pointer-events:none;
+}
+
+/* ----- generic wireframe atoms ----- */
+.box{border:1.5px solid var(--line);border-radius:4px}
+.box-soft{border:1.5px solid var(--line-soft);border-radius:4px}
+.box-dash{border:1.5px dashed var(--line-soft);border-radius:4px}
+.fill-paper2{background:var(--paper-2)}
+.fill-paper3{background:var(--paper-3)}
+
+.lbl{font-family:var(--hand);font-size:13px;color:var(--ink-2)}
+.lbl-sm{font-family:var(--hand);font-size:11px;color:var(--ink-3)}
+.mono{font-family:var(--mono);font-size:11px;color:var(--ink-2)}
+.mono-sm{font-family:var(--mono);font-size:10px;color:var(--ink-3)}
+.hand{font-family:var(--hand)}
+
+.dline{height:1px;background:var(--line-soft);border:0}
+.dline-dash{height:0;border:0;border-top:1.5px dashed var(--line-soft)}
+
+/* squiggle text placeholders */
+.sq{
+  display:inline-block;
+  height:8px; border-radius:4px;
+  background:var(--paper-2);
+  border:1px solid var(--line-soft);
+}
+.sq.dark{background:var(--ink-3)}
+.sq.darker{background:var(--ink-2)}
+.sq.h6{height:6px}.sq.h10{height:10px}.sq.h12{height:12px}.sq.h14{height:14px}
+
+/* badges (sketchy pills) */
+.badge{
+  display:inline-flex;align-items:center;gap:4px;
+  font-family:var(--hand); font-size:12px;
+  padding:2px 8px;
+  border:1.5px solid var(--line);
+  border-radius:99px;
+  background:var(--paper);
+  line-height:1;
+}
+.badge.fill{background:var(--accent);color:var(--paper);border-color:var(--accent)}
+.badge.acc{background:var(--accent-soft);border-color:var(--accent);color:var(--accent-strong)}
+.badge.warn{background:rgba(196,127,28,.16);border-color:var(--warn)}
+.badge.danger{background:rgba(184,83,74,.14);border-color:var(--danger)}
+.badge.ok{background:rgba(47,111,94,.14);border-color:#2f6f5e}
+.dot-r{width:6px;height:6px;border-radius:50%;background:var(--danger);display:inline-block}
+.dot-w{width:6px;height:6px;border-radius:50%;background:var(--warn);display:inline-block}
+.dot-a{width:6px;height:6px;border-radius:50%;background:var(--accent);display:inline-block}
+
+/* btn */
+.btn{
+  display:inline-flex;align-items:center;gap:6px;
+  font-family:var(--hand); font-size:13px;
+  padding:4px 12px;
+  border:1.5px solid var(--line);
+  border-radius:4px;
+  background:var(--paper);
+  cursor:default;
+}
+.btn.primary{background:var(--accent);color:var(--paper);border-color:var(--accent)}
+.btn.dark{background:var(--ink);color:var(--paper)}
+.btn.ghost{border-style:dashed}
+.btn.acc{background:var(--accent);color:var(--paper);border-color:var(--accent)}
+
+/* sketch arrow & callouts */
+.callout{
+  position:absolute;
+  font-family:var(--hand); font-size:13px; color:var(--ink-2);
+  pointer-events:none;
+}
+.callout svg{display:block}
+
+/* generic shell pieces used inside frames */
+.wf-topbar{
+  height:36px; border-bottom:1.5px solid var(--line);
+  display:flex;align-items:center; gap:10px; padding:0 12px;
+  background:var(--paper);
+}
+.wf-topbar .tt{font-family:var(--hand);font-weight:700;font-size:15px}
+.wf-topbar .tt .dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--accent);margin-right:4px}
+.wf-topbar .seg{margin-left:auto;display:flex;gap:6px;align-items:center}
+
+.wf-body{display:flex;height:calc(100% - 36px)}
+.wf-side{
+  width:160px; border-right:1.5px solid var(--line);
+  padding:10px 8px; display:flex; flex-direction:column; gap:6px;
+  background:var(--paper);
+}
+.wf-side .nav{
+  font-family:var(--hand);font-size:13px;
+  padding:5px 8px; border-radius:3px; cursor:default;
+  display:flex;justify-content:space-between;align-items:center;
+  border-left:2px solid transparent;
+}
+.wf-side .nav.active{background:var(--accent-soft);font-weight:700;border-left-color:var(--accent);color:var(--accent-strong)}
+.wf-side .nav .n{font-family:var(--mono);font-size:10px;color:var(--ink-3)}
+.wf-side .group-h{font-family:var(--hand);font-size:11px;color:var(--ink-3);text-transform:uppercase;letter-spacing:.08em;margin:8px 4px 2px}
+.wf-side .new-btn{
+  margin-top:auto;
+  font-family:var(--hand);font-size:13px;
+  padding:6px 8px;
+  background:var(--accent); color:var(--paper);
+  border:1.5px solid var(--accent);
+  border-radius:4px; text-align:center;
+}
+
+.wf-main{flex:1; display:flex;flex-direction:column; min-width:0}
+.wf-toolbar{
+  height:34px;border-bottom:1.5px solid var(--line-soft);
+  padding:0 12px; display:flex;align-items:center;gap:8px;
+}
+.wf-toolbar .chip{font-family:var(--hand);font-size:11px;padding:2px 7px;border:1.5px solid var(--line-soft);border-radius:3px}
+.wf-toolbar .search{
+  margin-left:auto;
+  font-family:var(--mono);font-size:10px;color:var(--ink-3);
+  border:1.5px solid var(--line-soft);
+  padding:3px 8px;border-radius:3px;
+  min-width:140px;
+}
+.wf-content{flex:1;overflow:hidden;padding:10px 12px}
+
+/* ticket table */
+.tk-table{width:100%;border-collapse:collapse}
+.tk-table th{
+  text-align:left; font-family:var(--hand); font-size:11px;
+  color:var(--ink-3); font-weight:400;
+  padding:4px 6px; border-bottom:1.5px solid var(--line);
+}
+.tk-table td{
+  padding:6px 6px; border-bottom:1px solid var(--line-soft);
+  font-family:var(--mono); font-size:10px;
+  vertical-align:middle;
+}
+.tk-table tr.hover td{background:var(--paper-2)}
+.tk-table .id{color:var(--ink-3); width:34px}
+.tk-table .ttl{font-family:var(--ui); font-size:11px}
+
+/* ticket card */
+.tk-card{
+  border:1.5px solid var(--line-soft);border-radius:5px;
+  padding:8px; display:flex;flex-direction:column; gap:6px;
+  background:var(--paper);
+}
+.tk-card .row{display:flex;align-items:center;gap:6px}
+.tk-card .meta{font-family:var(--mono);font-size:10px;color:var(--ink-3)}
+
+/* kanban col */
+.kcol{
+  display:flex;flex-direction:column;gap:6px;
+  padding:6px 6px 8px;
+  border-right:1.5px solid var(--line-soft);
+  min-width:0;
+}
+.kcol:last-child{border-right:0}
+.kcol-h{font-family:var(--hand);font-size:12px;display:flex;justify-content:space-between;align-items:center}
+.kcol-h .n{font-family:var(--mono);font-size:10px;color:var(--ink-3)}
+
+/* thread items */
+.th-item{display:flex;gap:8px;margin-bottom:8px}
+.th-item .icn{
+  width:22px;height:22px;border:1.5px solid var(--line);border-radius:50%;
+  display:grid;place-items:center;flex:none;
+  font-family:var(--mono);font-size:10px;
+  background:var(--paper);
+}
+.th-item .body{flex:1;min-width:0}
+.th-meta{font-family:var(--mono);font-size:10px;color:var(--ink-3);margin-bottom:3px}
+.th-card{
+  border:1.5px solid var(--line-soft); border-radius:4px;
+  padding:6px 8px; background:var(--paper);
+  font-family:var(--ui);font-size:11px;line-height:1.55;
+}
+.th-card.received{background:var(--paper-2)}
+.th-card.note{
+  border-left:3px solid var(--warn);
+  background:rgba(196,127,28,.06);
+}
+
+/* properties table */
+.prop{
+  display:grid; grid-template-columns:90px 1fr; gap:4px 10px;
+  font-size:11px;
+}
+.prop dt{font-family:var(--hand);color:var(--ink-3);padding:3px 0}
+.prop dd{margin:0;padding:3px 0;font-family:var(--ui);font-size:11px;border-bottom:1px solid var(--line-soft)}
+.prop dt + dd{border-bottom:1px solid var(--line-soft)}
+
+/* component catalog */
+.catalog{
+  display:grid; grid-template-columns:repeat(3,1fr); gap:24px;
+}
+@media (max-width:1100px){.catalog{grid-template-columns:1fr 1fr}}
+.cat-card{
+  border:1.5px solid var(--line); border-radius:6px;
+  padding:14px; background:var(--paper);
+  position:relative;
+}
+.cat-card::before{content:"";position:absolute;inset:3px;border:1px dashed rgba(42,42,38,.15);border-radius:4px;pointer-events:none}
+.cat-h{font-family:var(--hand);font-weight:700;font-size:16px;margin:0 0 4px}
+.cat-sub{font-family:var(--hand);font-size:12px;color:var(--ink-2);margin:0 0 12px}
+.cat-row{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:8px}
+
+/* tweaks */
+#tweaks{
+  position:fixed; right:18px; bottom:18px; z-index:50;
+  background:var(--paper); border:1.5px solid var(--line); border-radius:6px;
+  box-shadow:0 12px 30px rgba(42,42,38,.14);
+  padding:12px 14px;
+  font-family:var(--hand); font-size:13px;
+  display:none;
+  min-width:220px;
+}
+#tweaks.open{display:block}
+#tweaks h4{margin:0 0 8px;font-family:var(--hand);font-size:15px;font-weight:700}
+#tweaks label{display:flex;align-items:center;gap:8px;margin:6px 0;cursor:pointer}
+#tweaks input[type=range]{flex:1}
+#tweaks .close{position:absolute;top:6px;right:8px;border:none;background:none;font-family:var(--hand);font-size:16px;cursor:pointer;color:var(--ink-3)}
+#tweak-toggle{
+  position:fixed;right:18px;bottom:18px;z-index:49;
+  background:var(--ink);color:var(--paper);
+  font-family:var(--hand);font-size:13px;
+  border:none;border-radius:99px;padding:8px 14px;cursor:pointer;
+  box-shadow:0 6px 14px rgba(42,42,38,.2);
+}
+
+/* sketchy hand-drawn arrow helpers */
+.arrow{position:absolute;font-family:var(--hand);color:var(--ink-2);font-size:12px}
+
+/* dark theme variant card */
+[data-mini-theme="dark"]{
+  --paper:#1d1b18; --paper-2:#25231f; --paper-3:#3a3731;
+  --ink:#e8e4d8; --ink-2:#a8a39a; --ink-3:#7a766c;
+  --line:#a8a39a; --line-soft:rgba(232,228,216,.25);
+}
+[data-mini-theme="dark"].frame{background:var(--paper);color:var(--ink)}
+[data-mini-theme="dark"] .wf-side,
+[data-mini-theme="dark"] .wf-topbar{background:var(--paper)}
+[data-mini-theme="dark"] .badge{background:var(--paper)}
+[data-mini-theme="dark"] .tk-card,
+[data-mini-theme="dark"] .th-card{background:var(--paper-2)}
+
+/* margin notes (inline annotations next to mocks) */
+.notes{
+  font-family:var(--hand); font-size:13px; color:var(--ink-2);
+  line-height:1.55;
+  margin-top:10px;
+}
+.notes ul{margin:6px 0;padding-left:18px}
+.notes li{margin-bottom:3px}
+
+/* section dividers */
+.section-h{
+  font-family:var(--hand);font-size:18px;font-weight:700;
+  margin:38px 0 14px;
+  display:flex;align-items:center;gap:10px;
+}
+.section-h::before{
+  content:""; flex:none; width:22px; height:2px; background:var(--accent);
+}
+.section-h::after{
+  content:""; flex:1; height:1.5px; background:var(--line-soft);
+}
+.section-h .sn{font-family:var(--mono);font-size:11px;color:var(--ink-3);font-weight:400}
+
+/* legend */
+.legend{
+  display:flex;gap:14px;flex-wrap:wrap;
+  font-family:var(--hand);font-size:12px;color:var(--ink-2);
+  margin:6px 0 18px;
+}
+.legend span{display:flex;align-items:center;gap:5px}
+
+/* small row meta */
+.tk-row-card{
+  display:grid;
+  grid-template-columns:34px 1fr auto auto auto;
+  gap:8px;align-items:center;
+  padding:8px 10px; border-bottom:1px solid var(--line-soft);
+}
+.tk-row-card:hover{background:var(--paper-2)}
+.tk-row-card .id{font-family:var(--mono);font-size:10px;color:var(--ink-3)}
+.tk-row-card .ttl{font-family:var(--ui);font-size:12px}
+.tk-row-card .sub{font-family:var(--hand);font-size:11px;color:var(--ink-3);margin-top:1px}
+
+/* generic sub-grid for inbox split */
+.split-2{display:grid;grid-template-columns:1fr 1fr;height:100%}
+.split-3{display:grid;grid-template-columns:160px 1fr 280px;height:100%}
+.split-2-side{display:grid;grid-template-columns:1fr 320px;height:100%}
+
+/* modal mini */
+.modal-mini{
+  border:1.5px solid var(--line); border-radius:6px;
+  background:var(--paper);
+  box-shadow:0 8px 20px rgba(42,42,38,.10);
+  padding:14px;
+}
+.modal-mini h5{font-family:var(--hand);font-size:16px;font-weight:700;margin:0 0 8px}
+.modal-mini .field{
+  border:1.5px solid var(--line-soft);border-radius:3px;
+  padding:5px 7px; margin-bottom:6px; font-family:var(--mono);font-size:10px;color:var(--ink-3);
+  background:var(--paper);
+}
+.modal-mini .field.tall{height:48px}
+.modal-mini .actions{display:flex;justify-content:flex-end;gap:6px;margin-top:8px}
+
+/* simple icon glyphs (pseudo) */
+.ico{
+  width:14px;height:14px;display:inline-block;vertical-align:middle;
+  border:1.5px solid currentColor;border-radius:2px;position:relative;
+}
+.ico.mail::before{content:"";position:absolute;inset:1.5px;border-top:1.5px solid currentColor;transform:rotate(-15deg);transform-origin:left top}
+.ico.note::before{content:"";position:absolute;left:2px;right:2px;top:3px;height:1px;background:currentColor;box-shadow:0 3px 0 currentColor,0 6px 0 currentColor}
+.ico.gear{border-radius:50%}
+.ico.gear::before{content:"";position:absolute;inset:3px;border:1.5px solid currentColor;border-radius:50%}
+.ico.sync{border-radius:50%}
+.ico.sync::before{content:"";position:absolute;left:1.5px;right:1.5px;top:50%;height:1.5px;background:currentColor;transform:rotate(45deg)}
+.ico.x::before,.ico.x::after{content:"";position:absolute;inset:0;background:currentColor;height:1.5px;top:50%}
+.ico.x{border:none}
+.ico.x::before{transform:rotate(45deg)}
+.ico.x::after{transform:rotate(-45deg)}
+
+/* tag list */
+.taglist{display:flex;flex-wrap:wrap;gap:5px}
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="top-row1">
+    <div class="brand"><span class="dot"></span>Spira</div>
+    <div class="tagline">— wireframe exploration · M365 SharePoint ticket system</div>
+    <div class="stamp">LO-FI · v0.1 · 2026-05-10</div>
+  </div>
+  <nav class="tabs" id="tabs">
+    <button class="tab active" data-page="overview"><span class="num">00</span>overview</button>
+    <button class="tab" data-page="shell"><span class="num">01</span>shell</button>
+    <button class="tab" data-page="list"><span class="num">02</span>ticket list</button>
+    <button class="tab" data-page="detail"><span class="num">03</span>ticket detail</button>
+    <button class="tab" data-page="inbox"><span class="num">04</span>inbox</button>
+    <button class="tab" data-page="modals"><span class="num">05</span>modals</button>
+    <button class="tab" data-page="components"><span class="num">06</span>components</button>
+    <button class="tab" data-page="states"><span class="num">07</span>states &amp; theme</button>
+  </nav>
+</header>
+
+<main>
+  <!-- ============ OVERVIEW ============ -->
+  <section class="page active" data-screen-label="00 Overview" id="page-overview">
+    <div class="page-head">
+      <h2>Overview</h2>
+      <p>Five screens, ~12 wireframe options total. Pick layouts you like; we'll converge to high-fi after.</p>
+    </div>
+
+    <div class="legend">
+      <span><span class="dot-r"></span> high priority</span>
+      <span><span class="dot-w"></span> medium priority</span>
+      <span><span class="dot-a"></span> moss accent (active state)</span>
+      <span><i class="hand">handwritten</i> = label / annotation</span>
+      <span><i class="mono">mono</i> = data placeholder</span>
+    </div>
+
+    <div class="variants cols-3">
+      <div class="variant">
+        <div class="variant-label">Screen map <span class="v">A</span></div>
+        <p class="variant-note">The full IA in one frame — every screen and how the user moves between them.</p>
+        <div class="frame tall">
+          <svg viewBox="0 0 600 450" width="100%" height="100%" style="display:block">
+            <defs>
+              <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+                <path d="M0,0 L10,5 L0,10 z" fill="#262420"/>
+              </marker>
+            </defs>
+            <!-- Inbox -->
+            <g>
+              <rect x="30" y="40" width="150" height="90" rx="6" fill="#f7f4ec" stroke="#262420" stroke-width="1.8"/>
+              <text x="105" y="62" text-anchor="middle" font-family="Kalam" font-size="15" font-weight="700">Inbox</text>
+              <text x="105" y="80" text-anchor="middle" font-family="Kalam" font-size="11" fill="#5a564d">(received SP list)</text>
+              <text x="105" y="100" text-anchor="middle" font-family="IBM Plex Mono" font-size="10" fill="#8a857a">未処理 N 件</text>
+              <text x="105" y="118" text-anchor="middle" font-family="Kalam" font-size="11" fill="#5a564d">→ 起票 / 紐付け</text>
+            </g>
+            <!-- New Ticket Modal -->
+            <g>
+              <rect x="220" y="20" width="150" height="70" rx="6" fill="#efebe0" stroke="#262420" stroke-width="1.8" stroke-dasharray="4 3"/>
+              <text x="295" y="42" text-anchor="middle" font-family="Kalam" font-size="13" font-weight="700">New Ticket Modal</text>
+              <text x="295" y="60" text-anchor="middle" font-family="Kalam" font-size="11" fill="#5a564d">title / 担当 / 期限</text>
+              <text x="295" y="78" text-anchor="middle" font-family="IBM Plex Mono" font-size="10" fill="#8a857a">→ Tickets list</text>
+            </g>
+            <!-- Link Modal -->
+            <g>
+              <rect x="220" y="100" width="150" height="60" rx="6" fill="#efebe0" stroke="#262420" stroke-width="1.8" stroke-dasharray="4 3"/>
+              <text x="295" y="120" text-anchor="middle" font-family="Kalam" font-size="13" font-weight="700">Link Modal</text>
+              <text x="295" y="138" text-anchor="middle" font-family="Kalam" font-size="11" fill="#5a564d">既存チケットを検索</text>
+            </g>
+            <!-- Tickets list -->
+            <g>
+              <rect x="30" y="180" width="220" height="100" rx="6" fill="#f7f4ec" stroke="#262420" stroke-width="1.8"/>
+              <text x="140" y="204" text-anchor="middle" font-family="Kalam" font-size="16" font-weight="700">Tickets list</text>
+              <text x="140" y="224" text-anchor="middle" font-family="Kalam" font-size="11" fill="#5a564d">filter · sort · search</text>
+              <text x="140" y="244" text-anchor="middle" font-family="IBM Plex Mono" font-size="10" fill="#8a857a">table / cards / kanban</text>
+              <text x="140" y="262" text-anchor="middle" font-family="Kalam" font-size="11" fill="#5a564d">3 layout variants →</text>
+            </g>
+            <!-- Ticket detail -->
+            <g>
+              <rect x="290" y="180" width="280" height="220" rx="6" fill="#f7f4ec" stroke="#262420" stroke-width="1.8"/>
+              <text x="430" y="204" text-anchor="middle" font-family="Kalam" font-size="16" font-weight="700">Ticket detail</text>
+              <text x="430" y="224" text-anchor="middle" font-family="Kalam" font-size="11" fill="#5a564d">props · thread · note</text>
+              <line x1="310" y1="240" x2="550" y2="240" stroke="#2a2a26" stroke-opacity=".25" stroke-width="1.5"/>
+              <text x="320" y="258" font-family="IBM Plex Mono" font-size="10" fill="#5a564d">📧 received  (paper-2)</text>
+              <text x="320" y="278" font-family="IBM Plex Mono" font-size="10" fill="#5a564d">📝 note      (warn left-bdr)</text>
+              <text x="320" y="298" font-family="IBM Plex Mono" font-size="10" fill="#5a564d">📧 received</text>
+              <line x1="310" y1="320" x2="550" y2="320" stroke="#2a2a26" stroke-opacity=".25" stroke-width="1.5" stroke-dasharray="3 3"/>
+              <text x="320" y="340" font-family="Kalam" font-size="12" fill="#5a564d">⌨︎ internal note input</text>
+              <rect x="320" y="350" width="220" height="34" rx="3" fill="#efebe0" stroke="#2a2a26" stroke-opacity=".25" stroke-width="1.5"/>
+            </g>
+            <!-- arrows -->
+            <path d="M180,80 C200,80 200,55 220,55" stroke="#262420" stroke-width="1.5" fill="none" marker-end="url(#arr)"/>
+            <path d="M180,100 C200,100 200,130 220,130" stroke="#262420" stroke-width="1.5" fill="none" marker-end="url(#arr)"/>
+            <path d="M295,90 C295,140 200,150 140,180" stroke="#262420" stroke-width="1.5" fill="none" marker-end="url(#arr)"/>
+            <path d="M295,160 C295,170 200,170 200,180" stroke="#262420" stroke-width="1.5" fill="none" marker-end="url(#arr)"/>
+            <path d="M250,230 L290,230" stroke="#262420" stroke-width="1.5" fill="none" marker-end="url(#arr)"/>
+            <text x="262" y="222" font-family="Kalam" font-size="10" fill="#5a564d">click row</text>
+            <!-- shell wrapper note -->
+            <rect x="15" y="10" width="580" height="420" rx="10" fill="none" stroke="#7a8a78" stroke-width="1.5" stroke-dasharray="6 4"/>
+            <text x="20" y="425" font-family="Kalam" font-size="12" fill="#5e6f5c">all wrapped in fullscreen overlay shell (sidebar + main)</text>
+          </svg>
+        </div>
+      </div>
+
+      <div class="variant">
+        <div class="variant-label">Design system anchors <span class="v">B</span></div>
+        <p class="variant-note">Reusing n365's tokens verbatim — wireframes already use the warm paper background &amp; ink/moss palette so high-fi is a paint job, not a redo.</p>
+        <div class="frame tall">
+          <div style="padding:18px;height:100%;display:flex;flex-direction:column;gap:14px">
+            <div>
+              <div class="lbl" style="font-weight:700;margin-bottom:6px">color tokens</div>
+              <div style="display:flex;gap:6px;flex-wrap:wrap">
+                <div style="text-align:center"><div style="width:38px;height:38px;background:#fafaf7;border:1.5px solid #2a2a26;border-radius:4px"></div><div class="mono-sm">paper</div></div>
+                <div style="text-align:center"><div style="width:38px;height:38px;background:#f3f1ea;border:1.5px solid #2a2a26;border-radius:4px"></div><div class="mono-sm">paper-2</div></div>
+                <div style="text-align:center"><div style="width:38px;height:38px;background:#e8e4d8;border:1.5px solid #2a2a26;border-radius:4px"></div><div class="mono-sm">paper-3</div></div>
+                <div style="text-align:center"><div style="width:38px;height:38px;background:#2a2a26;border-radius:4px"></div><div class="mono-sm">ink</div></div>
+                <div style="text-align:center"><div style="width:38px;height:38px;background:#7a8a78;border-radius:4px"></div><div class="mono-sm">accent</div></div>
+                <div style="text-align:center"><div style="width:38px;height:38px;background:#b8534a;border-radius:4px"></div><div class="mono-sm">danger</div></div>
+                <div style="text-align:center"><div style="width:38px;height:38px;background:#c47f1c;border-radius:4px"></div><div class="mono-sm">warn</div></div>
+                <div style="text-align:center"><div style="width:38px;height:38px;background:#2f6f5e;border-radius:4px"></div><div class="mono-sm">ok</div></div>
+              </div>
+            </div>
+            <div>
+              <div class="lbl" style="font-weight:700;margin-bottom:6px">spacing scale (4px)</div>
+              <div style="display:flex;align-items:flex-end;gap:6px">
+                <div style="height:4px;width:14px;background:#262420"></div>
+                <div style="height:6px;width:14px;background:#262420"></div>
+                <div style="height:8px;width:14px;background:#262420"></div>
+                <div style="height:10px;width:14px;background:#262420"></div>
+                <div style="height:12px;width:14px;background:#262420"></div>
+                <div style="height:14px;width:14px;background:#262420"></div>
+                <div style="height:18px;width:14px;background:#262420"></div>
+                <div style="height:22px;width:14px;background:#262420"></div>
+                <div style="height:28px;width:14px;background:#262420"></div>
+                <div style="height:40px;width:14px;background:#262420"></div>
+              </div>
+              <div class="mono-sm" style="margin-top:4px">4 · 6 · 8 · 10 · 12 · 14 · 18 · 22 · 28 · 40</div>
+            </div>
+            <div>
+              <div class="lbl" style="font-weight:700;margin-bottom:6px">type scale</div>
+              <div style="display:flex;flex-direction:column;gap:2px">
+                <div style="font-size:36px;line-height:1;font-family:var(--ui)">36 / h1</div>
+                <div style="font-size:22px;font-family:var(--ui)">22 / h3</div>
+                <div style="font-size:15px;font-family:var(--ui)">15 / base — Meiryo, body copy</div>
+                <div style="font-size:12px;font-family:var(--ui);color:var(--ink-2)">12 / sm — table cells, meta</div>
+              </div>
+            </div>
+            <div style="margin-top:auto">
+              <div class="lbl" style="font-weight:700;margin-bottom:6px">namespace</div>
+              <span class="badge"><span class="mono">.spira-root</span></span>
+              <span class="badge"><span class="mono">.spira-tk-*</span></span>
+              <span class="badge"><span class="mono">.spira-btn-*</span></span>
+              <span class="lbl-sm" style="margin-left:6px">avoid CSS bleed in SP host</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="variant">
+        <div class="variant-label">Open questions <span class="v">?</span></div>
+        <p class="variant-note">Things I'd like to lock down before high-fi.</p>
+        <div class="frame tall" style="padding:0">
+          <div style="padding:18px;font-family:var(--hand);font-size:14px;line-height:1.7;color:var(--ink-2)">
+            <ol style="padding-left:22px;margin:0">
+              <li><b style="color:var(--ink)">Ticket ID 表示</b> — `#001` を Title 横 / 上のクロムバー / プロパティ の どこに置く？(返信件名コピーが最重要)</li>
+              <li><b style="color:var(--ink)">List default view</b> — テーブル / カード / カンバン のどれを既定に？私案: テーブル（情報密度）</li>
+              <li><b style="color:var(--ink)">Inbox の出し方</b> — 専用画面？サイドバーの常設 inbox ペイン？モーダル？</li>
+              <li><b style="color:var(--ink)">Status の段数</b> — 4 段（新規/対応中/確認待ち/完了）でいい？「保留」要らない？</li>
+              <li><b style="color:var(--ink)">担当者 unset</b> — どう表示？dashed avatar plus "未割当" バッジ案</li>
+              <li><b style="color:var(--ink)">SP 同期失敗</b> — トーストだけ？それとも banner で永続表示？</li>
+              <li><b style="color:var(--ink)">スレッド方向</b> — 古→新（メールクライアント風）/ 新→古 (Slack 風)?</li>
+              <li><b style="color:var(--ink)">期限超過</b> — 行全体 danger / バッジだけ danger / 期限セルのみ強調?</li>
+            </ol>
+            <div style="margin-top:14px;padding:8px 10px;border:1.5px dashed var(--accent);border-radius:4px;color:var(--accent-strong)">
+              ↑ 各 wireframe で複数案を提示中。気に入ったものを丸で囲んで返してくれれば確定します。
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ SHELL ============ -->
+  <section class="page" data-screen-label="01 Shell" id="page-shell">
+    <div class="page-head">
+      <h2>01 — Shell</h2>
+      <p>Fullscreen overlay (bookmarklet-injected). 2 takes on the chrome around content.</p>
+    </div>
+
+    <div class="variants cols-2">
+      <!-- Shell A: classic sidebar -->
+      <div class="variant">
+        <div class="variant-label">Classic sidebar shell <span class="v">A</span></div>
+        <p class="variant-note"><span class="pro">+ familiar, scales to many filters / saved views</span> · <span class="con">– 200px sidebar always present</span></p>
+        <div class="frame short" style="aspect-ratio:16/10">
+          <div class="wf-topbar">
+            <div class="tt"><span class="dot"></span>Spira</div>
+            <span class="lbl-sm">/ Tickets</span>
+            <div class="seg">
+              <span class="lbl-sm">伊藤</span>
+              <span class="ico sync"></span>
+              <span class="ico gear"></span>
+              <span class="lbl-sm">☼</span>
+              <span class="ico x"></span>
+            </div>
+          </div>
+          <div class="wf-body">
+            <aside class="wf-side">
+              <div class="group-h">VIEWS</div>
+              <div class="nav active">📋 チケット一覧 <span class="n">42</span></div>
+              <div class="nav">📥 受信メール <span class="n" style="color:var(--danger)">7</span></div>
+              <div class="group-h">FILTERS</div>
+              <div class="nav">⚑ 自分の担当 <span class="n">12</span></div>
+              <div class="nav">⏰ 今週期限 <span class="n">5</span></div>
+              <div class="nav">🔥 高優先度 <span class="n">3</span></div>
+              <div class="nav">✓ 完了済み <span class="n">281</span></div>
+              <div class="new-btn">＋ 新規チケット</div>
+            </aside>
+            <div class="wf-main">
+              <div class="wf-toolbar">
+                <span class="chip">Status: All</span>
+                <span class="chip">担当: 全員</span>
+                <span class="chip">▾ Sort: 更新日</span>
+                <span class="search">🔍 search …</span>
+              </div>
+              <div class="wf-content" style="display:flex;align-items:center;justify-content:center;color:var(--ink-3);font-family:var(--hand);font-size:14px">
+                ｟ main view goes here — see screen 02 ｠
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="notes">
+          <ul>
+            <li>Sidebar 200px fixed. Collapses to icon-only at &lt;1100px.</li>
+            <li>Top bar 36px. Right: user · sync · settings · theme · close.</li>
+            <li>Inbox count badge inherits danger color when N&gt;0.</li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- Shell B: command-bar shell -->
+      <div class="variant">
+        <div class="variant-label">Command-bar shell <span class="v">B</span></div>
+        <p class="variant-note"><span class="pro">+ more horizontal real estate, Notion-ish breadcrumb</span> · <span class="con">– needs a popover for filters</span></p>
+        <div class="frame short" style="aspect-ratio:16/10">
+          <div style="height:36px;border-bottom:1.5px solid var(--line);display:flex;align-items:center;padding:0 14px;gap:10px">
+            <div class="hand" style="font-weight:700;font-size:15px"><span class="dot-a" style="margin-right:5px"></span>Spira</div>
+            <span class="lbl-sm">›</span>
+            <span class="hand" style="font-size:13px">チケット一覧</span>
+            <span class="lbl-sm">›</span>
+            <span class="lbl-sm">高優先度</span>
+            <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+              <span class="btn ghost"><span class="ico sync"></span> 同期</span>
+              <span class="lbl-sm">伊藤</span>
+              <span class="ico gear"></span>
+              <span class="ico x"></span>
+            </div>
+          </div>
+          <div style="height:30px;border-bottom:1.5px solid var(--line-soft);display:flex;align-items:center;padding:0 14px;gap:6px;background:var(--paper-2)">
+            <span class="badge fill">📋 Tickets</span>
+            <span class="badge">📥 Inbox <span style="color:var(--danger);font-weight:700">7</span></span>
+            <span class="lbl-sm" style="margin-left:auto">⌘K — quick switch</span>
+            <span style="font-family:var(--mono);font-size:10px;color:var(--ink-3);border:1.5px solid var(--line-soft);border-radius:3px;padding:2px 8px">🔍 検索 / コマンド…</span>
+            <span class="btn primary">＋ 新規</span>
+          </div>
+          <div class="wf-toolbar">
+            <span class="chip">Status: 新規 + 対応中</span>
+            <span class="chip">担当: 自分</span>
+            <span class="chip">期限: 全て</span>
+            <span class="chip">＋ filter</span>
+            <span class="lbl-sm" style="margin-left:auto">42 件</span>
+          </div>
+          <div style="flex:1;display:flex;align-items:center;justify-content:center;color:var(--ink-3);font-family:var(--hand);font-size:14px">
+            ｟ main view ｠
+          </div>
+        </div>
+        <div class="notes">
+          <ul>
+            <li>No sidebar — view switch is two pill tabs in a sub-bar.</li>
+            <li>Filters live as chips, opened via popover. Saved views land in ⌘K.</li>
+            <li>Better when the user is mostly on Tickets list and rarely jumps.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <h3 class="section-h">Common topbar — anatomy <span class="sn">shared by both</span></h3>
+    <div class="frame" style="padding:24px;background:var(--paper-2)">
+      <svg viewBox="0 0 1100 130" width="100%">
+        <rect x="10" y="20" width="1080" height="44" rx="4" fill="#f7f4ec" stroke="#262420" stroke-width="1.5"/>
+        <circle cx="32" cy="42" r="5" fill="#7a8a78"/>
+        <text x="44" y="48" font-family="Kalam" font-size="18" font-weight="700">Spira</text>
+        <text x="115" y="48" font-family="Kalam" font-size="12" fill="#8a857a">/ チケット一覧</text>
+        <line x1="500" y1="32" x2="500" y2="52" stroke="#2a2a26" stroke-opacity=".2" stroke-width="1.5"/>
+        <text x="510" y="48" font-family="Kalam" font-size="12" fill="#5a564d">←  free space (breadcrumb / view title)  →</text>
+        <text x="850" y="48" font-family="Kalam" font-size="12">伊藤 慶</text>
+        <circle cx="900" cy="42" r="9" fill="none" stroke="#262420" stroke-width="1.5"/>
+        <path d="M900 38 a4 4 0 1 1 0 8" fill="none" stroke="#262420" stroke-width="1.5"/>
+        <rect x="925" y="33" width="18" height="18" rx="2" fill="none" stroke="#262420" stroke-width="1.5"/>
+        <text x="960" y="48" font-family="Kalam" font-size="14">☼</text>
+        <line x1="985" y1="34" x2="1000" y2="50" stroke="#262420" stroke-width="1.5"/><line x1="985" y1="50" x2="1000" y2="34" stroke="#262420" stroke-width="1.5"/>
+
+        <text x="32" y="100" font-family="Kalam" font-size="11" fill="#5a564d">brand</text>
+        <text x="115" y="100" font-family="Kalam" font-size="11" fill="#5a564d">breadcrumb</text>
+        <text x="850" y="100" font-family="Kalam" font-size="11" fill="#5a564d">user</text>
+        <text x="895" y="100" font-family="Kalam" font-size="11" fill="#5a564d">sync</text>
+        <text x="925" y="100" font-family="Kalam" font-size="11" fill="#5a564d">settings</text>
+        <text x="958" y="100" font-family="Kalam" font-size="11" fill="#5a564d">theme</text>
+        <text x="985" y="100" font-family="Kalam" font-size="11" fill="#5a564d">close</text>
+
+        <path d="M30 75 Q30 85 35 90" stroke="#5a564d" stroke-width="1" fill="none"/>
+        <path d="M115 75 Q115 85 130 90" stroke="#5a564d" stroke-width="1" fill="none"/>
+        <path d="M850 75 Q850 85 855 90" stroke="#5a564d" stroke-width="1" fill="none"/>
+      </svg>
+    </div>
+  </section>
+
+  <!-- ============ TICKET LIST ============ -->
+  <section class="page" data-screen-label="02 Ticket list" id="page-list">
+    <div class="page-head">
+      <h2>02 — Ticket list</h2>
+      <p>Three layouts, ranked by information density. Pick the default; we can keep the others as toggleable views.</p>
+    </div>
+
+    <div class="variants cols-3">
+      <!-- A: dense table -->
+      <div class="variant">
+        <div class="variant-label">Dense table <span class="v">A · default candidate</span></div>
+        <p class="variant-note"><span class="pro">+ scan-friendly · sortable cols · most data per row</span></p>
+        <div class="frame tall">
+          <div class="wf-toolbar">
+            <span class="chip">Status: 全て</span>
+            <span class="chip">担当: 全員</span>
+            <span class="chip">優先度: 全て</span>
+            <span class="chip">▾ 更新日</span>
+            <span class="search">🔍 …</span>
+          </div>
+          <div style="padding:0 8px;height:calc(100% - 34px);overflow:hidden">
+            <table class="tk-table">
+              <thead><tr><th>#</th><th>Title</th><th>St.</th><th>担当</th><th>優</th><th>期限</th><th>更新</th></tr></thead>
+              <tbody>
+                <tr class="hover"><td class="id">#042</td><td class="ttl">Outlook 同期失敗の問い合わせ</td><td><span class="badge">対応中</span></td><td>伊藤</td><td><span class="dot-r"></span></td><td style="color:var(--danger)">05-08</td><td>2h</td></tr>
+                <tr><td class="id">#041</td><td class="ttl">パスワードリセット依頼 (経理部)</td><td><span class="badge fill">新規</span></td><td>—</td><td><span class="dot-w"></span></td><td>05-12</td><td>4h</td></tr>
+                <tr><td class="id">#040</td><td class="ttl">VPN 接続できない件</td><td><span class="badge">確認待ち</span></td><td>佐藤</td><td><span class="dot-r"></span></td><td>05-11</td><td>1d</td></tr>
+                <tr><td class="id">#039</td><td class="ttl">プリンタドライバ追加申請</td><td><span class="badge">対応中</span></td><td>田中</td><td></td><td>05-15</td><td>1d</td></tr>
+                <tr><td class="id">#038</td><td class="ttl">SharePoint 権限変更</td><td><span class="badge fill">新規</span></td><td>—</td><td><span class="dot-w"></span></td><td>05-13</td><td>2d</td></tr>
+                <tr><td class="id">#037</td><td class="ttl">PC 入替依頼 / 営業 1 課</td><td><span class="badge">対応中</span></td><td>伊藤</td><td></td><td>05-20</td><td>2d</td></tr>
+                <tr><td class="id">#036</td><td class="ttl">Teams カメラ認識せず</td><td><span class="badge ok">完了</span></td><td>佐藤</td><td></td><td>—</td><td>3d</td></tr>
+                <tr><td class="id">#035</td><td class="ttl">ライセンス追加 (Visio)</td><td><span class="badge">確認待ち</span></td><td>田中</td><td></td><td>05-18</td><td>3d</td></tr>
+                <tr><td class="id">#034</td><td class="ttl">メーリングリスト追加</td><td><span class="badge ok">完了</span></td><td>伊藤</td><td></td><td>—</td><td>4d</td></tr>
+                <tr><td class="id">#033</td><td class="ttl">入退社処理 (5 月分)</td><td><span class="badge">対応中</span></td><td>佐藤</td><td><span class="dot-w"></span></td><td>05-31</td><td>5d</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div class="notes">
+          <ul><li>Hover row → paper-2 background. Click → detail.</li><li>期限超過は数値だけ danger 色 (option 1)</li></ul>
+        </div>
+      </div>
+
+      <!-- B: card list -->
+      <div class="variant">
+        <div class="variant-label">Card / row hybrid <span class="v">B</span></div>
+        <p class="variant-note"><span class="pro">+ subject-prominent, breathing room</span> · <span class="con">– fewer rows visible</span></p>
+        <div class="frame tall">
+          <div class="wf-toolbar">
+            <span class="chip">All</span>
+            <span class="chip">自分</span>
+            <span class="chip">▾ 更新日</span>
+            <span class="search">🔍 …</span>
+          </div>
+          <div style="padding:0;height:calc(100% - 34px);overflow:hidden">
+            <div class="tk-row-card">
+              <span class="id">#042</span>
+              <div>
+                <div class="ttl">Outlook 同期失敗の問い合わせ</div>
+                <div class="sub">山田 太郎 &lt;y.yamada@…&gt; · 5 件のやり取り · 2h ago</div>
+              </div>
+              <span class="badge">対応中</span>
+              <span class="dot-r" title="high"></span>
+              <span class="lbl-sm" style="color:var(--danger)">期限切れ</span>
+            </div>
+            <div class="tk-row-card">
+              <span class="id">#041</span>
+              <div>
+                <div class="ttl">パスワードリセット依頼 (経理部)</div>
+                <div class="sub">経理部 共有 · 1 件 · 4h ago</div>
+              </div>
+              <span class="badge fill">新規</span>
+              <span class="dot-w"></span>
+              <span class="lbl-sm">~ 05-12</span>
+            </div>
+            <div class="tk-row-card">
+              <span class="id">#040</span>
+              <div>
+                <div class="ttl">VPN 接続できない件</div>
+                <div class="sub">鈴木 健 · 3 件 · 1d ago</div>
+              </div>
+              <span class="badge">確認待ち</span>
+              <span class="dot-r"></span>
+              <span class="lbl-sm">~ 05-11</span>
+            </div>
+            <div class="tk-row-card">
+              <span class="id">#039</span>
+              <div>
+                <div class="ttl">プリンタドライバ追加申請</div>
+                <div class="sub">情報システム本部 · 2 件 · 1d ago</div>
+              </div>
+              <span class="badge">対応中</span>
+              <span></span>
+              <span class="lbl-sm">~ 05-15</span>
+            </div>
+            <div class="tk-row-card">
+              <span class="id">#038</span>
+              <div>
+                <div class="ttl">SharePoint 権限変更</div>
+                <div class="sub">高橋 葵 · 1 件 · 2d ago</div>
+              </div>
+              <span class="badge fill">新規</span>
+              <span class="dot-w"></span>
+              <span class="lbl-sm">~ 05-13</span>
+            </div>
+            <div class="tk-row-card">
+              <span class="id">#037</span>
+              <div>
+                <div class="ttl">PC 入替依頼 / 営業 1 課</div>
+                <div class="sub">営業 1 課 · 4 件 · 2d ago</div>
+              </div>
+              <span class="badge">対応中</span>
+              <span></span>
+              <span class="lbl-sm">~ 05-20</span>
+            </div>
+            <div class="tk-row-card">
+              <span class="id">#036</span>
+              <div>
+                <div class="ttl">Teams カメラ認識せず</div>
+                <div class="sub">佐藤 · 7 件 · 3d ago</div>
+              </div>
+              <span class="badge ok">完了</span>
+              <span></span>
+              <span class="lbl-sm">—</span>
+            </div>
+          </div>
+        </div>
+        <div class="notes"><ul><li>Subtitle = sender + thread count. Helpful when titles repeat.</li></ul></div>
+      </div>
+
+      <!-- C: kanban -->
+      <div class="variant">
+        <div class="variant-label">Kanban by status <span class="v">C</span></div>
+        <p class="variant-note"><span class="pro">+ workflow at a glance, drag to move</span> · <span class="con">– breaks down past ~30 tickets</span></p>
+        <div class="frame tall">
+          <div class="wf-toolbar">
+            <span class="chip">Group: Status</span>
+            <span class="chip">担当: 全員</span>
+            <span class="search">🔍 …</span>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);height:calc(100% - 34px);overflow:hidden">
+            <div class="kcol">
+              <div class="kcol-h">新規 <span class="n">5</span></div>
+              <div class="tk-card"><div class="meta">#041 · 4h</div><div style="font-size:11px">パスワードリセット依頼…</div><div class="row"><span class="dot-w"></span><span class="lbl-sm">— 未割当</span></div></div>
+              <div class="tk-card"><div class="meta">#038 · 2d</div><div style="font-size:11px">SharePoint 権限変更</div><div class="row"><span class="dot-w"></span><span class="lbl-sm">— 未割当</span></div></div>
+              <div class="tk-card"><div class="meta">#032 · 3d</div><div style="font-size:11px">新入社員アカウント</div><div class="row"><span class="lbl-sm">伊藤</span></div></div>
+            </div>
+            <div class="kcol">
+              <div class="kcol-h">対応中 <span class="n">12</span></div>
+              <div class="tk-card" style="border-color:var(--danger)"><div class="meta">#042 · 2h</div><div style="font-size:11px">Outlook 同期失敗…</div><div class="row"><span class="dot-r"></span><span class="lbl-sm" style="color:var(--danger)">期限切れ</span></div></div>
+              <div class="tk-card"><div class="meta">#039 · 1d</div><div style="font-size:11px">プリンタドライバ追加…</div><div class="row"><span class="lbl-sm">田中</span></div></div>
+              <div class="tk-card"><div class="meta">#037 · 2d</div><div style="font-size:11px">PC 入替依頼…</div><div class="row"><span class="lbl-sm">伊藤</span></div></div>
+              <div class="tk-card"><div class="meta">#033 · 5d</div><div style="font-size:11px">入退社処理 5 月</div><div class="row"><span class="dot-w"></span><span class="lbl-sm">佐藤</span></div></div>
+            </div>
+            <div class="kcol">
+              <div class="kcol-h">確認待ち <span class="n">3</span></div>
+              <div class="tk-card"><div class="meta">#040 · 1d</div><div style="font-size:11px">VPN 接続できない件</div><div class="row"><span class="dot-r"></span><span class="lbl-sm">佐藤</span></div></div>
+              <div class="tk-card"><div class="meta">#035 · 3d</div><div style="font-size:11px">ライセンス追加</div><div class="row"><span class="lbl-sm">田中</span></div></div>
+            </div>
+            <div class="kcol">
+              <div class="kcol-h">完了 <span class="n">281</span></div>
+              <div class="tk-card" style="opacity:.55"><div class="meta">#036 · 3d</div><div style="font-size:11px">Teams カメラ…</div></div>
+              <div class="tk-card" style="opacity:.55"><div class="meta">#034 · 4d</div><div style="font-size:11px">ML 追加</div></div>
+              <div style="font-family:var(--hand);font-size:11px;color:var(--ink-3);text-align:center;padding:6px">+278 hidden ▾</div>
+            </div>
+          </div>
+        </div>
+        <div class="notes"><ul><li>Card border-left tint = priority. Drag handle on hover.</li></ul></div>
+      </div>
+    </div>
+
+    <h3 class="section-h">Status badge — colour treatment options <span class="sn">pick one</span></h3>
+    <div class="frame" style="padding:18px">
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:18px">
+        <div>
+          <div class="lbl" style="font-weight:700;margin-bottom:6px">option 1 — outline only</div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap"><span class="badge">新規</span><span class="badge">対応中</span><span class="badge">確認待ち</span><span class="badge">完了</span></div>
+          <div class="lbl-sm" style="margin-top:6px">quietest — relies on text only</div>
+        </div>
+        <div>
+          <div class="lbl" style="font-weight:700;margin-bottom:6px">option 2 — fill on 新規 only</div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap"><span class="badge fill">新規</span><span class="badge">対応中</span><span class="badge">確認待ち</span><span class="badge ok">完了</span></div>
+          <div class="lbl-sm" style="margin-top:6px">draws eye to action-needed</div>
+        </div>
+        <div>
+          <div class="lbl" style="font-weight:700;margin-bottom:6px">option 3 — soft tints</div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            <span class="badge" style="background:rgba(184,83,74,.14);border-color:var(--danger)">新規</span>
+            <span class="badge acc">対応中</span>
+            <span class="badge warn">確認待ち</span>
+            <span class="badge ok">完了</span>
+          </div>
+          <div class="lbl-sm" style="margin-top:6px">most colourful — risks visual noise</div>
+        </div>
+        <div>
+          <div class="lbl" style="font-weight:700;margin-bottom:6px">option 4 — dot + text</div>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;font-family:var(--hand);font-size:12px">
+            <span><span class="dot-r" style="margin-right:4px"></span>新規</span>
+            <span><span class="dot-a" style="margin-right:4px"></span>対応中</span>
+            <span><span class="dot-w" style="margin-right:4px"></span>確認待ち</span>
+            <span><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--ink-3);margin-right:4px"></span>完了</span>
+          </div>
+          <div class="lbl-sm" style="margin-top:6px">linear-style. compact in tables.</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ TICKET DETAIL ============ -->
+  <section class="page" data-screen-label="03 Ticket detail" id="page-detail">
+    <div class="page-head">
+      <h2>03 — Ticket detail</h2>
+      <p>The page where work happens. Three layouts trade off thread real-estate against property visibility.</p>
+    </div>
+
+    <div class="variants cols-3">
+      <!-- A: top header + thread -->
+      <div class="variant">
+        <div class="variant-label">Top header, full-width thread <span class="v">A</span></div>
+        <p class="variant-note"><span class="pro">+ thread gets the most space</span> · <span class="con">– properties scroll out of view</span></p>
+        <div class="frame tall">
+          <div style="padding:14px 16px;border-bottom:1.5px solid var(--line-soft)">
+            <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:4px">
+              <span class="mono" style="font-size:13px;color:var(--ink-3)">#042</span>
+              <span class="btn ghost" style="padding:1px 6px;font-size:11px">⧉ copy</span>
+              <span class="badge" style="margin-left:auto">対応中</span>
+              <span class="badge danger">期限超過</span>
+            </div>
+            <div style="font-family:var(--ui);font-weight:600;font-size:18px">Outlook 同期失敗の問い合わせ</div>
+            <div style="display:flex;gap:14px;margin-top:6px;font-family:var(--mono);font-size:10px;color:var(--ink-2)">
+              <span>担当: 伊藤 慶</span><span>優先度: <span class="dot-r"></span> High</span><span>期限: 05-08 (2d 経過)</span><span>📨 OWA で開く ↗</span>
+            </div>
+          </div>
+          <div style="padding:10px 16px;flex:1;overflow:hidden;display:flex;flex-direction:column">
+            <div class="th-item"><div class="icn">📧</div><div class="body"><div class="th-meta">山田 太郎 &lt;y.yamada@…&gt; · 受信 05-06 09:14</div><div class="th-card received">いつもお世話になっております。Outlook の同期がエラーで止まっており、メールが届きません。お手数ですが…</div></div></div>
+            <div class="th-item"><div class="icn">📝</div><div class="body"><div class="th-meta">伊藤 慶 · note · 05-06 09:30</div><div class="th-card note">プロファイル再作成の手順を案内予定。同様事例 #021 参照。</div></div></div>
+            <div class="th-item"><div class="icn">📧</div><div class="body"><div class="th-meta">伊藤 慶 → 山田 太郎 · 送信 05-06 10:02</div><div class="th-card received">プロファイルの再作成をお試しください…</div></div></div>
+            <div class="th-item"><div class="icn">📧</div><div class="body"><div class="th-meta">山田 太郎 · 受信 05-07 16:40</div><div class="th-card received">手順実施しましたが現象変わらずです。</div></div></div>
+            <div style="margin-top:auto;border-top:1.5px dashed var(--line-soft);padding-top:8px">
+              <div class="lbl" style="margin-bottom:4px">＋ 内部メモ追加</div>
+              <div style="border:1.5px solid var(--line-soft);border-radius:4px;height:46px;padding:6px;font-family:var(--mono);font-size:10px;color:var(--ink-3)">type a note…</div>
+              <div style="display:flex;justify-content:flex-end;margin-top:6px"><span class="btn primary">保存</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- B: split with right rail -->
+      <div class="variant">
+        <div class="variant-label">Right-rail properties <span class="v">B · default candidate</span></div>
+        <p class="variant-note"><span class="pro">+ properties always visible &amp; editable</span> · <span class="con">– less thread width</span></p>
+        <div class="frame tall">
+          <div class="split-2-side">
+            <div style="display:flex;flex-direction:column;min-width:0">
+              <div style="padding:12px 14px;border-bottom:1.5px solid var(--line-soft)">
+                <div style="display:flex;align-items:baseline;gap:8px">
+                  <span class="mono" style="color:var(--ink-3)">#042</span>
+                  <span class="btn ghost" style="padding:1px 6px;font-size:10px">⧉</span>
+                </div>
+                <div style="font-family:var(--ui);font-weight:600;font-size:16px;margin-top:2px">Outlook 同期失敗の問い合わせ</div>
+              </div>
+              <div style="padding:10px 14px;flex:1;overflow:hidden">
+                <div class="th-item"><div class="icn">📧</div><div class="body"><div class="th-meta">山田 太郎 · 05-06 09:14</div><div class="th-card received">いつもお世話に…同期がエラーで止まっています。</div></div></div>
+                <div class="th-item"><div class="icn">📝</div><div class="body"><div class="th-meta">伊藤 · note · 09:30</div><div class="th-card note">プロファイル再作成手順を案内予定。</div></div></div>
+                <div class="th-item"><div class="icn">📧</div><div class="body"><div class="th-meta">伊藤 → 山田 · 10:02</div><div class="th-card received">手順をお試しください…</div></div></div>
+                <div class="th-item"><div class="icn">📧</div><div class="body"><div class="th-meta">山田 · 05-07 16:40</div><div class="th-card received">手順実施しましたが…</div></div></div>
+              </div>
+              <div style="border-top:1.5px dashed var(--line-soft);padding:8px 14px">
+                <div style="border:1.5px solid var(--line-soft);border-radius:4px;height:34px;padding:5px;font-family:var(--mono);font-size:10px;color:var(--ink-3)">＋ 内部メモを追加…</div>
+              </div>
+            </div>
+            <aside style="border-left:1.5px solid var(--line-soft);padding:14px;background:var(--paper);overflow:hidden">
+              <div class="lbl" style="font-weight:700;margin-bottom:8px">プロパティ</div>
+              <dl class="prop">
+                <dt>Status</dt><dd><span class="badge">対応中</span> ▾</dd>
+                <dt>担当</dt><dd>伊藤 慶 ▾</dd>
+                <dt>優先度</dt><dd><span class="dot-r"></span> High ▾</dd>
+                <dt>期限</dt><dd style="color:var(--danger)">05-08 (2d 超過)</dd>
+                <dt>起票</dt><dd>05-06 09:15</dd>
+                <dt>送信元</dt><dd>y.yamada@…</dd>
+              </dl>
+              <div style="margin-top:14px"><div class="lbl" style="font-weight:700;margin-bottom:6px">アクション</div>
+                <div style="display:flex;flex-direction:column;gap:5px"><span class="btn">📨 OWA で開く</span><span class="btn">⧉ 件名コピー</span><span class="btn ghost">📎 関連チケット</span></div>
+              </div>
+            </aside>
+          </div>
+        </div>
+      </div>
+
+      <!-- C: notion-style -->
+      <div class="variant">
+        <div class="variant-label">Notion-style stacked <span class="v">C</span></div>
+        <p class="variant-note"><span class="pro">+ matches n365 row-properties pattern</span> · <span class="con">– thread starts below the fold</span></p>
+        <div class="frame tall">
+          <div style="padding:18px 22px 14px;border-bottom:1.5px solid var(--line-soft)">
+            <div class="mono" style="color:var(--ink-3);margin-bottom:4px">#042 ⧉</div>
+            <div style="font-family:var(--ui);font-weight:600;font-size:22px;line-height:1.25">Outlook 同期失敗の問い合わせ</div>
+            <dl class="prop" style="margin-top:12px;grid-template-columns:80px 1fr 80px 1fr;column-gap:18px">
+              <dt>Status</dt><dd><span class="badge">対応中</span></dd>
+              <dt>担当</dt><dd>伊藤 慶</dd>
+              <dt>優先度</dt><dd><span class="dot-r"></span> High</dd>
+              <dt>期限</dt><dd style="color:var(--danger)">05-08 (超過)</dd>
+              <dt>起票</dt><dd>05-06 09:15</dd>
+              <dt>送信元</dt><dd>y.yamada@…</dd>
+            </dl>
+          </div>
+          <div style="padding:12px 22px;flex:1;overflow:hidden">
+            <div class="lbl" style="font-weight:700;margin-bottom:6px">スレッド</div>
+            <div class="th-item"><div class="icn">📧</div><div class="body"><div class="th-meta">山田 · 05-06 09:14</div><div class="th-card received">いつもお世話に…</div></div></div>
+            <div class="th-item"><div class="icn">📝</div><div class="body"><div class="th-meta">伊藤 · note</div><div class="th-card note">プロファイル再作成 案内予定</div></div></div>
+            <div class="th-item"><div class="icn">📧</div><div class="body"><div class="th-meta">伊藤 → 山田 · 10:02</div><div class="th-card received">手順をお試しください…</div></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <h3 class="section-h">Thread item — received vs note <span class="sn">visual differentiation</span></h3>
+    <div class="frame" style="padding:20px;display:grid;grid-template-columns:1fr 1fr;gap:24px">
+      <div>
+        <div class="lbl" style="font-weight:700;margin-bottom:6px">📧 received (paper-2 quote-style)</div>
+        <div class="th-item"><div class="icn">📧</div><div class="body"><div class="th-meta">山田 太郎 &lt;y.yamada@example.co.jp&gt; · 受信 05-07 16:40</div><div class="th-card received">手順実施しましたが現象変わらずです。お手数ですが追加でご対応いただけますでしょうか。</div></div></div>
+        <div class="lbl-sm">background paper-2 · subtle border · envelope icon</div>
+      </div>
+      <div>
+        <div class="lbl" style="font-weight:700;margin-bottom:6px">📝 internal note (warn left-border)</div>
+        <div class="th-item"><div class="icn">📝</div><div class="body"><div class="th-meta">伊藤 慶 · note · 05-06 09:30</div><div class="th-card note">プロファイル再作成の手順を案内予定。同様事例 #021 参照。OWA から元メール確認済。</div></div></div>
+        <div class="lbl-sm">paper bg · warn-color left border · note icon · 黄色付箋風</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ INBOX ============ -->
+  <section class="page" data-screen-label="04 Inbox" id="page-inbox">
+    <div class="page-head">
+      <h2>04 — Inbox (未処理メール)</h2>
+      <p>Where mail becomes tickets. Two arrangements depending on how often the user processes mail.</p>
+    </div>
+
+    <div class="variants cols-2">
+      <div class="variant">
+        <div class="variant-label">List + per-row actions <span class="v">A</span></div>
+        <p class="variant-note"><span class="pro">+ fastest single-pass triage</span></p>
+        <div class="frame short" style="aspect-ratio:16/10">
+          <div class="wf-toolbar">
+            <span class="chip">未処理 7 件</span>
+            <span class="chip ghost" style="border-style:dashed">処理済みも表示 ▢</span>
+            <span class="search">🔍 …</span>
+          </div>
+          <div style="padding:0">
+            <div class="tk-row-card" style="grid-template-columns:1fr auto auto">
+              <div>
+                <div class="ttl">[Re:] 同期エラーが続いています</div>
+                <div class="sub">山田 太郎 &lt;y.yamada@…&gt; · 05-07 16:40</div>
+              </div>
+              <span class="btn primary">＋ 起票</span>
+              <span class="btn">⌬ 紐付け</span>
+            </div>
+            <div class="tk-row-card" style="grid-template-columns:1fr auto auto">
+              <div>
+                <div class="ttl">パスワード初期化のお願い</div>
+                <div class="sub">経理部 共有 &lt;keiri@…&gt; · 05-07 14:22</div>
+              </div>
+              <span class="btn primary">＋ 起票</span>
+              <span class="btn">⌬ 紐付け</span>
+            </div>
+            <div class="tk-row-card" style="grid-template-columns:1fr auto auto">
+              <div>
+                <div class="ttl">VPN 接続不可 (続報)</div>
+                <div class="sub">鈴木 健 · 05-07 11:08</div>
+              </div>
+              <span class="btn primary">＋ 起票</span>
+              <span class="btn">⌬ 紐付け</span>
+            </div>
+            <div class="tk-row-card" style="grid-template-columns:1fr auto auto">
+              <div>
+                <div class="ttl">[FWD] PC 入替 - 仕様確認</div>
+                <div class="sub">営業 1 課 ML · 05-07 10:30</div>
+              </div>
+              <span class="btn primary">＋ 起票</span>
+              <span class="btn">⌬ 紐付け</span>
+            </div>
+            <div class="tk-row-card" style="grid-template-columns:1fr auto auto">
+              <div>
+                <div class="ttl">ライセンス追加申請 (Visio)</div>
+                <div class="sub">高橋 葵 · 05-06 18:05</div>
+              </div>
+              <span class="btn primary">＋ 起票</span>
+              <span class="btn">⌬ 紐付け</span>
+            </div>
+          </div>
+        </div>
+        <div class="notes"><ul><li>＋ 起票 = open new-ticket modal pre-filled</li><li>⌬ 紐付け = open link-to-ticket modal</li></ul></div>
+      </div>
+
+      <div class="variant">
+        <div class="variant-label">List + preview pane <span class="v">B</span></div>
+        <p class="variant-note"><span class="pro">+ context before deciding</span> · <span class="con">– more chrome, slower for batch</span></p>
+        <div class="frame short" style="aspect-ratio:16/10">
+          <div class="wf-toolbar">
+            <span class="chip">未処理 7 件</span>
+            <span class="search">🔍 …</span>
+          </div>
+          <div style="display:grid;grid-template-columns:300px 1fr;height:calc(100% - 34px);overflow:hidden">
+            <div style="border-right:1.5px solid var(--line-soft);overflow:hidden">
+              <div class="tk-row-card" style="grid-template-columns:1fr;padding:8px 10px;background:var(--paper-2)">
+                <div class="ttl" style="font-weight:600">[Re:] 同期エラーが続いています</div>
+                <div class="sub">山田 · 05-07 16:40</div>
+              </div>
+              <div class="tk-row-card" style="grid-template-columns:1fr;padding:8px 10px">
+                <div class="ttl">パスワード初期化のお願い</div>
+                <div class="sub">経理部 · 05-07 14:22</div>
+              </div>
+              <div class="tk-row-card" style="grid-template-columns:1fr;padding:8px 10px">
+                <div class="ttl">VPN 接続不可 (続報)</div>
+                <div class="sub">鈴木 · 05-07 11:08</div>
+              </div>
+              <div class="tk-row-card" style="grid-template-columns:1fr;padding:8px 10px">
+                <div class="ttl">[FWD] PC 入替 - 仕様確認</div>
+                <div class="sub">営業 1 課 · 05-07 10:30</div>
+              </div>
+            </div>
+            <div style="padding:14px 16px;overflow:hidden;display:flex;flex-direction:column">
+              <div class="lbl-sm">From: 山田 太郎 &lt;y.yamada@…&gt;</div>
+              <div class="lbl-sm">To: support@…</div>
+              <div class="lbl-sm">Date: 05-07 16:40</div>
+              <div style="font-family:var(--ui);font-weight:600;font-size:14px;margin:6px 0">[Re:] 同期エラーが続いています</div>
+              <div style="font-family:var(--ui);font-size:11px;line-height:1.6;color:var(--ink-2);flex:1">
+                先ほどお送りいただいたプロファイル再作成の手順を実施しましたが、症状変わらずです。<br>事象発生は本日 09 時頃から、PC は会社支給のノート…<br><br><span class="lbl-sm">— 続き —</span>
+              </div>
+              <div style="display:flex;gap:6px;justify-content:flex-end;border-top:1.5px dashed var(--line-soft);padding-top:8px">
+                <span class="btn">⌬ 紐付け</span>
+                <span class="btn primary">＋ 新規チケット</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="notes"><ul><li>j/k or ↑↓ to walk the list. Enter = open chosen action.</li></ul></div>
+      </div>
+    </div>
+
+    <h3 class="section-h">Empty state <span class="sn">when 0 unprocessed</span></h3>
+    <div class="frame" style="padding:30px;display:grid;place-items:center;min-height:220px">
+      <div style="text-align:center">
+        <div style="font-family:var(--hand);font-size:36px;color:var(--ink-3)">✉︎</div>
+        <div style="font-family:var(--hand);font-size:18px;font-weight:700;margin-top:6px">未処理メールはありません</div>
+        <div class="lbl-sm" style="margin-top:4px">最終同期: 5 分前</div>
+        <div style="margin-top:10px"><span class="btn">同期する</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ MODALS ============ -->
+  <section class="page" data-screen-label="05 Modals" id="page-modals">
+    <div class="page-head">
+      <h2>05 — Modal flows</h2>
+      <p>Three modals (new-ticket, link-to-existing, sync-status) with the page dimmed behind them.</p>
+    </div>
+
+    <div class="variants cols-3">
+      <div class="variant">
+        <div class="variant-label">New ticket from mail <span class="v">M1</span></div>
+        <p class="variant-note">Triggered from inbox row "＋ 起票". Mail preview top, form bottom.</p>
+        <div class="frame tall" style="background:rgba(15,15,15,.45)">
+          <div style="position:absolute;inset:0;backdrop-filter:blur(2px)"></div>
+          <div class="modal-mini" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:88%;max-width:520px">
+            <div style="display:flex;align-items:center"><h5 style="margin:0">新規チケット起票</h5><span class="lbl-sm" style="margin-left:auto">×</span></div>
+            <div class="lbl-sm" style="margin:6px 0 4px">元メール</div>
+            <div class="field" style="height:auto;padding:8px;font-family:var(--ui);font-size:11px;color:var(--ink-2);background:var(--paper-2)">
+              <div class="lbl-sm" style="margin-bottom:2px">山田 太郎 · 05-07 16:40</div>
+              [Re:] 同期エラーが続いています<br><span style="color:var(--ink-3)">先ほどお送りいただいた手順を実施しましたが…</span>
+            </div>
+            <div class="lbl-sm" style="margin-top:8px">Title</div>
+            <div class="field" style="font-family:var(--ui);color:var(--ink);font-size:11px">Outlook 同期失敗の問い合わせ</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+              <div><div class="lbl-sm">担当</div><div class="field">伊藤 慶 ▾</div></div>
+              <div><div class="lbl-sm">優先度</div><div class="field"><span class="dot-r"></span> High ▾</div></div>
+              <div><div class="lbl-sm">期限</div><div class="field">2026-05-12</div></div>
+              <div><div class="lbl-sm">Status</div><div class="field">新規 ▾</div></div>
+            </div>
+            <div class="actions"><span class="btn">キャンセル</span><span class="btn primary">起票</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="variant">
+        <div class="variant-label">Link to existing ticket <span class="v">M2</span></div>
+        <p class="variant-note">Search by #id or subject. Recent tickets pre-listed.</p>
+        <div class="frame tall" style="background:rgba(15,15,15,.45)">
+          <div style="position:absolute;inset:0;backdrop-filter:blur(2px)"></div>
+          <div class="modal-mini" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:88%;max-width:520px">
+            <div style="display:flex;align-items:center"><h5 style="margin:0">既存チケットに紐付け</h5><span class="lbl-sm" style="margin-left:auto">×</span></div>
+            <div class="field" style="margin-top:8px;font-family:var(--mono);font-size:11px">🔍 #001 or 件名で検索…</div>
+            <div class="lbl-sm" style="margin-top:8px;margin-bottom:4px">最近のチケット</div>
+            <div style="border:1.5px solid var(--line-soft);border-radius:4px;overflow:hidden">
+              <div class="tk-row-card" style="grid-template-columns:34px 1fr auto;padding:6px 10px;background:var(--paper-2)"><span class="id">#042</span><div class="ttl" style="font-size:11px">Outlook 同期失敗の問い合わせ</div><span class="badge">対応中</span></div>
+              <div class="tk-row-card" style="grid-template-columns:34px 1fr auto;padding:6px 10px"><span class="id">#040</span><div class="ttl" style="font-size:11px">VPN 接続できない件</div><span class="badge">確認待ち</span></div>
+              <div class="tk-row-card" style="grid-template-columns:34px 1fr auto;padding:6px 10px"><span class="id">#021</span><div class="ttl" style="font-size:11px">Outlook プロファイル不具合</div><span class="badge ok">完了</span></div>
+              <div class="tk-row-card" style="grid-template-columns:34px 1fr auto;padding:6px 10px"><span class="id">#017</span><div class="ttl" style="font-size:11px">同期トラブル一般</div><span class="badge ok">完了</span></div>
+            </div>
+            <div class="actions"><span class="btn">キャンセル</span><span class="btn primary">紐付ける</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="variant">
+        <div class="variant-label">Sync status / toast <span class="v">M3</span></div>
+        <p class="variant-note">Two takes: full modal (rare, manual sync) + corner toast (auto sync).</p>
+        <div class="frame tall" style="background:var(--paper-2);position:relative">
+          <!-- toast -->
+          <div style="position:absolute;top:14px;right:14px;border:1.5px solid var(--line);background:var(--paper);border-radius:5px;padding:8px 12px;display:flex;gap:10px;align-items:center;box-shadow:0 8px 20px rgba(42,42,38,.10)">
+            <span class="dot-a"></span>
+            <div>
+              <div class="hand" style="font-size:13px;font-weight:700">同期完了</div>
+              <div class="lbl-sm">12 件処理 · 自動 8 件 / 未処理 4 件</div>
+            </div>
+            <span class="lbl-sm" style="margin-left:8px">×</span>
+          </div>
+          <!-- modal -->
+          <div class="modal-mini" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:78%;max-width:380px">
+            <h5>同期中…</h5>
+            <div style="height:6px;border:1.5px solid var(--line);border-radius:99px;margin:8px 0;overflow:hidden">
+              <div style="width:60%;height:100%;background:var(--accent)"></div>
+            </div>
+            <div class="lbl-sm">受信メールを取得 · 12 / 20</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:10px;font-family:var(--mono);font-size:10px;color:var(--ink-2)">
+              <div>● 取得</div><div style="text-align:right">12</div>
+              <div>● 自動起票</div><div style="text-align:right">8</div>
+              <div>● 未処理追加</div><div style="text-align:right">4</div>
+            </div>
+            <div class="actions"><span class="btn">閉じる</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <h3 class="section-h">Modal anatomy <span class="sn">shared</span></h3>
+    <div class="frame" style="padding:18px">
+      <div style="display:grid;grid-template-columns:1fr auto;gap:24px;align-items:center">
+        <div class="modal-mini" style="max-width:440px">
+          <h5 data-comment-anchor="modal-title">タイトル / Title</h5>
+          <div class="field" style="font-family:var(--ui);font-size:11px;color:var(--ink)">field — focus = paper-2 bg + subtle border</div>
+          <div class="field" style="font-family:var(--mono);font-size:10px;color:var(--ink-3)">placeholder text</div>
+          <div class="field tall" style="font-family:var(--mono);font-size:10px;color:var(--ink-3)">multi-line</div>
+          <div class="actions"><span class="btn">キャンセル</span><span class="btn primary">確定</span></div>
+        </div>
+        <ul class="notes" style="margin:0">
+          <li>backdrop: <span class="mono">rgba(15,15,15,.45)</span> + 2px blur</li>
+          <li>box: paper bg · 1.5px line border · radius 6 · flyout shadow</li>
+          <li>max-width 520–760px, padding 20px</li>
+          <li>Esc / backdrop click = cancel; primary = Enter</li>
+          <li>focus first input on open</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ COMPONENTS ============ -->
+  <section class="page" data-screen-label="06 Components" id="page-components">
+    <div class="page-head">
+      <h2>06 — Component catalogue</h2>
+      <p>Atoms used across screens. Same patterns as n365 with a Spira coat of paint — keep so high-fi reuses CSS.</p>
+    </div>
+
+    <div class="catalog">
+      <div class="cat-card">
+        <h3 class="cat-h">Buttons</h3>
+        <p class="cat-sub">primary · secondary · ghost · danger</p>
+        <div class="cat-row"><span class="btn primary">起票する</span><span class="btn">キャンセル</span><span class="btn ghost">＋ 追加</span><span class="btn" style="border-color:var(--danger);color:var(--danger)">削除</span></div>
+        <div class="cat-row"><span class="btn primary">⏎ 保存</span><span class="btn">⧉ コピー</span></div>
+        <div class="lbl-sm">h 34px · padding 0 18 · radius 4</div>
+      </div>
+
+      <div class="cat-card">
+        <h3 class="cat-h">Status badges</h3>
+        <p class="cat-sub">option 2 (新規 fill) recommended</p>
+        <div class="cat-row"><span class="badge fill">新規</span><span class="badge">対応中</span><span class="badge">確認待ち</span><span class="badge ok">完了</span></div>
+        <div class="cat-row"><span class="badge danger">期限超過</span><span class="badge warn">確認待ち 3d</span><span class="badge acc">担当: 自分</span></div>
+      </div>
+
+      <div class="cat-card">
+        <h3 class="cat-h">Priority indicators</h3>
+        <p class="cat-sub">dot in tables, badge in detail</p>
+        <div class="cat-row"><span><span class="dot-r" style="margin-right:4px"></span><span class="hand">High</span></span><span><span class="dot-w" style="margin-right:4px"></span><span class="hand">Medium</span></span><span class="hand" style="color:var(--ink-3)">Low (no marker)</span></div>
+      </div>
+
+      <div class="cat-card">
+        <h3 class="cat-h">Inputs</h3>
+        <p class="cat-sub">transparent default, paper-2 on focus</p>
+        <div class="cat-row" style="flex-direction:column;align-items:stretch;gap:6px;">
+          <div class="lbl-sm">default</div>
+          <div style="border:1.5px solid transparent;padding:5px 8px;font-family:var(--mono);font-size:10px;color:var(--ink-3);border-bottom:1.5px solid var(--line-soft)">クリックして編集…</div>
+          <div class="lbl-sm">hover</div>
+          <div style="border:1.5px solid var(--line-soft);padding:5px 8px;font-family:var(--mono);font-size:10px;color:var(--ink-2);background:var(--paper-2);border-radius:3px">クリックして編集…</div>
+          <div class="lbl-sm">focus</div>
+          <div style="border:1.5px solid var(--line);padding:5px 8px;font-family:var(--ui);font-size:11px;color:var(--ink);background:var(--paper-2);border-radius:3px">入力中のテキスト|</div>
+        </div>
+      </div>
+
+      <div class="cat-card">
+        <h3 class="cat-h">List row</h3>
+        <p class="cat-sub">paper-3 separator · paper-2 hover</p>
+        <div style="border:1px solid var(--line-soft);border-radius:4px;overflow:hidden">
+          <div class="tk-row-card" style="grid-template-columns:34px 1fr auto;padding:6px 10px"><span class="id">#042</span><div class="ttl" style="font-size:11px">Outlook 同期失敗</div><span class="badge">対応中</span></div>
+          <div class="tk-row-card" style="grid-template-columns:34px 1fr auto;padding:6px 10px;background:var(--paper-2)"><span class="id">#041</span><div class="ttl" style="font-size:11px">パスワードリセット ← hover</div><span class="badge fill">新規</span></div>
+          <div class="tk-row-card" style="grid-template-columns:34px 1fr auto;padding:6px 10px"><span class="id">#040</span><div class="ttl" style="font-size:11px">VPN 接続できない件</div><span class="badge">確認待ち</span></div>
+        </div>
+      </div>
+
+      <div class="cat-card">
+        <h3 class="cat-h">Menu</h3>
+        <p class="cat-sub">paper bg · paper-3 border · flyout shadow</p>
+        <div style="border:1.5px solid var(--paper-3);border-radius:4px;background:var(--paper);padding:4px;box-shadow:0 12px 30px rgba(42,42,38,.14);max-width:200px;font-family:var(--ui);font-size:12px">
+          <div style="padding:5px 8px;border-radius:3px">⏵ 編集</div>
+          <div style="padding:5px 8px;border-radius:3px;background:var(--paper-2)">⧉ チケット ID をコピー</div>
+          <div style="padding:5px 8px;border-radius:3px">📨 OWA で開く</div>
+          <hr class="dline" style="margin:4px 0">
+          <div style="padding:5px 8px;border-radius:3px;color:var(--danger)">削除…</div>
+        </div>
+      </div>
+
+      <div class="cat-card">
+        <h3 class="cat-h">Toast</h3>
+        <p class="cat-sub">banner-in animation, top-right</p>
+        <div style="border:1.5px solid var(--line);background:var(--paper);border-radius:5px;padding:8px 12px;display:flex;gap:10px;align-items:center;box-shadow:0 8px 20px rgba(42,42,38,.10)">
+          <span class="dot-a"></span>
+          <div>
+            <div class="hand" style="font-size:13px;font-weight:700">保存しました</div>
+            <div class="lbl-sm">#042 を更新 · 2 秒前</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="cat-card">
+        <h3 class="cat-h">Avatar / unset</h3>
+        <p class="cat-sub">未割当 case is common</p>
+        <div class="cat-row">
+          <span style="display:inline-flex;align-items:center;gap:4px"><span style="width:22px;height:22px;border-radius:50%;background:var(--accent);color:var(--paper);display:inline-grid;place-items:center;font-family:var(--hand);font-size:11px">伊</span><span class="hand" style="font-size:12px">伊藤</span></span>
+          <span style="display:inline-flex;align-items:center;gap:4px"><span style="width:22px;height:22px;border-radius:50%;border:1.5px dashed var(--line-soft);display:inline-block"></span><span class="hand" style="font-size:12px;color:var(--ink-3)">未割当</span></span>
+        </div>
+      </div>
+
+      <div class="cat-card">
+        <h3 class="cat-h">Icons (Feather-ish)</h3>
+        <p class="cat-sub">24×24, stroke 1.7–2, currentColor</p>
+        <div class="cat-row" style="font-family:var(--mono);font-size:10px;color:var(--ink-2)">
+          <span style="text-align:center"><span class="ico mail" style="width:22px;height:22px"></span><div>mail</div></span>
+          <span style="text-align:center"><span class="ico note" style="width:22px;height:22px"></span><div>note</div></span>
+          <span style="text-align:center"><span class="ico gear" style="width:22px;height:22px"></span><div>gear</div></span>
+          <span style="text-align:center"><span class="ico sync" style="width:22px;height:22px"></span><div>sync</div></span>
+          <span style="text-align:center"><span class="ico x" style="width:22px;height:22px"></span><div>close</div></span>
+        </div>
+      </div>
+    </div>
+
+    <h3 class="section-h">Class naming <span class="sn">spira- prefix</span></h3>
+    <div class="frame" style="padding:18px">
+      <pre style="margin:0;font-family:var(--mono);font-size:11px;line-height:1.7;color:var(--ink)">
+.spira-root             /* host overlay */
+.spira-overlay          /* fullscreen black backdrop */
+.spira-shell            /* topbar + body */
+.spira-topbar           /* 36px chrome */
+.spira-side             /* 200px sidebar (variant A only) */
+.spira-main             /* main view region */
+
+.spira-btn              /* base button */
+.spira-btn--primary     /* moss fill */
+.spira-btn--ghost       /* dashed */
+.spira-input            /* base input (transparent) */
+.spira-badge            /* status pill */
+.spira-badge--ok|warn|danger|acc
+
+.spira-tk-row           /* ticket list row */
+.spira-tk-table         /* dense table variant */
+.spira-tk-card          /* card variant */
+.spira-tk-detail        /* detail page wrapper */
+.spira-tk-prop          /* property table */
+.spira-th-item          /* thread item */
+.spira-th-card--received|note
+
+.spira-modal            /* modal box */
+.spira-toast            /* corner toast */
+.spira-menu             /* flyout menu */
+      </pre>
+    </div>
+  </section>
+
+  <!-- ============ STATES & THEME ============ -->
+  <section class="page" data-screen-label="07 States and theme" id="page-states">
+    <div class="page-head">
+      <h2>07 — States &amp; theme</h2>
+      <p>Loading / empty / error per screen, plus dark-mode parity.</p>
+    </div>
+
+    <div class="variants cols-3">
+      <div class="variant">
+        <div class="variant-label">Loading <span class="v">S1</span></div>
+        <p class="variant-note">Skeleton rows, top-bar sync icon spins.</p>
+        <div class="frame short" style="aspect-ratio:4/3">
+          <div class="wf-toolbar"><span class="chip">同期中…</span><span class="search">🔍 …</span></div>
+          <div style="padding:0 8px">
+            <table class="tk-table">
+              <thead><tr><th>#</th><th>Title</th><th>St.</th><th>担当</th><th>優</th><th>期限</th></tr></thead>
+              <tbody>
+                <tr><td><span class="sq h6" style="width:24px"></span></td><td><span class="sq h10" style="width:60%"></span></td><td><span class="sq h10" style="width:32px"></span></td><td><span class="sq h10" style="width:28px"></span></td><td><span class="sq h10" style="width:14px"></span></td><td><span class="sq h10" style="width:38px"></span></td></tr>
+                <tr><td><span class="sq h6" style="width:24px"></span></td><td><span class="sq h10" style="width:80%"></span></td><td><span class="sq h10" style="width:32px"></span></td><td><span class="sq h10" style="width:28px"></span></td><td><span class="sq h10" style="width:14px"></span></td><td><span class="sq h10" style="width:38px"></span></td></tr>
+                <tr><td><span class="sq h6" style="width:24px"></span></td><td><span class="sq h10" style="width:50%"></span></td><td><span class="sq h10" style="width:32px"></span></td><td><span class="sq h10" style="width:28px"></span></td><td><span class="sq h10" style="width:14px"></span></td><td><span class="sq h10" style="width:38px"></span></td></tr>
+                <tr><td><span class="sq h6" style="width:24px"></span></td><td><span class="sq h10" style="width:70%"></span></td><td><span class="sq h10" style="width:32px"></span></td><td><span class="sq h10" style="width:28px"></span></td><td><span class="sq h10" style="width:14px"></span></td><td><span class="sq h10" style="width:38px"></span></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="variant">
+        <div class="variant-label">Empty <span class="v">S2</span></div>
+        <p class="variant-note">Friendly, single CTA. No filler illustration — just type.</p>
+        <div class="frame short" style="aspect-ratio:4/3;display:grid;place-items:center">
+          <div style="text-align:center">
+            <div style="font-family:var(--hand);font-size:42px;color:var(--ink-3)">∅</div>
+            <div style="font-family:var(--hand);font-size:18px;font-weight:700;margin-top:6px">該当チケットなし</div>
+            <div class="lbl-sm" style="margin-top:4px">フィルタを広げるか、新規チケットを起票してください。</div>
+            <div style="margin-top:12px;display:flex;gap:6px;justify-content:center"><span class="btn">フィルタクリア</span><span class="btn primary">＋ 新規</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="variant">
+        <div class="variant-label">Error <span class="v">S3</span></div>
+        <p class="variant-note">SP API 失敗時。banner stays until dismissed; row data preserved when possible.</p>
+        <div class="frame short" style="aspect-ratio:4/3">
+          <div style="background:rgba(184,83,74,.12);border-bottom:1.5px solid var(--danger);padding:8px 14px;display:flex;gap:10px;align-items:center">
+            <span style="color:var(--danger);font-family:var(--hand);font-weight:700">⚠ 同期失敗</span>
+            <span class="lbl-sm">SharePoint API 401 — トークン期限切れ</span>
+            <span class="btn" style="margin-left:auto;border-color:var(--danger);color:var(--danger)">再試行</span>
+            <span class="lbl-sm">×</span>
+          </div>
+          <div class="wf-toolbar"><span class="chip" style="opacity:.5">同期: 12 分前</span><span class="search">🔍 …</span></div>
+          <div style="padding:0 8px;opacity:.55">
+            <table class="tk-table">
+              <thead><tr><th>#</th><th>Title</th><th>St.</th><th>担当</th></tr></thead>
+              <tbody>
+                <tr><td class="id">#042</td><td class="ttl">Outlook 同期失敗の問い合わせ</td><td><span class="badge">対応中</span></td><td>伊藤</td></tr>
+                <tr><td class="id">#041</td><td class="ttl">パスワードリセット依頼</td><td><span class="badge fill">新規</span></td><td>—</td></tr>
+                <tr><td class="id">#040</td><td class="ttl">VPN 接続できない件</td><td><span class="badge">確認待ち</span></td><td>佐藤</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <h3 class="section-h">Light / Dark parity <span class="sn">data-theme=dark</span></h3>
+    <div class="variants cols-2">
+      <div class="variant">
+        <div class="variant-label">Light</div>
+        <div class="frame short" style="aspect-ratio:16/10">
+          <div class="wf-topbar">
+            <div class="tt"><span class="dot"></span>Spira</div>
+            <span class="lbl-sm">/ Tickets</span>
+            <div class="seg"><span class="lbl-sm">伊藤</span><span class="ico sync"></span><span class="ico gear"></span><span class="ico x"></span></div>
+          </div>
+          <div class="wf-body">
+            <aside class="wf-side">
+              <div class="nav active">📋 チケット <span class="n">42</span></div>
+              <div class="nav">📥 受信 <span class="n" style="color:var(--danger)">7</span></div>
+              <div class="new-btn">＋ 新規</div>
+            </aside>
+            <div class="wf-main">
+              <div class="wf-toolbar"><span class="chip">All</span><span class="chip">自分</span><span class="search">🔍 …</span></div>
+              <div style="padding:0 8px">
+                <table class="tk-table">
+                  <tbody>
+                    <tr><td class="id">#042</td><td class="ttl">Outlook 同期失敗</td><td><span class="badge">対応中</span></td></tr>
+                    <tr class="hover"><td class="id">#041</td><td class="ttl">パスワードリセット</td><td><span class="badge fill">新規</span></td></tr>
+                    <tr><td class="id">#040</td><td class="ttl">VPN 接続できない</td><td><span class="badge">確認待ち</span></td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="variant">
+        <div class="variant-label">Dark</div>
+        <div class="frame short" data-mini-theme="dark" style="aspect-ratio:16/10">
+          <div class="wf-topbar">
+            <div class="tt"><span class="dot"></span>Spira</div>
+            <span class="lbl-sm">/ Tickets</span>
+            <div class="seg"><span class="lbl-sm">伊藤</span><span class="ico sync"></span><span class="ico gear"></span><span class="ico x"></span></div>
+          </div>
+          <div class="wf-body">
+            <aside class="wf-side">
+              <div class="nav active">📋 チケット <span class="n">42</span></div>
+              <div class="nav">📥 受信 <span class="n" style="color:var(--danger)">7</span></div>
+              <div class="new-btn">＋ 新規</div>
+            </aside>
+            <div class="wf-main">
+              <div class="wf-toolbar"><span class="chip">All</span><span class="chip">自分</span><span class="search">🔍 …</span></div>
+              <div style="padding:0 8px">
+                <table class="tk-table">
+                  <tbody>
+                    <tr><td class="id">#042</td><td class="ttl">Outlook 同期失敗</td><td><span class="badge">対応中</span></td></tr>
+                    <tr class="hover"><td class="id">#041</td><td class="ttl">パスワードリセット</td><td><span class="badge fill">新規</span></td></tr>
+                    <tr><td class="id">#040</td><td class="ttl">VPN 接続できない</td><td><span class="badge">確認待ち</span></td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<!-- tweaks -->
+<button id="tweak-toggle">⚙ tweaks</button>
+<div id="tweaks">
+  <button class="close" id="tweak-close">×</button>
+  <h4>Wireframe tweaks</h4>
+  <label><input type="checkbox" id="t-grid" checked> ruled paper background</label>
+  <label><input type="checkbox" id="t-dashed"> all borders dashed</label>
+  <label><input type="checkbox" id="t-dark"> preview in dark mode</label>
+  <label>density <input type="range" id="t-dens" min="80" max="120" value="100"></label>
+  <hr class="dline" style="margin:8px 0">
+  <div class="lbl-sm">density just nudges base font for readability</div>
+</div>
+
+<script>
+// tabs
+const tabs = document.querySelectorAll('.tab');
+const pages = document.querySelectorAll('.page');
+tabs.forEach(t => t.addEventListener('click', () => {
+  tabs.forEach(x => x.classList.remove('active'));
+  pages.forEach(p => p.classList.remove('active'));
+  t.classList.add('active');
+  document.getElementById('page-' + t.dataset.page).classList.add('active');
+  window.scrollTo({top:0});
+}));
+
+// tweaks
+const tt = document.getElementById('tweak-toggle');
+const tp = document.getElementById('tweaks');
+tt.addEventListener('click', () => { tp.classList.add('open'); tt.style.display='none'; });
+document.getElementById('tweak-close').addEventListener('click', () => { tp.classList.remove('open'); tt.style.display=''; });
+
+document.getElementById('t-grid').addEventListener('change', e => {
+  document.body.style.background = e.target.checked
+    ? 'repeating-linear-gradient(0deg, transparent 0 31px, rgba(42,42,38,.05) 31px 32px), var(--paper)'
+    : 'var(--paper)';
+});
+document.getElementById('t-dashed').addEventListener('change', e => {
+  document.documentElement.style.setProperty('--border-style', e.target.checked ? 'dashed' : 'solid');
+  document.querySelectorAll('.frame, .box, .wf-topbar, .wf-side, .wf-toolbar, .tk-card, .modal-mini, .cat-card').forEach(el => {
+    el.style.borderStyle = e.target.checked ? 'dashed' : '';
+  });
+});
+document.getElementById('t-dark').addEventListener('change', e => {
+  if (e.target.checked) {
+    document.documentElement.style.setProperty('--paper','#1d1b18');
+    document.documentElement.style.setProperty('--paper-2','#25231f');
+    document.documentElement.style.setProperty('--paper-3','#3a3731');
+    document.documentElement.style.setProperty('--ink','#e8e4d8');
+    document.documentElement.style.setProperty('--ink-2','#a8a39a');
+    document.documentElement.style.setProperty('--ink-3','#7a766c');
+    document.documentElement.style.setProperty('--line','#a8a39a');
+    document.documentElement.style.setProperty('--line-soft','rgba(232,228,216,.25)');
+  } else {
+    ['paper','paper-2','paper-3','ink','ink-2','ink-3','line','line-soft'].forEach(k => {
+      document.documentElement.style.removeProperty('--'+k);
+    });
+  }
+});
+document.getElementById('t-dens').addEventListener('input', e => {
+  document.body.style.fontSize = (13 * e.target.value/100) + 'px';
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,743 @@
+/* =========================================================
+ * Spira — App CSS
+ * 1. Design tokens (CSS variables)
+ * 2. Layout (overlay / shell / sidebar / main)
+ * 3. Components (button / badge / modal / menu / toast / input)
+ * 4. Views (ticket list / detail / inbox / trash)
+ * 5. States (loading / empty / error)
+ * ========================================================= */
+
+/* ---------- 1. Design tokens ---------- */
+.spira-root {
+  /* shield from SP host: must come first so explicit values override */
+  all: initial;
+
+  /* text */
+  --ink:           #2a2a26;
+  --ink-3:         #7a766c;
+  --ink-4:         #a8a39a;
+
+  /* surface */
+  --paper:         #fafaf7;
+  --paper-2:       #f3f1ea;
+  --paper-2-strong:#ece8de;
+  --paper-3:       #e8e4d8;
+
+  /* line */
+  --line:          rgba(42, 42, 38, 0.12);
+  --line-strong:   rgba(42, 42, 38, 0.18);
+
+  /* accent — moss green */
+  --accent:        #7a8a78;
+  --accent-soft:   rgba(122, 138, 120, 0.18);
+  --accent-strong: #5e6f5c;
+
+  /* status */
+  --danger:        #b8534a;
+  --danger-soft:   rgba(184, 83, 74, 0.12);
+  --warn:          #c47f1c;
+  --warn-soft:     rgba(196, 127, 28, 0.14);
+  --ok:            #2f6f5e;
+  --ok-soft:       rgba(47, 111, 94, 0.12);
+  --hl:            rgba(196, 174, 96, 0.35);
+
+  /* type */
+  --font-sans: "Meiryo", "メイリオ", "Hiragino Sans", "Yu Gothic UI",
+               -apple-system, "Segoe UI", system-ui, sans-serif;
+  --font-mono: ui-monospace, "Cascadia Mono", "Consolas", monospace;
+
+  --fs-xs:   11px;
+  --fs-sm:   12px;
+  --fs-md:   13px;
+  --fs-base: 15px;
+  --fs-lg:   16px;
+  --fs-xl:   18px;
+  --fs-h3:   22px;
+  --fs-h2:   28px;
+  --fs-h1:   36px;
+
+  --lh-base:  1.75;
+  --lh-tight: 1.35;
+
+  /* spacing (4px base) */
+  --s-1:  4px;  --s-2:  6px;  --s-3:  8px;  --s-4:  10px; --s-5:  12px;
+  --s-6:  14px; --s-7:  18px; --s-8:  22px; --s-9:  28px; --s-10: 40px;
+
+  /* radius */
+  --r-1: 2px; --r-2: 4px; --r-3: 6px; --r-4: 8px;
+
+  /* shadow (warm, no blue) */
+  --shadow-flyout: 0 12px 30px rgba(42, 42, 38, 0.14);
+  --shadow-panel:  0 8px  20px rgba(42, 42, 38, 0.10);
+  --shadow-modal:  0 0 0 1px rgba(42, 42, 38, 0.06),
+                   0 4px  12px rgba(42, 42, 38, 0.10),
+                   0 16px 40px rgba(42, 42, 38, 0.18);
+
+  /* chrome */
+  --topbar-h:  44px;
+  --side-w:    200px;
+  --toolbar-h: 38px;
+
+  /* z */
+  --z-overlay: 2147483600;
+  --z-modal:   2147483700;
+  --z-toast:   2147483800;
+
+  /* base typography (must be after `all: initial`) */
+  font-family: var(--font-sans);
+  font-size:   var(--fs-base);
+  line-height: var(--lh-base);
+  color:       var(--ink);
+  -webkit-font-smoothing: antialiased;
+}
+
+.spira-root,
+.spira-root *,
+.spira-root *::before,
+.spira-root *::after { box-sizing: border-box; }
+
+/* Reset known SP/host CSS bleed-through on descendants. */
+.spira-root a {
+  color: inherit;
+  text-decoration: none;
+  background: transparent;
+}
+.spira-root .spira-th-card-body a {
+  color: var(--accent-strong);
+  text-decoration: underline;
+}
+.spira-root button,
+.spira-root input,
+.spira-root select,
+.spira-root textarea {
+  font: inherit;
+  color: inherit;
+  margin: 0;
+}
+.spira-root p,
+.spira-root h1,
+.spira-root h2,
+.spira-root h3,
+.spira-root h4,
+.spira-root h5,
+.spira-root h6,
+.spira-root ul,
+.spira-root ol,
+.spira-root figure,
+.spira-root pre {
+  margin: 0;
+}
+.spira-root img { max-width: 100%; height: auto; }
+.spira-root table { border-collapse: collapse; }
+
+.spira-root[data-theme="dark"] {
+  --ink:            #e8e4d8;
+  --ink-3:          #a8a39a;
+  --ink-4:          #7a766c;
+  --paper:          #1d1b18;
+  --paper-2:        #25231f;
+  --paper-2-strong: #2c2a25;
+  --paper-3:        #3a3731;
+  --line:           rgba(232, 228, 216, 0.14);
+  --line-strong:    rgba(232, 228, 216, 0.22);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spira-root * {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ---------- 2. Overlay & Shell ---------- */
+.spira-root {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-overlay);
+  display: flex;
+  background: var(--paper);
+}
+
+.spira-shell {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+}
+
+.spira-topbar {
+  height: var(--topbar-h);
+  display: flex;
+  align-items: center;
+  gap: var(--s-5);
+  padding: 0 var(--s-7);
+  background: var(--paper);
+  border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
+}
+
+.spira-topbar-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-3);
+  font-weight: 600;
+  font-size: var(--fs-md);
+  color: var(--ink);
+}
+
+.spira-topbar-brand::before {
+  content: "";
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  background: var(--accent);
+  display: inline-block;
+}
+
+.spira-topbar-spacer { flex: 1; }
+
+.spira-topbar-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+}
+
+.spira-topbar-actions .spira-iconbtn { color: var(--ink-3); }
+
+.spira-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  background: var(--paper);
+}
+
+.spira-side {
+  width: var(--side-w);
+  background: var(--paper-2);
+  border-right: 1px solid var(--line);
+  padding: var(--s-5) var(--s-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-5);
+  flex-shrink: 0;
+}
+
+.spira-side-group { display: flex; flex-direction: column; gap: var(--s-1); }
+.spira-side-group-title {
+  font-size: var(--fs-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-3);
+  padding: 0 var(--s-3);
+  margin-bottom: var(--s-1);
+}
+.spira-side-item {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  height: 30px;
+  padding: 0 var(--s-3);
+  border-radius: var(--r-2);
+  cursor: pointer;
+  font-size: var(--fs-md);
+  color: var(--ink);
+  border-left: 2px solid transparent;
+  user-select: none;
+}
+.spira-side-item:hover { background: var(--paper-2-strong); }
+.spira-side-item.active {
+  background: var(--accent-soft);
+  border-left-color: var(--accent);
+  color: var(--accent-strong);
+  font-weight: 500;
+}
+.spira-side-item .spira-side-count {
+  margin-left: auto;
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
+  background: var(--paper-3);
+  padding: 1px var(--s-2);
+  border-radius: 99px;
+}
+.spira-side-bottom { margin-top: auto; }
+
+.spira-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--paper);
+}
+
+.spira-toolbar {
+  height: var(--toolbar-h);
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: 0 var(--s-7);
+  border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
+  background: var(--paper);
+}
+.spira-toolbar-spacer { flex: 1; }
+
+.spira-content {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--s-7);
+}
+
+/* ---------- 3. Components ---------- */
+/* Button */
+.spira-btn {
+  height: 34px;
+  padding: 0 var(--s-7);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s-2);
+  border-radius: var(--r-2);
+  font-family: inherit;
+  font-size: var(--fs-md);
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid var(--line-strong);
+  background: var(--paper);
+  color: var(--ink);
+  transition: background 0.1s, color 0.1s, border-color 0.1s, filter 0.1s;
+  white-space: nowrap;
+}
+.spira-btn:hover { filter: brightness(0.96); }
+.spira-btn:focus-visible {
+  outline: 2px solid var(--accent-soft);
+  outline-offset: 1px;
+}
+.spira-btn:disabled { opacity: 0.5; cursor: not-allowed; filter: none; }
+
+.spira-btn--primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+.spira-btn--primary:hover { background: var(--accent-strong); border-color: var(--accent-strong); filter: none; }
+.spira-btn--dark    { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+.spira-btn--secondary { background: var(--paper-2); color: var(--ink); border-color: var(--paper-3); }
+.spira-btn--ghost   { background: transparent; border: 1px dashed var(--line-strong); color: var(--ink-3); }
+.spira-btn--ghost:hover { border-color: var(--ink-4); color: var(--ink); filter: none; }
+.spira-btn--danger  { background: transparent; border-color: var(--danger); color: var(--danger); }
+.spira-btn--danger:hover { background: var(--danger-soft); filter: none; }
+.spira-btn--sm { height: 28px; padding: 0 var(--s-5); font-size: var(--fs-sm); }
+
+/* Icon button (square) */
+.spira-iconbtn {
+  width: 30px; height: 30px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: none; background: transparent;
+  border-radius: var(--r-2);
+  cursor: pointer;
+  color: var(--ink);
+}
+.spira-iconbtn:hover { background: var(--paper-2-strong); }
+.spira-iconbtn:focus-visible { outline: 2px solid var(--accent-soft); outline-offset: 1px; }
+.spira-iconbtn svg { width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-width: 1.7; }
+
+/* Input */
+.spira-input,
+.spira-textarea,
+.spira-select {
+  width: 100%;
+  font-family: inherit;
+  font-size: var(--fs-md);
+  color: var(--ink);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--r-2);
+  padding: 6px var(--s-3);
+  line-height: var(--lh-tight);
+}
+.spira-input:hover,
+.spira-textarea:hover,
+.spira-select:hover { background: var(--paper-2); }
+.spira-input:focus,
+.spira-textarea:focus,
+.spira-select:focus {
+  outline: none;
+  background: var(--paper);
+  border-color: var(--line-strong);
+}
+.spira-input::placeholder,
+.spira-textarea::placeholder { color: var(--ink-4); }
+
+.spira-textarea { min-height: 72px; resize: vertical; line-height: 1.6; }
+
+.spira-input--inline {
+  font-size: var(--fs-h3);
+  font-weight: 600;
+  padding: var(--s-1) var(--s-2);
+}
+
+.spira-search-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+.spira-search-wrap svg { position: absolute; left: 8px; width: 14px; height: 14px; color: var(--ink-4); pointer-events: none; }
+.spira-search-input { padding-left: 28px; min-width: 220px; background: var(--paper-2); border-color: var(--paper-3); }
+
+/* Badge */
+.spira-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-1);
+  padding: 2px var(--s-3);
+  border-radius: 99px;
+  border: 1px solid var(--line-strong);
+  background: var(--paper);
+  color: var(--ink);
+  font-size: var(--fs-sm);
+  line-height: 1.2;
+  white-space: nowrap;
+}
+.spira-badge--fill   { background: var(--accent); color: #fff; border-color: var(--accent); }
+.spira-badge--ok     { background: var(--ok-soft); border-color: var(--ok); color: var(--ok); }
+.spira-badge--warn   { background: var(--warn-soft); border-color: var(--warn); color: #5d3d0c; }
+.spira-badge--danger { background: var(--danger-soft); border-color: var(--danger); color: var(--danger); }
+.spira-badge--muted  { background: var(--paper-2); border-color: var(--paper-3); color: var(--ink-3); }
+
+/* Priority dot */
+.spira-prio-dot {
+  display: inline-block;
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  vertical-align: middle;
+}
+.spira-prio-dot--high   { background: var(--danger); }
+.spira-prio-dot--medium { background: var(--warn); }
+.spira-prio-dot--low    { background: transparent; border: 1px solid var(--line-strong); }
+
+/* Avatar */
+.spira-avatar {
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.spira-avatar--unset {
+  background: transparent;
+  border: 1px dashed var(--line-strong);
+  color: var(--ink-4);
+}
+.spira-avatar--lg { width: 28px; height: 28px; font-size: var(--fs-sm); }
+
+/* Modal */
+.spira-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  background: rgba(15, 15, 15, 0.45);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--s-7);
+}
+.spira-modal {
+  background: var(--paper);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-3);
+  box-shadow: var(--shadow-modal);
+  padding: var(--s-7);
+  width: 100%;
+  max-width: 560px;
+  max-height: calc(100vh - var(--s-10));
+  overflow: auto;
+}
+.spira-modal--lg { max-width: 720px; }
+.spira-modal-header {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  margin-bottom: var(--s-5);
+}
+.spira-modal-title {
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  color: var(--ink);
+  margin: 0;
+}
+.spira-modal-body { font-size: var(--fs-md); color: var(--ink); }
+.spira-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--s-3);
+  margin-top: var(--s-7);
+}
+.spira-modal-close { margin-left: auto; }
+
+/* Field row in modal/form */
+.spira-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  margin-bottom: var(--s-5);
+}
+.spira-field-label {
+  font-size: var(--fs-sm);
+  color: var(--ink-3);
+  font-weight: 500;
+}
+
+/* Menu (flyout) */
+.spira-menu {
+  background: var(--paper);
+  border: 1px solid var(--paper-3);
+  border-radius: var(--r-2);
+  box-shadow: var(--shadow-flyout);
+  padding: var(--s-1);
+  min-width: 180px;
+}
+.spira-menu-item {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: var(--s-2) var(--s-3);
+  border-radius: var(--r-2);
+  font-size: var(--fs-md);
+  color: var(--ink);
+  cursor: pointer;
+}
+.spira-menu-item:hover { background: var(--paper-2); }
+.spira-menu-divider { height: 1px; background: var(--paper-3); margin: var(--s-1) var(--s-2); }
+
+/* Toast */
+.spira-toast-stack {
+  position: fixed;
+  top: var(--s-7);
+  right: var(--s-7);
+  z-index: var(--z-toast);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  pointer-events: none;
+}
+.spira-toast {
+  background: var(--paper);
+  border: 1px solid var(--line-strong);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--r-3);
+  box-shadow: var(--shadow-panel);
+  padding: var(--s-4) var(--s-6);
+  font-size: var(--fs-md);
+  color: var(--ink);
+  max-width: 360px;
+  pointer-events: auto;
+  animation: spira-toast-in 0.2s ease-out;
+}
+.spira-toast--error  { border-left-color: var(--danger); }
+.spira-toast--warn   { border-left-color: var(--warn); }
+.spira-toast--ok     { border-left-color: var(--ok); }
+@keyframes spira-toast-in {
+  from { opacity: 0; transform: translateY(-8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Error banner */
+.spira-error-banner {
+  background: var(--danger-soft);
+  border-bottom: 1px solid var(--danger);
+  color: var(--danger);
+  padding: var(--s-3) var(--s-7);
+  font-size: var(--fs-sm);
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+}
+.spira-error-banner-spacer { flex: 1; }
+
+/* ---------- 4. Views ---------- */
+/* Ticket list (dense table) */
+.spira-tk-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-md);
+}
+.spira-tk-table th {
+  text-align: left;
+  font-weight: 400;
+  font-size: var(--fs-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ink-3);
+  padding: var(--s-3) var(--s-4);
+  border-bottom: 1px solid var(--line);
+  background: var(--paper);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.spira-tk-table td {
+  padding: var(--s-4);
+  border-bottom: 1px solid var(--paper-3);
+  color: var(--ink);
+  vertical-align: middle;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.spira-tk-table tr { cursor: pointer; }
+.spira-tk-table tr:hover td { background: var(--paper-2); }
+.spira-tk-row.active td { background: var(--accent-soft); }
+.spira-tk-id { font-family: var(--font-mono); color: var(--ink-3); font-size: var(--fs-sm); }
+.spira-tk-title { color: var(--ink); max-width: 360px; overflow: hidden; text-overflow: ellipsis; }
+.spira-tk-due--overdue { color: var(--danger); font-weight: 500; }
+
+/* Ticket detail (right-rail) */
+.spira-detail {
+  display: flex;
+  gap: var(--s-7);
+  height: 100%;
+  min-height: 0;
+}
+.spira-detail-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-7);
+}
+.spira-detail-hd { display: flex; flex-direction: column; gap: var(--s-3); }
+.spira-detail-hd-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  font-size: var(--fs-sm);
+  color: var(--ink-3);
+}
+.spira-detail-id-tag {
+  font-family: var(--font-mono);
+  background: var(--paper-2);
+  border: 1px solid var(--paper-3);
+  color: var(--ink);
+  padding: 2px var(--s-3);
+  border-radius: var(--r-2);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  cursor: pointer;
+}
+.spira-detail-id-tag:hover { background: var(--paper-2-strong); }
+.spira-detail-title-input {
+  font-size: var(--fs-h3);
+  font-weight: 600;
+  border: none;
+  background: transparent;
+  width: 100%;
+  color: var(--ink);
+  padding: var(--s-1) var(--s-2);
+  border-radius: var(--r-2);
+}
+.spira-detail-title-input:hover { background: var(--paper-2); }
+.spira-detail-title-input:focus { background: var(--paper); outline: 1px solid var(--line-strong); }
+
+.spira-detail-rail {
+  width: 320px;
+  flex-shrink: 0;
+  background: var(--paper-2);
+  border: 1px solid var(--paper-3);
+  border-radius: var(--r-3);
+  padding: var(--s-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-5);
+  align-self: flex-start;
+}
+.spira-prop-row {
+  display: grid;
+  grid-template-columns: 96px 1fr;
+  align-items: center;
+  gap: var(--s-3);
+  font-size: var(--fs-md);
+}
+.spira-prop-label { color: var(--ink-3); font-size: var(--fs-sm); }
+.spira-prop-value { color: var(--ink); }
+
+/* Thread */
+.spira-th-list { display: flex; flex-direction: column; gap: var(--s-5); }
+.spira-th-card {
+  border-radius: var(--r-3);
+  padding: var(--s-5);
+  border: 1px solid var(--paper-3);
+}
+.spira-th-card--received { background: var(--paper-2); }
+.spira-th-card--note     { background: var(--paper); border-left: 3px solid var(--warn); }
+.spira-th-card-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  margin-bottom: var(--s-3);
+  font-size: var(--fs-sm);
+  color: var(--ink-3);
+}
+.spira-th-card-head svg { width: 14px; height: 14px; stroke: currentColor; fill: none; stroke-width: 1.7; }
+.spira-th-card-from { color: var(--ink); font-weight: 500; }
+.spira-th-card-body { font-size: var(--fs-md); line-height: 1.7; word-break: break-word; }
+.spira-th-card-body img { max-width: 100%; height: auto; border-radius: var(--r-2); }
+.spira-th-card-body a { color: var(--accent-strong); text-decoration: underline; }
+
+/* Inbox */
+.spira-inbox-list { display: flex; flex-direction: column; }
+.spira-inbox-row {
+  display: grid;
+  grid-template-columns: 1fr 200px 140px auto;
+  gap: var(--s-4);
+  padding: var(--s-4);
+  border-bottom: 1px solid var(--paper-3);
+  align-items: center;
+  font-size: var(--fs-md);
+}
+.spira-inbox-row:hover { background: var(--paper-2); }
+.spira-inbox-subject { color: var(--ink); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.spira-inbox-from    { color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.spira-inbox-date    { color: var(--ink-3); font-size: var(--fs-sm); }
+.spira-inbox-actions { display: inline-flex; gap: var(--s-2); }
+
+/* Trash */
+.spira-trash-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: var(--s-4) 0;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: var(--s-5);
+}
+
+/* ---------- 5. States ---------- */
+.spira-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s-3);
+  padding: var(--s-10);
+  color: var(--ink-3);
+  font-size: var(--fs-md);
+  text-align: center;
+}
+.spira-empty-title { color: var(--ink); font-size: var(--fs-lg); font-weight: 500; }
+
+.spira-skeleton {
+  background: linear-gradient(90deg, var(--paper-2) 0%, var(--paper-2-strong) 50%, var(--paper-2) 100%);
+  background-size: 200% 100%;
+  animation: spira-skl 1.2s ease-in-out infinite;
+  border-radius: var(--r-2);
+}
+@keyframes spira-skl {
+  from { background-position: 200% 0; }
+  to   { background-position: -200% 0; }
+}
+
+.spira-spin { animation: spira-spin 1s linear infinite; transform-origin: center; }
+@keyframes spira-spin { to { transform: rotate(360deg); } }

@@ -1,0 +1,19 @@
+{
+  "name": "spira",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "SharePoint 上で動くメール起票型チケット管理システム (bookmarklet)",
+  "scripts": {
+    "dev": "node build.js --watch --serve",
+    "build": "node build.js",
+    "type-check": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "esbuild": "^0.21.0",
+    "typescript": "^5.4.0"
+  },
+  "dependencies": {
+    "dompurify": "^3.1.0"
+  }
+}

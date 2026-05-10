@@ -1,0 +1,122 @@
+/* =========================================================
+ * Spira — Design Tokens
+ * Drop this at the top of src/styles/app.css.
+ * All component styles below should reference these vars only.
+ * ========================================================= */
+
+.spira-root {
+  /* ---------- text ---------- */
+  --ink:           #2a2a26;
+  --ink-3:         #7a766c;
+  --ink-4:         #a8a39a;
+
+  /* ---------- surface ---------- */
+  --paper:         #fafaf7;
+  --paper-2:       #f3f1ea;
+  --paper-2-strong:#ece8de;
+  --paper-3:       #e8e4d8;
+
+  /* ---------- line ---------- */
+  --line:          rgba(42, 42, 38, 0.12);
+  --line-strong:   rgba(42, 42, 38, 0.18);
+
+  /* ---------- accent (moss green, n365 と同一) ---------- */
+  --accent:        #7a8a78;
+  --accent-soft:   rgba(122, 138, 120, 0.18);
+  --accent-strong: #5e6f5c;
+
+  /* ---------- status ---------- */
+  --danger:        #b8534a;
+  --warn:          #c47f1c;
+  --ok:            #2f6f5e;
+  --hl:            rgba(196, 174, 96, 0.35);
+
+  /* ---------- type ---------- */
+  --font-sans: "Meiryo", "メイリオ", "Hiragino Sans", "Yu Gothic UI",
+               -apple-system, "Segoe UI", system-ui, sans-serif;
+  --font-mono: ui-monospace, "Cascadia Mono", "Consolas", monospace;
+
+  --fs-xs:   11px;
+  --fs-sm:   12px;
+  --fs-md:   13px;
+  --fs-base: 15px;
+  --fs-lg:   16px;
+  --fs-xl:   18px;
+  --fs-h3:   22px;
+  --fs-h2:   28px;
+  --fs-h1:   36px;
+
+  --lh-base:  1.75;
+  --lh-tight: 1.35;
+
+  /* ---------- spacing (4px base) ---------- */
+  --s-1:  4px;
+  --s-2:  6px;
+  --s-3:  8px;
+  --s-4:  10px;
+  --s-5:  12px;
+  --s-6:  14px;
+  --s-7:  18px;
+  --s-8:  22px;
+  --s-9:  28px;
+  --s-10: 40px;
+
+  /* ---------- radius ---------- */
+  --r-1: 2px;
+  --r-2: 4px;
+  --r-3: 6px;
+  --r-4: 8px;
+
+  /* ---------- shadow (warm, no blue) ---------- */
+  --shadow-flyout: 0 12px 30px rgba(42, 42, 38, 0.14);
+  --shadow-panel:  0 8px  20px rgba(42, 42, 38, 0.10);
+  --shadow-modal:  0 0 0 1px rgba(42, 42, 38, 0.06),
+                   0 4px  12px rgba(42, 42, 38, 0.10),
+                   0 16px 40px rgba(42, 42, 38, 0.18);
+
+  /* ---------- chrome metrics ---------- */
+  --topbar-h:  44px;
+  --side-w:    200px;
+  --toolbar-h: 38px;
+
+  /* ---------- z ---------- */
+  --z-overlay: 2147483600;
+  --z-modal:   2147483700;
+  --z-toast:   2147483800;
+
+  /* ---------- base ---------- */
+  font-family: var(--font-sans);
+  font-size:   var(--fs-base);
+  line-height: var(--lh-base);
+  color:       var(--ink);
+  background:  var(--paper);
+
+  /* shield from SP host */
+  all: initial;
+}
+
+/* re-apply what `all: initial` wiped out for descendants */
+.spira-root *,
+.spira-root *::before,
+.spira-root *::after {
+  box-sizing: border-box;
+}
+
+.spira-root[data-theme="dark"] {
+  --ink:        #e8e4d8;
+  --ink-3:      #a8a39a;
+  --ink-4:      #7a766c;
+  --paper:      #1d1b18;
+  --paper-2:    #25231f;
+  --paper-2-strong: #2c2a25;
+  --paper-3:    #3a3731;
+  --line:       rgba(232, 228, 216, 0.14);
+  --line-strong:rgba(232, 228, 216, 0.22);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spira-root * {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
