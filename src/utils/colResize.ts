@@ -10,18 +10,28 @@ interface ResizeOptions {
 
 const STORAGE_PREFIX = 'spira:colw:';
 
+/** Read saved width for a column, suitable for use as initial inline style at render time. */
+export function savedColWidth(tableKey: string, colKey: string | null, fallback: string): string {
+  if (!colKey) return fallback;
+  const v = readWidth(tableKey, colKey);
+  return v != null ? `${v}px` : fallback;
+}
+
 export function attachColumnResize(table: HTMLTableElement, opts: ResizeOptions): void {
   const colgroup = table.querySelector('colgroup');
   const cols = colgroup ? Array.from(colgroup.querySelectorAll<HTMLTableColElement>('col')) : [];
   const ths = Array.from(table.querySelectorAll<HTMLTableCellElement>('thead > tr > th'));
   const minWidth = opts.minWidth ?? 40;
 
-  // Restore widths from storage.
+  // Saved widths are now applied synchronously at render time via savedColWidth().
+  // Re-apply here defensively in case widths were not pre-applied.
   opts.colKeys.forEach((key, i) => {
     if (!key) return;
     const saved = readWidth(opts.tableKey, key);
     const col = cols[i];
-    if (saved && col) col.style.width = `${saved}px`;
+    if (saved && col && !col.style.width.endsWith(`${saved}px`)) {
+      col.style.width = `${saved}px`;
+    }
   });
 
   // Attach resize handle to each th except where colKeys[i] is null.

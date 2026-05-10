@@ -5,7 +5,7 @@ import { getRepo } from '../api/repo';
 import { getState, setFilter, setState } from '../state';
 import { confirmModal } from '../components/modal';
 import { toast } from '../components/toast';
-import { attachColumnResize } from '../utils/colResize';
+import { attachColumnResize, savedColWidth } from '../utils/colResize';
 import type { Ticket, TicketStatus, Priority } from '../types';
 
 // multi-select state — module-level, persists across re-renders.
@@ -319,26 +319,19 @@ function renderTable(rows: Ticket[]): HTMLElement {
     ]);
   }
 
+  const tableKey = 'tickets';
+  const colKeys: (string | null)[] = [null, 'id', 'title', 'status', 'assignee', 'priority', 'due', null];
+  const defaults = ['36px', '64px', '360px', '96px', '140px', '96px', '120px', '140px'];
+  const widths = colKeys.map((k, i) => savedColWidth(tableKey, k, defaults[i]!));
+
   const table = el('table', { class: 'spira-tk-table', role: 'grid' }, [
-    el('colgroup', {}, [
-      el('col', { style: 'width:36px' }),    // checkbox
-      el('col', { style: 'width:64px' }),    // #
-      el('col', { style: 'width:360px' }),   // Title
-      el('col', { style: 'width:96px' }),    // Status
-      el('col', { style: 'width:140px' }),   // 担当
-      el('col', { style: 'width:96px' }),    // 優先度
-      el('col', { style: 'width:120px' }),   // 期限
-      el('col', { style: 'width:140px' }),   // 更新
-    ]),
+    el('colgroup', {}, widths.map(w => el('col', { style: `width:${w}` }))),
     el('thead', {}, [renderHeaderRow(rows)]),
     el('tbody', {}, rows.map(t => renderRow(t))),
   ]) as HTMLTableElement;
 
-  // Defer resize handle attachment until the table is in the DOM.
-  setTimeout(() => attachColumnResize(table, {
-    tableKey: 'tickets',
-    colKeys: [null, 'id', 'title', 'status', 'assignee', 'priority', 'due', null],
-  }), 0);
+  // Saved widths are applied synchronously above; resize handles still need DOM attach.
+  setTimeout(() => attachColumnResize(table, { tableKey, colKeys }), 0);
 
   return el('div', { class: 'spira-content', style: 'padding:0' }, [
     el('div', { class: 'spira-table-wrap' }, [table]),

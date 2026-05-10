@@ -6,7 +6,7 @@ import { setState, getState } from '../state';
 import { sanitizeMailHtml } from '../utils/sanitize';
 import { openModal, confirmModal } from '../components/modal';
 import { toast } from '../components/toast';
-import { attachColumnResize } from '../utils/colResize';
+import { attachColumnResize, savedColWidth } from '../utils/colResize';
 import type { InboxMail, TicketStatus, Priority } from '../types';
 
 const expandedIds = new Set<number>();
@@ -332,23 +332,18 @@ function renderList(mails: InboxMail[]): HTMLElement {
     if (expandedIds.has(m.id)) tbody.appendChild(renderExpandedRow(m));
   }
 
+  const tableKey = 'inbox';
+  const colKeys: (string | null)[] = [null, null, 'subject', 'from', 'date', null];
+  const defaults = ['36px', '24px', '380px', '240px', '140px', '240px'];
+  const widths = colKeys.map((k, i) => savedColWidth(tableKey, k, defaults[i]!));
+
   const table = el('table', { class: 'spira-tk-table spira-inbox-table', role: 'grid' }, [
-    el('colgroup', {}, [
-      el('col', { style: 'width:36px' }),    // checkbox
-      el('col', { style: 'width:24px' }),    // disclosure arrow
-      el('col', { style: 'width:380px' }),   // 件名
-      el('col', { style: 'width:240px' }),   // 送信者
-      el('col', { style: 'width:140px' }),   // 受信日時
-      el('col', { style: 'width:240px' }),   // 操作
-    ]),
+    el('colgroup', {}, widths.map(w => el('col', { style: `width:${w}` }))),
     el('thead', {}, [head]),
     tbody,
   ]) as HTMLTableElement;
 
-  setTimeout(() => attachColumnResize(table, {
-    tableKey: 'inbox',
-    colKeys: [null, null, 'subject', 'from', 'date', null],
-  }), 0);
+  setTimeout(() => attachColumnResize(table, { tableKey, colKeys }), 0);
 
   return el('div', { class: 'spira-content', style: 'padding:0' }, [
     el('div', { class: 'spira-table-wrap' }, [table]),
