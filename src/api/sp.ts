@@ -445,17 +445,25 @@ type FieldType = 'Text' | 'Note' | 'NoteRich' | 'Number' | 'DateTime' | 'Boolean
 interface FieldSpec { name: string; type: FieldType; choices?: string[] }
 
 function toFieldSchema(f: FieldSpec): unknown {
-  if (f.type === 'NoteRich') {
-    return { __metadata: { type: 'SP.FieldMultiLineText' }, FieldTypeKind: 3, Title: f.name, RichText: true, NumberOfLines: 6 };
+  // SP REST `/_api/web/lists/.../fields` POST requires odata=verbose payload
+  // with a properly-typed `__metadata.type`. Generic SP.Field is rejected.
+  switch (f.type) {
+    case 'Text':
+      return { __metadata: { type: 'SP.FieldText' }, FieldTypeKind: 2, Title: f.name };
+    case 'Note':
+      return { __metadata: { type: 'SP.FieldMultiLineText' }, FieldTypeKind: 3, Title: f.name, RichText: false, NumberOfLines: 6 };
+    case 'NoteRich':
+      return { __metadata: { type: 'SP.FieldMultiLineText' }, FieldTypeKind: 3, Title: f.name, RichText: true, NumberOfLines: 6 };
+    case 'Number':
+      return { __metadata: { type: 'SP.FieldNumber' }, FieldTypeKind: 9, Title: f.name };
+    case 'DateTime':
+      // DisplayFormat 1 = DateTime (date+time). 0 = Date only.
+      return { __metadata: { type: 'SP.FieldDateTime' }, FieldTypeKind: 4, Title: f.name, DisplayFormat: 1 };
+    case 'Boolean':
+      return { __metadata: { type: 'SP.Field' }, FieldTypeKind: 8, Title: f.name };
+    case 'Choice':
+      return { __metadata: { type: 'SP.FieldChoice' }, FieldTypeKind: 6, Title: f.name, Choices: { results: f.choices ?? [] } };
   }
-  if (f.type === 'Note') {
-    return { __metadata: { type: 'SP.FieldMultiLineText' }, FieldTypeKind: 3, Title: f.name, RichText: false, NumberOfLines: 6 };
-  }
-  if (f.type === 'Choice') {
-    return { __metadata: { type: 'SP.FieldChoice' }, FieldTypeKind: 6, Title: f.name, Choices: { results: f.choices ?? [] } };
-  }
-  const kind: Record<FieldType, number> = { Text: 2, Note: 3, NoteRich: 3, Number: 9, DateTime: 4, Boolean: 8, Choice: 6 };
-  return { FieldTypeKind: kind[f.type], Title: f.name };
 }
 
 function ticketFieldSpecs(): FieldSpec[] {
