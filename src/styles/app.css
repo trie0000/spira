@@ -288,56 +288,110 @@
 }
 
 /* ---------- 3. Components ---------- */
-/* Button */
-.spira-btn {
-  height: 34px;
-  padding: 0 var(--s-7);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--s-2);
-  border-radius: var(--r-2);
-  font-family: inherit;
-  font-size: var(--fs-md);
-  font-weight: 500;
-  cursor: pointer;
-  border: 1px solid var(--line-strong);
-  background: var(--paper);
-  color: var(--ink);
-  transition: background 0.1s, color 0.1s, border-color 0.1s, filter 0.1s;
-  white-space: nowrap;
+/* Button.
+ * SharePoint host injects very aggressive button styles (Fluent UI / m365 chrome)
+ * that override our colors via element selectors and !important. We use !important
+ * here as well — this is the documented escape hatch for namespaced overlays.
+ * The color is also applied to children so SP's icon-stack rules can't recolor text.
+ */
+.spira-root .spira-btn,
+.spira-root .spira-btn * {
+  font-family: inherit !important;
+  font-size: var(--fs-md) !important;
 }
-.spira-btn:hover { filter: brightness(0.96); }
-.spira-btn:focus-visible {
-  outline: 2px solid var(--accent-soft);
-  outline-offset: 1px;
+.spira-root .spira-btn {
+  height: 34px !important;
+  padding: 0 var(--s-7) !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: var(--s-2) !important;
+  border-radius: var(--r-2) !important;
+  font-weight: 500 !important;
+  cursor: pointer !important;
+  border: 1px solid var(--line-strong) !important;
+  background: var(--paper) !important;
+  color: var(--ink) !important;
+  transition: background 0.1s, color 0.1s, border-color 0.1s, filter 0.1s !important;
+  white-space: nowrap !important;
+  text-decoration: none !important;
 }
-.spira-btn:disabled { opacity: 0.5; cursor: not-allowed; filter: none; }
+.spira-root .spira-btn:hover { filter: brightness(0.96) !important; }
+.spira-root .spira-btn:focus-visible {
+  outline: 2px solid var(--accent-soft) !important;
+  outline-offset: 1px !important;
+}
+.spira-root .spira-btn:disabled { opacity: 0.5 !important; cursor: not-allowed !important; filter: none !important; }
 
-/* Bump specificity with `.spira-root` so SP host's `button { color: ... }`
-   can't override our intended foreground color. */
-.spira-root .spira-btn--primary { background: var(--accent); color: #ffffff; border-color: var(--accent); }
-.spira-root .spira-btn--primary:hover { background: var(--accent-strong); border-color: var(--accent-strong); color: #ffffff; filter: none; }
-.spira-root .spira-btn--dark { background: var(--ink); color: var(--paper); border-color: var(--ink); }
-.spira-root .spira-btn--secondary { background: var(--paper-2); color: var(--ink); border-color: var(--paper-3); }
-.spira-root .spira-btn--ghost { background: transparent; border: 1px dashed var(--line-strong); color: var(--ink-3); }
-.spira-root .spira-btn--ghost:hover { border-color: var(--ink-4); color: var(--ink); filter: none; }
-.spira-root .spira-btn--danger { background: transparent; border-color: var(--danger); color: var(--danger); }
-.spira-root .spira-btn--danger:hover { background: var(--danger-soft); color: var(--danger); filter: none; }
-.spira-btn--sm { height: 28px; padding: 0 var(--s-5); font-size: var(--fs-sm); }
-
-/* Icon button (square) */
-.spira-iconbtn {
-  width: 30px; height: 30px;
-  display: inline-flex; align-items: center; justify-content: center;
-  border: none; background: transparent;
-  border-radius: var(--r-2);
-  cursor: pointer;
-  color: var(--ink);
+.spira-root .spira-btn--primary,
+.spira-root .spira-btn--primary * {
+  background: var(--accent) !important;
+  color: #ffffff !important;
+  border-color: var(--accent) !important;
 }
-.spira-iconbtn:hover { background: var(--paper-2-strong); }
-.spira-iconbtn:focus-visible { outline: 2px solid var(--accent-soft); outline-offset: 1px; }
-.spira-iconbtn svg { width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-width: 1.7; }
+.spira-root .spira-btn--primary { background: var(--accent) !important; color: #ffffff !important; border-color: var(--accent) !important; }
+.spira-root .spira-btn--primary:hover {
+  background: var(--accent-strong) !important;
+  border-color: var(--accent-strong) !important;
+  color: #ffffff !important;
+  filter: none !important;
+}
+
+.spira-root .spira-btn--dark,
+.spira-root .spira-btn--dark * {
+  background: var(--ink) !important;
+  color: var(--paper) !important;
+  border-color: var(--ink) !important;
+}
+
+.spira-root .spira-btn--secondary,
+.spira-root .spira-btn--secondary * {
+  background: var(--paper-2) !important;
+  color: var(--ink) !important;
+  border-color: var(--paper-3) !important;
+}
+
+.spira-root .spira-btn--ghost,
+.spira-root .spira-btn--ghost * {
+  background: transparent !important;
+  color: var(--ink-3) !important;
+}
+.spira-root .spira-btn--ghost { border: 1px dashed var(--line-strong) !important; }
+.spira-root .spira-btn--ghost:hover,
+.spira-root .spira-btn--ghost:hover * {
+  border-color: var(--ink-4) !important;
+  color: var(--ink) !important;
+  filter: none !important;
+}
+
+.spira-root .spira-btn--danger,
+.spira-root .spira-btn--danger * {
+  background: transparent !important;
+  color: var(--danger) !important;
+}
+.spira-root .spira-btn--danger { border-color: var(--danger) !important; }
+.spira-root .spira-btn--danger:hover {
+  background: var(--danger-soft) !important;
+  color: var(--danger) !important;
+  filter: none !important;
+}
+
+.spira-root .spira-btn--sm { height: 28px !important; padding: 0 var(--s-5) !important; font-size: var(--fs-sm) !important; }
+
+/* Icon button (square) — also force-shielded from host CSS. */
+.spira-root .spira-iconbtn {
+  width: 30px !important; height: 30px !important;
+  display: inline-flex !important; align-items: center !important; justify-content: center !important;
+  border: none !important;
+  background: transparent !important;
+  border-radius: var(--r-2) !important;
+  cursor: pointer !important;
+  color: var(--ink) !important;
+  padding: 0 !important;
+}
+.spira-root .spira-iconbtn:hover { background: var(--paper-2-strong) !important; }
+.spira-root .spira-iconbtn:focus-visible { outline: 2px solid var(--accent-soft) !important; outline-offset: 1px !important; }
+.spira-root .spira-iconbtn svg { width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-width: 1.7; }
 
 /* Input */
 .spira-input,
