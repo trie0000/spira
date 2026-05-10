@@ -390,6 +390,12 @@ export class SpRepository implements Repository {
     return (res.value ?? []).map(asComment);
   }
 
+  async updateComment(id: number, patch: { content: string }): Promise<void> {
+    await this.tx.update(this.listPath(this.cfg.listComments), id, {
+      Content: patch.content,
+    });
+  }
+
   async addComment(input: AddCommentInput): Promise<Comment> {
     const body: Record<string, unknown> = {
       Title: `c-${input.ticketId}-${Date.now()}`, // SP requires Title; not displayed

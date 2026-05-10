@@ -228,6 +228,14 @@ export class MockRepository implements Repository {
       .filter(c => c.ticketId === ticketId)
       .sort((a, b) => a.sentAt.localeCompare(b.sentAt));
   }
+  async updateComment(id: number, patch: { content: string }): Promise<void> {
+    const c = store.comments.find(x => x.id === id);
+    if (!c) return;
+    c.content = patch.content;
+    const t = store.tickets.find(x => x.id === c.ticketId);
+    if (t) t.updatedAt = now();
+  }
+
   async addComment(input: AddCommentInput): Promise<Comment> {
     const id = store.nextCommentId++;
     const c: Comment = {
