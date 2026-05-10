@@ -1,7 +1,7 @@
 // SharePoint REST API repository — same-origin auth, MERGE/DELETE via X-HTTP-Method.
 // All endpoints are relative to siteUrl.
 import type { Ticket, Comment, InboxMail, SiteUser, InboxState, TicketStatus, Priority, CommentType } from '../types';
-import type { Repository, CreateTicketInput, AddCommentInput, SyncResult } from './repo';
+import type { Repository, CreateTicketInput, AddCommentInput, SyncResult, ResetResult } from './repo';
 import { sampleInboxInputs } from './sampleInbox';
 
 export interface SpConfig {
@@ -221,6 +221,31 @@ export class SpRepository implements Repository {
     await ensure(this.cfg.listInbox, inboxFieldSpecs());
 
     return { created, addedFields };
+  }
+
+  // ---- destructive: reset all lists
+
+  async resetLists(): Promise<ResetResult> {
+    const titles = [this.cfg.listTickets, this.cfg.listComments, this.cfg.listInbox];
+    const deleted: string[] = [];
+    for (const t of titles) {
+      try {
+        await this.deleteList(t);
+        deleted.push(t);
+      } catch (e) {
+        if (e instanceof SpError && e.status === 404) continue;
+        throw new Error(`list delete failed: ${t} — ${(e as Error).message}`);
+      }
+    }
+    const r = await this.ensureLists();
+    return { deleted, recreated: r.created, addedFields: r.addedFields ?? [] };
+  }
+
+  private async deleteList(title: string): Promise<void> {
+    await this.tx.req(this.listPath(title), {
+      method: 'POST',
+      headers: { 'X-HTTP-Method': 'DELETE', 'IF-MATCH': '*' },
+    });
   }
 
   private async listExists(title: string): Promise<boolean> {

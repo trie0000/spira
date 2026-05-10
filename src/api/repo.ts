@@ -31,9 +31,19 @@ export interface SyncResult {
   errors: string[];
 }
 
+export interface ResetResult {
+  deleted: string[];
+  recreated: string[];
+  addedFields: string[];
+}
+
 export interface Repository {
   // bootstrap (SP only — no-op for mock)
-  ensureLists(): Promise<{ created: string[] }>;
+  ensureLists(): Promise<{ created: string[]; addedFields?: string[] }>;
+
+  // 危険: 全リストを削除して再作成する。Tickets / Comments / InboxMails の
+  // 中身は全て失われる。設定メニューから明示的な確認後にのみ呼び出すこと。
+  resetLists(): Promise<ResetResult>;
 
   // tickets
   listTickets(opts?: { includeDeleted?: boolean }): Promise<Ticket[]>;

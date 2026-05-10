@@ -5,6 +5,9 @@ import { renderTicketList } from './ticketList';
 import { renderTicketDetail } from './ticketDetail';
 import { renderInbox } from './inbox';
 import { renderTrash } from './trash';
+import { confirmModal } from '../components/modal';
+import { toast } from '../components/toast';
+import { getRepo, getRepoMode } from '../api/repo';
 
 export function renderShell(): HTMLElement {
   const root = el('div', { class: 'spira-root', 'data-theme': 'light' });
@@ -183,21 +186,113 @@ function renderTopbar(root: HTMLElement): HTMLElement {
     html: icon('x'),
   });
 
+  const settingsBtn = el('button', {
+    class: 'spira-iconbtn',
+    'aria-label': '設定',
+    title: '設定',
+    html: icon('gear'),
+  });
+  settingsBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    openSettingsMenu(root, settingsBtn);
+  });
+
   return el('header', { class: 'spira-topbar', role: 'banner' }, [
     el('div', { class: 'spira-topbar-brand' }, ['Spira']),
     el('div', { class: 'spira-topbar-spacer' }),
     el('div', { class: 'spira-topbar-actions' }, [
       syncBtn,
       themeBtn,
-      el('button', {
-        class: 'spira-iconbtn',
-        'aria-label': '設定',
-        title: '設定 (準備中)',
-        html: icon('gear'),
-      }),
+      settingsBtn,
       closeBtn,
     ]),
   ]);
+}
+
+function openSettingsMenu(root: HTMLElement, anchor: HTMLElement): void {
+  const existing = document.querySelector('.spira-settings-menu');
+  if (existing) { existing.remove(); return; }
+
+  const resetItem = el('div', {
+    class: 'spira-menu-item',
+    style: 'color:var(--danger)',
+    onclick: () => {
+      menu.remove();
+      onResetLists(root);
+    },
+  }, [
+    el('span', { html: icon('trash'), style: 'display:inline-flex;width:14px;height:14px' }),
+    'SP リストをリセット',
+  ]);
+
+  const modeLabel = el('div', {
+    class: 'spira-menu-item',
+    style: 'cursor:default;color:var(--ink-3);font-size:var(--fs-xs);pointer-events:none',
+  }, [`モード: ${getRepoMode()}`]);
+
+  const menu = el('div', {
+    class: 'spira-menu spira-settings-menu',
+    style: 'position:fixed;z-index:var(--z-modal);min-width:220px',
+  }, [
+    modeLabel,
+    el('div', { class: 'spira-menu-divider' }),
+    resetItem,
+  ]);
+
+  const rect = anchor.getBoundingClientRect();
+  menu.style.top = `${rect.bottom + 4}px`;
+  menu.style.right = `${window.innerWidth - rect.right}px`;
+
+  root.appendChild(menu);
+
+  // close on outside click / Esc
+  setTimeout(() => {
+    const closer = (ev: Event) => {
+      if (!menu.contains(ev.target as Node)) {
+        menu.remove();
+        document.removeEventListener('click', closer);
+        document.removeEventListener('keydown', keyCloser);
+      }
+    };
+    const keyCloser = (ev: KeyboardEvent) => {
+      if (ev.key === 'Escape') {
+        menu.remove();
+        document.removeEventListener('click', closer);
+        document.removeEventListener('keydown', keyCloser);
+      }
+    };
+    document.addEventListener('click', closer);
+    document.addEventListener('keydown', keyCloser);
+  }, 0);
+}
+
+function onResetLists(root: HTMLElement): void {
+  const isMock = getRepoMode() === 'mock';
+  const message = isMock
+    ? 'mock データを初期化します。チケット / コメント / 受信メールがすべて消えてサンプルに戻ります。'
+    : 'SP の Tickets / Comments / InboxMails リストを物理削除して再作成します。' +
+      '\nこれら 3 リストの中身（チケット・コメント・受信メール）はすべて失われ、戻せません。' +
+      '\n本当に実行しますか？';
+
+  confirmModal(root, {
+    title: 'SP リストをリセット',
+    message,
+    primaryLabel: 'リセット実行',
+    primaryVariant: 'danger',
+    onConfirm: async () => {
+      try {
+        const r = await getRepo().resetLists();
+        const msg = isMock
+          ? 'mock データをリセットしました'
+          : `${r.deleted.length} リストを削除 → ${r.recreated.length} リストを再作成しました`;
+        toast(root, msg, 'ok', 6000);
+        // 再読み込みで完全なクリーン状態へ
+        setTimeout(() => location.reload(), 800);
+      } catch (e) {
+        toast(root, `リセット失敗: ${(e as Error).message}`, 'error');
+      }
+    },
+  });
 }
 
 function renderSidebar(): HTMLElement {

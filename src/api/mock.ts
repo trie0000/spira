@@ -1,6 +1,6 @@
 // In-memory mock repository — used in dev (off-SP host) or with ?mock=1.
 import type { Ticket, Comment, InboxMail, SiteUser, InboxState } from '../types';
-import type { Repository, CreateTicketInput, AddCommentInput, SyncResult } from './repo';
+import type { Repository, CreateTicketInput, AddCommentInput, SyncResult, ResetResult } from './repo';
 import { sampleInboxInputs, toMockInbox } from './sampleInbox';
 
 interface DataStore {
@@ -139,7 +139,25 @@ export function seedMock(): void {
 }
 
 export class MockRepository implements Repository {
-  async ensureLists() { return { created: [] }; }
+  async ensureLists(): Promise<{ created: string[]; addedFields?: string[] }> {
+    return { created: [], addedFields: [] };
+  }
+
+  async resetLists(): Promise<ResetResult> {
+    store.tickets = [];
+    store.comments = [];
+    store.inbox = [];
+    store.users = [];
+    store.nextTicketId = 1;
+    store.nextCommentId = 1;
+    store.nextInboxId = 1;
+    seedMock();
+    return {
+      deleted: ['Tickets', 'Comments', 'InboxMails'],
+      recreated: ['Tickets', 'Comments', 'InboxMails'],
+      addedFields: [],
+    };
+  }
 
   async listTickets(opts: { includeDeleted?: boolean } = {}): Promise<Ticket[]> {
     return store.tickets.filter(t => opts.includeDeleted ? true : !t.isDeleted);

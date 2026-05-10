@@ -102,7 +102,8 @@ export function confirmModal(root: HTMLElement, opts: {
   primaryVariant?: 'primary' | 'danger';
   onConfirm: () => void | Promise<void>;
 }): void {
-  const body = el('p', { class: 'spira-modal-body' }, [opts.message]);
+  // Use a div with `white-space: pre-line` so newlines in the message are preserved.
+  const body = el('div', { class: 'spira-modal-body', style: 'white-space:pre-line;line-height:1.7' }, [opts.message]);
   openModal(root, {
     title: opts.title,
     body,
