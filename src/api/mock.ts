@@ -96,6 +96,7 @@ export function seedMock(): void {
       fromEmail: 'ops@external.example', fromName: '運用',
       content: '<p>サーバ応答が断続的に消えています。Grafana のメトリクスをご確認ください。</p><p><img src="data:image/svg+xml;utf8,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'80\' height=\'40\'%3E%3Crect width=\'80\' height=\'40\' fill=\'%23c47f1c\'/%3E%3C/svg%3E" alt="chart"/></p>',
       isHtml: true, sentAt: minus(30), hasAttachments: true,
+      internetMessageId: '<a1b2c3d4-e5f6-7890-abcd-ef1234567890@external.example>',
     },
     {
       id: 5, ticketId: 3, type: 'note',
@@ -258,6 +259,7 @@ export class MockRepository implements Repository {
       sentAt: input.sentAt ?? now(),
       sourceEmailId: input.sourceEmailId,
       hasAttachments: input.hasAttachments,
+      internetMessageId: input.internetMessageId,
     };
     store.comments.push(c);
     const t = store.tickets.find(x => x.id === input.ticketId);
@@ -304,6 +306,7 @@ export class MockRepository implements Repository {
           content: m.bodyHtml, isHtml: true,
           sentAt: m.receivedAt, sourceEmailId: m.id,
           hasAttachments: m.hasAttachments,
+          internetMessageId: m.internetMessageId,
         });
         await this.markInboxProcessed(m.id, { ticketId: tid, result: 'auto-linked' });
         autoLinked++;

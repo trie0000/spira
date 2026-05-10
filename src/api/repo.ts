@@ -24,6 +24,7 @@ export interface AddCommentInput {
   sentAt?: string;
   sourceEmailId?: number;
   hasAttachments?: boolean;
+  internetMessageId?: string;
 }
 
 export interface SyncResult {

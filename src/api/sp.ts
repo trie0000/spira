@@ -148,6 +148,7 @@ function asComment(it: SpListItem): Comment {
     sentAt: String(it.SentAt ?? it.Created),
     sourceEmailId: it.SourceEmailId != null ? Number(it.SourceEmailId) : undefined,
     hasAttachments: it.HasAttachments != null ? Boolean(it.HasAttachments) : undefined,
+    internetMessageId: it.InternetMessageId ? String(it.InternetMessageId) : undefined,
   };
 }
 
@@ -168,6 +169,7 @@ function asInbox(it: SpListItem): InboxMail {
     processedAt: it.ProcessedAt ? String(it.ProcessedAt) : undefined,
     processResult: it.ProcessResult ? (String(it.ProcessResult) as InboxState) : undefined,
     isHidden: Boolean(it.IsHidden),
+    internetMessageId: it.InternetMessageId ? String(it.InternetMessageId) : undefined,
   };
 }
 
@@ -430,6 +432,7 @@ export class SpRepository implements Repository {
       SentAt: input.sentAt ?? new Date().toISOString(),
       SourceEmailId: input.sourceEmailId ?? null,
       HasAttachments: input.hasAttachments ?? false,
+      InternetMessageId: input.internetMessageId ?? null,
     };
     const created = await this.tx.req<SpListItem>(`${this.listPath(this.cfg.listComments)}/items`, {
       method: 'POST',
@@ -490,6 +493,7 @@ export class SpRepository implements Repository {
           content: m.bodyHtml || m.bodyText, isHtml: !!m.bodyHtml,
           sentAt: m.receivedAt, sourceEmailId: m.id,
           hasAttachments: m.hasAttachments,
+          internetMessageId: m.internetMessageId,
         });
         await this.markInboxProcessed(m.id, { ticketId: tid, result: 'auto-linked' });
         autoLinked++;
@@ -594,6 +598,7 @@ function commentFieldSpecs(): FieldSpec[] {
     { name: 'SentAt', type: 'DateTime' },
     { name: 'SourceEmailId', type: 'Number' },
     { name: 'HasAttachments', type: 'Boolean' },
+    { name: 'InternetMessageId', type: 'Text' },
   ];
 }
 
@@ -613,6 +618,7 @@ function inboxFieldSpecs(): FieldSpec[] {
     { name: 'ProcessedAt', type: 'DateTime' },
     { name: 'ProcessResult', type: 'Choice', choices: ['auto-linked', 'manual-linked', 'created'] },
     { name: 'IsHidden', type: 'Boolean' },
+    { name: 'InternetMessageId', type: 'Text' },
   ];
 }
 

@@ -17,30 +17,25 @@ export interface BuildOwaReplyArgs {
 }
 
 /** Build a KQL search string usable in OWA's search bar.
- *  - `received:` は受信側 (mailbox 持ち主) の到着時刻なのでメンバー毎にブレる。
- *    マルチユーザで誰が検索しても同じメールに辿り着くために `sent:` (送信日時、
- *    メールヘッダの Date) を使う。送信日時はメール自体の属性なので
- *    全員一致する。
- *  - 件名タグ [#XXX] は最初の問い合わせメールには含まれないので検索条件から除外。
- *    代わりに rawSubject (RE:/FW: と [#XXX] を除去した素の件名) を入れて
- *    返信スレッドも精度よく絞る。
- *  - OWA 検索は時刻レベルの絞り込みを公式サポートしないため day 精度。
+ *  - `internetMessageId` (RFC 822 Message-Id) があれば `messageid:<id>` 1 条件で
+ *    ピンポイント特定できる (世界で一意なので絶対に 1 件)。これを最優先で使う。
+ *  - 無い場合のみ from + sent (日付) のフォールバック。日付は受信時刻 (人ごとに
+ *    ブレる) ではなく送信時刻 (メール固有) を使う。
+ *  - 件名は重複しがちなので検索キーとしては当てにしない。
  */
 export function buildOwaSearchQuery(args: BuildOwaReplyArgs): string {
-  const { ticket, comment } = args;
-  const day = (comment.sentAt ?? new Date().toISOString()).slice(0, 10); // YYYY-MM-DD
+  const { comment } = args;
 
+  // 1. Internet Message-Id があれば、それだけで一意特定できる
+  if (comment.internetMessageId) {
+    const id = comment.internetMessageId.replace(/^<|>$/g, ''); // 角括弧を剥がす
+    return `messageid:${quoteIfNeeded(id)}`;
+  }
+
+  // 2. フォールバック: 送信元 + 送信日 (day 精度)
+  const day = (comment.sentAt ?? new Date().toISOString()).slice(0, 10);
   const parts: string[] = [];
   if (comment.fromEmail) parts.push(`from:${comment.fromEmail}`);
-
-  // Subject (cleaned) で件名絞り込み
-  const subjRaw = ticket.rawSubject ?? ticket.title ?? '';
-  const subjClean = subjRaw
-    .replace(/^(RE:|Re:|FW:|Fw:)\s*/gi, '')
-    .replace(/\[#\d+\]\s*/g, '')
-    .trim();
-  if (subjClean) parts.push(`subject:${quoteIfNeeded(subjClean)}`);
-
   parts.push(`sent:${day}`);
   return parts.join(' ');
 }

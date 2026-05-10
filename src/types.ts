@@ -35,6 +35,7 @@ export interface Comment {
   sentAt: string;
   sourceEmailId?: number;
   hasAttachments?: boolean;    // true when the source mail had real attachments
+  internetMessageId?: string;  // RFC 822 Message-ID (世界で一意)。OWA messageid: 検索用
 }
 
 export interface InboxMail {
@@ -53,6 +54,7 @@ export interface InboxMail {
   processedAt?: string;
   processResult?: InboxState;
   isHidden?: boolean;
+  internetMessageId?: string;
 }
 
 export interface SiteUser {
