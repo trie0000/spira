@@ -51,6 +51,7 @@ export interface InboxMail {
   ticketId?: number;
   processedAt?: string;
   processResult?: InboxState;
+  isHidden?: boolean;
 }
 
 export interface SiteUser {

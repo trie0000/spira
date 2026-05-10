@@ -265,8 +265,14 @@ export class MockRepository implements Repository {
   }
 
   async listInbox(opts: { unprocessedOnly?: boolean } = {}): Promise<InboxMail[]> {
-    const all = opts.unprocessedOnly ? store.inbox.filter(m => !m.isProcessed) : store.inbox;
+    let all = store.inbox.filter(m => !m.isHidden);
+    if (opts.unprocessedOnly) all = all.filter(m => !m.isProcessed);
     return [...all].sort((a, b) => b.receivedAt.localeCompare(a.receivedAt));
+  }
+  async hideInboxItems(ids: number[]): Promise<void> {
+    for (const m of store.inbox) {
+      if (ids.includes(m.id)) m.isHidden = true;
+    }
   }
   async markInboxProcessed(id: number, patch: { ticketId: number; result: InboxState }): Promise<void> {
     const m = store.inbox.find(x => x.id === id);

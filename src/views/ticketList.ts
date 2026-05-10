@@ -3,14 +3,59 @@ import { icon } from '../icons';
 import { ticketStatusList, priorityList } from '../api/sp';
 import { getRepo } from '../api/repo';
 import { getState, setFilter, setState } from '../state';
+import { confirmModal } from '../components/modal';
+import { toast } from '../components/toast';
 import type { Ticket, TicketStatus, Priority } from '../types';
+
+// multi-select state — module-level, persists across re-renders.
+const selectedIds = new Set<number>();
+function root(): HTMLElement { return document.querySelector<HTMLElement>('#spira-root') ?? document.body; }
 
 export async function renderTicketList(): Promise<HTMLElement> {
   const wrap = el('div', { class: 'spira-main-wrap', style: 'display:flex;flex-direction:column;height:100%;min-height:0' });
   const tickets = await getRepo().listTickets();
+  // prune selection of deleted IDs
+  for (const id of Array.from(selectedIds)) if (!tickets.find(t => t.id === id)) selectedIds.delete(id);
   wrap.appendChild(renderToolbar());
+  if (selectedIds.size > 0) wrap.appendChild(renderBulkBar(tickets));
   wrap.appendChild(renderTable(tickets));
   return wrap;
+}
+
+function renderBulkBar(allTickets: Ticket[]): HTMLElement {
+  const count = selectedIds.size;
+  return el('div', { class: 'spira-bulkbar' }, [
+    el('span', { style: 'font-size:var(--fs-sm);color:var(--ink)' }, [`${count} 件選択中`]),
+    el('div', { style: 'flex:1' }),
+    el('button', {
+      class: 'spira-btn spira-btn--secondary spira-btn--sm',
+      onclick: () => { selectedIds.clear(); setState({}); },
+    }, ['選択解除']),
+    el('button', {
+      class: 'spira-btn spira-btn--danger spira-btn--sm',
+      onclick: () => {
+        const ids = Array.from(selectedIds);
+        confirmModal(root(), {
+          title: 'まとめて削除',
+          message: `${count} 件のチケットをゴミ箱に移動します。`,
+          primaryLabel: '削除',
+          primaryVariant: 'danger',
+          onConfirm: async () => {
+            try {
+              for (const id of ids) await getRepo().softDeleteTicket(id);
+              toast(root(), `${ids.length} 件をゴミ箱に移動しました`, 'ok');
+              selectedIds.clear();
+              setState({ trashCount: getState().trashCount + ids.length });
+            } catch (e) {
+              toast(root(), `削除失敗: ${(e as Error).message}`, 'error');
+            }
+          },
+        });
+        // suppress unused
+        void allTickets;
+      },
+    }, [`${count} 件を削除`]),
+  ]);
 }
 
 function renderToolbar(): HTMLElement {
@@ -191,7 +236,9 @@ function openFilterPopover(anchor: HTMLElement): void {
   pop.style.position = 'fixed';
   pop.style.top = `${rect.bottom + 4}px`;
   pop.style.left = `${rect.left}px`;
-  pop.style.zIndex = 'var(--z-modal)';
+  // numeric literal — `style.zIndex = 'var(...)'` is rejected by CSSOM
+  pop.style.zIndex = '2147483700';
+  pop.style.width = '420px';
   root.appendChild(pop);
 
   setTimeout(() => {
@@ -252,7 +299,7 @@ function renderTable(allTickets: Ticket[]): HTMLElement {
 
   return el('div', { class: 'spira-content', style: 'padding:0' }, [
     el('table', { class: 'spira-tk-table', role: 'grid' }, [
-      el('thead', {}, [renderHeaderRow()]),
+      el('thead', {}, [renderHeaderRow(rows)]),
       el('tbody', {}, rows.map(t => renderRow(t))),
     ]),
   ]);
@@ -263,7 +310,7 @@ interface HeaderSpec {
   sortKey?: 'id' | 'title' | 'status' | 'assignee' | 'priority' | 'due' | 'updated';
 }
 
-function renderHeaderRow(): HTMLElement {
+function renderHeaderRow(visibleRows: Ticket[]): HTMLElement {
   const cols: HeaderSpec[] = [
     { label: '#',       sortKey: 'id' },
     { label: 'Title',   sortKey: 'title' },
@@ -274,36 +321,72 @@ function renderHeaderRow(): HTMLElement {
     { label: '更新',    sortKey: 'updated' },
   ];
   const s = getState();
-  return el('tr', {}, cols.map(c => {
-    if (!c.sortKey) return el('th', {}, [c.label]);
-    const isActive = s.sortBy === c.sortKey;
-    const arrow = !isActive ? '' : (s.sortDir === 'asc' ? ' ▲' : ' ▼');
-    return el('th', {
-      class: 'spira-th-sort' + (isActive ? ' active' : ''),
-      style: 'cursor:pointer;user-select:none',
-      onclick: () => {
-        if (s.sortBy === c.sortKey) {
-          setState({ sortDir: s.sortDir === 'asc' ? 'desc' : 'asc' });
-        } else {
-          setState({ sortBy: c.sortKey as typeof s.sortBy, sortDir: c.sortKey === 'title' ? 'asc' : 'desc' });
-        }
-      },
-    }, [c.label + arrow]);
-  }));
+  const allChecked = visibleRows.length > 0 && visibleRows.every(t => selectedIds.has(t.id));
+  const someChecked = !allChecked && visibleRows.some(t => selectedIds.has(t.id));
+
+  const selectAll = el('input', {
+    type: 'checkbox',
+    'aria-label': 'すべて選択',
+    onclick: (e: Event) => {
+      const checked = (e.target as HTMLInputElement).checked;
+      if (checked) for (const t of visibleRows) selectedIds.add(t.id);
+      else for (const t of visibleRows) selectedIds.delete(t.id);
+      setState({});
+    },
+  }) as HTMLInputElement;
+  selectAll.checked = allChecked;
+  if (someChecked) selectAll.indeterminate = true;
+
+  const headerCells: HTMLElement[] = [
+    el('th', { class: 'spira-tk-checkbox-cell', style: 'width:34px' }, [selectAll]),
+    ...cols.map(c => {
+      if (!c.sortKey) return el('th', {}, [c.label]);
+      const isActive = s.sortBy === c.sortKey;
+      const arrow = !isActive ? '' : (s.sortDir === 'asc' ? ' ▲' : ' ▼');
+      return el('th', {
+        class: 'spira-th-sort' + (isActive ? ' active' : ''),
+        style: 'cursor:pointer;user-select:none',
+        onclick: () => {
+          if (s.sortBy === c.sortKey) {
+            setState({ sortDir: s.sortDir === 'asc' ? 'desc' : 'asc' });
+          } else {
+            setState({ sortBy: c.sortKey as typeof s.sortBy, sortDir: c.sortKey === 'title' ? 'asc' : 'desc' });
+          }
+        },
+      }, [c.label + arrow]);
+    }),
+  ];
+  return el('tr', {}, headerCells);
 }
 
 function renderRow(t: Ticket): HTMLElement {
   const overdue = t.dueDate ? isOverdue(t.dueDate) && t.status !== '完了' : false;
   const dueCell = el('td', { class: overdue ? 'spira-tk-due--overdue' : '' }, [t.dueDate ? fmtDate(t.dueDate, false) : '—']);
 
+  const checkbox = el('input', {
+    type: 'checkbox',
+    'aria-label': '選択',
+  }) as HTMLInputElement;
+  checkbox.checked = selectedIds.has(t.id);
+  checkbox.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (checkbox.checked) selectedIds.add(t.id);
+    else selectedIds.delete(t.id);
+    setState({});
+  });
+
   return el('tr', {
-    class: 'spira-tk-row',
-    onclick: () => {
+    class: 'spira-tk-row' + (selectedIds.has(t.id) ? ' selected' : ''),
+    onclick: (e: Event) => {
+      // ignore clicks originating from the checkbox cell
+      const target = e.target as HTMLElement;
+      if (target.closest('.spira-tk-checkbox-cell')) return;
       const open = getState().openTicketIds;
       const next = open.includes(t.id) ? open : [...open, t.id];
       setState({ selectedTicketId: t.id, openTicketIds: next });
     },
   }, [
+    el('td', { class: 'spira-tk-checkbox-cell', onclick: (e: Event) => e.stopPropagation() }, [checkbox]),
     el('td', { class: 'spira-tk-id' }, [`#${String(t.id).padStart(3, '0')}`]),
     el('td', { class: 'spira-tk-title' }, [t.title]),
     el('td', {}, [renderStatusBadge(t.status)]),

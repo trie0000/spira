@@ -65,6 +65,7 @@ export interface Repository {
   // inbox
   listInbox(opts?: { unprocessedOnly?: boolean }): Promise<InboxMail[]>;
   markInboxProcessed(id: number, patch: { ticketId: number; result: InboxState }): Promise<void>;
+  hideInboxItems(ids: number[]): Promise<void>;
   syncInbox(): Promise<SyncResult>;
 
   // users (AD picker)

@@ -166,6 +166,7 @@ function asInbox(it: SpListItem): InboxMail {
     ticketId: it.TicketId != null ? Number(it.TicketId) : undefined,
     processedAt: it.ProcessedAt ? String(it.ProcessedAt) : undefined,
     processResult: it.ProcessResult ? (String(it.ProcessResult) as InboxState) : undefined,
+    isHidden: Boolean(it.IsHidden),
   };
 }
 
@@ -422,10 +423,18 @@ export class SpRepository implements Repository {
   // ---- inbox
 
   async listInbox(opts: { unprocessedOnly?: boolean } = {}): Promise<InboxMail[]> {
-    const filter = opts.unprocessedOnly ? '&$filter=IsProcessed eq 0' : '';
+    const conds: string[] = ['IsHidden ne 1'];
+    if (opts.unprocessedOnly) conds.push('IsProcessed eq 0');
+    const filter = `&$filter=${encodeURIComponent(conds.join(' and '))}`;
     const url = `${this.listPath(this.cfg.listInbox)}/items?$top=500&$orderby=ReceivedAt desc${filter}`;
     const res = await this.tx.req<ListItemsResp<SpListItem>>(url);
     return (res.value ?? []).map(asInbox);
+  }
+
+  async hideInboxItems(ids: number[]): Promise<void> {
+    for (const id of ids) {
+      await this.tx.update(this.listPath(this.cfg.listInbox), id, { IsHidden: true });
+    }
   }
 
   async markInboxProcessed(id: number, patch: { ticketId: number; result: InboxState }): Promise<void> {
@@ -576,6 +585,7 @@ function inboxFieldSpecs(): FieldSpec[] {
     { name: 'TicketId', type: 'Number' },
     { name: 'ProcessedAt', type: 'DateTime' },
     { name: 'ProcessResult', type: 'Choice', choices: ['auto-linked', 'manual-linked', 'created'] },
+    { name: 'IsHidden', type: 'Boolean' },
   ];
 }
 

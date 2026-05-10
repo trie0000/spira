@@ -1,17 +1,29 @@
-import { el, fmtDate } from '../utils/dom';
+import { el, fmtDate, clear } from '../utils/dom';
 import { icon } from '../icons';
 import { ticketStatusList, priorityList } from '../api/sp';
 import { getRepo } from '../api/repo';
 import { setState, getState } from '../state';
 import { sanitizeMailHtml } from '../utils/sanitize';
-import { openModal } from '../components/modal';
+import { openModal, confirmModal } from '../components/modal';
 import { toast } from '../components/toast';
 import type { InboxMail, TicketStatus, Priority } from '../types';
+
+const expandedIds = new Set<number>();
+const selectedInboxIds = new Set<number>();
+
+function getRoot(): HTMLElement {
+  return document.querySelector<HTMLElement>('#spira-root') ?? document.body;
+}
 
 export async function renderInbox(): Promise<HTMLElement> {
   const wrap = el('div', { class: 'spira-main-wrap', style: 'display:flex;flex-direction:column;height:100%;min-height:0' });
   const mails = await getRepo().listInbox({ unprocessedOnly: true });
+
+  // prune selection of removed ids
+  for (const id of Array.from(selectedInboxIds)) if (!mails.find(m => m.id === id)) selectedInboxIds.delete(id);
+
   wrap.appendChild(renderToolbar());
+  if (selectedInboxIds.size > 0) wrap.appendChild(renderBulkBar(mails));
   wrap.appendChild(renderList(mails));
   return wrap;
 }
@@ -30,6 +42,42 @@ function renderToolbar(): HTMLElement {
   ]);
 }
 
+function renderBulkBar(allMails: InboxMail[]): HTMLElement {
+  const count = selectedInboxIds.size;
+  return el('div', { class: 'spira-bulkbar' }, [
+    el('span', { style: 'font-size:var(--fs-sm);color:var(--ink)' }, [`${count} 件選択中`]),
+    el('div', { style: 'flex:1' }),
+    el('button', {
+      class: 'spira-btn spira-btn--secondary spira-btn--sm',
+      onclick: () => { selectedInboxIds.clear(); setState({}); },
+    }, ['選択解除']),
+    el('button', {
+      class: 'spira-btn spira-btn--secondary spira-btn--sm',
+      onclick: () => {
+        const ids = Array.from(selectedInboxIds);
+        confirmModal(getRoot(), {
+          title: 'まとめて非表示',
+          message: `${count} 件を一覧から非表示にします。\n（チケット起票や紐付けは行いません。受信メールリスト上では IsHidden = true になります）`,
+          primaryLabel: '非表示にする',
+          primaryVariant: 'primary',
+          onConfirm: async () => {
+            try {
+              await getRepo().hideInboxItems(ids);
+              toast(getRoot(), `${ids.length} 件を非表示にしました`, 'ok');
+              selectedInboxIds.clear();
+              const fresh = await getRepo().listInbox({ unprocessedOnly: true });
+              setState({ inboxCount: fresh.length });
+            } catch (e) {
+              toast(getRoot(), `失敗: ${(e as Error).message}`, 'error');
+            }
+          },
+        });
+        void allMails;
+      },
+    }, [`${count} 件を非表示`]),
+  ]);
+}
+
 function renderList(mails: InboxMail[]): HTMLElement {
   if (mails.length === 0) {
     const sampleBtn = el('button', {
@@ -39,7 +87,6 @@ function renderList(mails: InboxMail[]): HTMLElement {
         try {
           const r = await getRepo().addSampleInbox();
           toast(getRoot(), `サンプルメール ${r.count} 件を追加しました`, 'ok');
-          // re-fetch & re-paint
           const fresh = await getRepo().listInbox({ unprocessedOnly: true });
           setState({ inboxCount: fresh.length });
         } catch (e) {
@@ -59,32 +106,78 @@ function renderList(mails: InboxMail[]): HTMLElement {
       ]),
     ]);
   }
+
+  // Same table style as Tickets — checkbox column + sortable headers (only date here).
+  const allChecked = mails.every(m => selectedInboxIds.has(m.id));
+  const someChecked = !allChecked && mails.some(m => selectedInboxIds.has(m.id));
+  const selectAll = el('input', {
+    type: 'checkbox',
+    'aria-label': 'すべて選択',
+    onclick: (e: Event) => {
+      const checked = (e.target as HTMLInputElement).checked;
+      if (checked) for (const m of mails) selectedInboxIds.add(m.id);
+      else for (const m of mails) selectedInboxIds.delete(m.id);
+      setState({});
+    },
+  }) as HTMLInputElement;
+  selectAll.checked = allChecked;
+  if (someChecked) selectAll.indeterminate = true;
+
+  const head = el('tr', {}, [
+    el('th', { class: 'spira-tk-checkbox-cell', style: 'width:34px' }, [selectAll]),
+    el('th', { style: 'width:24px' }),
+    el('th', {}, ['件名']),
+    el('th', { style: 'width:240px' }, ['送信者']),
+    el('th', { style: 'width:140px' }, ['受信日時']),
+    el('th', { style: 'width:200px' }, ['操作']),
+  ]);
+
+  const tbody = el('tbody', {}, []);
+  for (const m of mails) {
+    tbody.appendChild(renderHeaderRow(m));
+    if (expandedIds.has(m.id)) tbody.appendChild(renderExpandedRow(m));
+  }
+
   return el('div', { class: 'spira-content', style: 'padding:0' }, [
-    el('div', { class: 'spira-inbox-list' }, mails.map(m => renderRow(m))),
+    el('table', { class: 'spira-tk-table spira-inbox-table', role: 'grid' }, [
+      el('thead', {}, [head]),
+      tbody,
+    ]),
   ]);
 }
 
-// Persist expanded state across re-renders so clicks within view don't collapse.
-const expandedIds = new Set<number>();
+function renderHeaderRow(m: InboxMail): HTMLElement {
+  const checkbox = el('input', { type: 'checkbox', 'aria-label': '選択' }) as HTMLInputElement;
+  checkbox.checked = selectedInboxIds.has(m.id);
+  checkbox.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (checkbox.checked) selectedInboxIds.add(m.id);
+    else selectedInboxIds.delete(m.id);
+    setState({});
+  });
 
-function renderRow(m: InboxMail): HTMLElement {
   const isOpen = expandedIds.has(m.id);
+  const arrow = el('span', {
+    style: 'display:inline-block;color:var(--ink-3);font-size:var(--fs-xs);transition:transform .1s;transform:rotate(' + (isOpen ? '90' : '0') + 'deg)',
+  }, ['▶']);
 
-  const subjectCell = el('div', {
-    class: 'spira-inbox-subject',
-    style: 'cursor:pointer;user-select:none',
-    title: 'クリックで本文を展開',
+  const tr = el('tr', {
+    class: 'spira-tk-row' + (selectedInboxIds.has(m.id) ? ' selected' : ''),
+    onclick: (e: Event) => {
+      const target = e.target as HTMLElement;
+      if (target.closest('.spira-tk-checkbox-cell')) return;
+      if (target.closest('.spira-inbox-actions')) return;
+      if (expandedIds.has(m.id)) expandedIds.delete(m.id);
+      else expandedIds.add(m.id);
+      setState({});
+    },
   }, [
-    el('span', { style: 'display:inline-block;width:14px;color:var(--ink-3);font-size:var(--fs-xs);transition:transform .1s;transform:rotate(' + (isOpen ? '90' : '0') + 'deg)' }, ['▶']),
-    ' ',
-    m.subject,
-  ]);
-
-  const head = el('div', { class: 'spira-inbox-row' }, [
-    subjectCell,
-    el('div', { class: 'spira-inbox-from' }, [`${m.fromName ?? ''} <${m.fromEmail}>`]),
-    el('div', { class: 'spira-inbox-date' }, [fmtDate(m.receivedAt)]),
-    el('div', { class: 'spira-inbox-actions' }, [
+    el('td', { class: 'spira-tk-checkbox-cell', onclick: (e: Event) => e.stopPropagation() }, [checkbox]),
+    el('td', {}, [arrow]),
+    el('td', { class: 'spira-tk-title', style: 'cursor:pointer' }, [m.subject]),
+    el('td', {}, [`${m.fromName ?? ''} <${m.fromEmail}>`]),
+    el('td', {}, [fmtDate(m.receivedAt)]),
+    el('td', { class: 'spira-inbox-actions', style: 'display:flex;gap:var(--s-2)' }, [
       el('button', {
         class: 'spira-btn spira-btn--primary spira-btn--sm',
         onclick: (e: Event) => { e.stopPropagation(); openNewTicketModal(m); },
@@ -93,62 +186,51 @@ function renderRow(m: InboxMail): HTMLElement {
         class: 'spira-btn spira-btn--secondary spira-btn--sm',
         onclick: (e: Event) => { e.stopPropagation(); openLinkModal(m); },
       }, ['⌬ 紐付け']),
+      el('button', {
+        class: 'spira-btn spira-btn--ghost spira-btn--sm',
+        title: '一覧から非表示',
+        onclick: async (e: Event) => {
+          e.stopPropagation();
+          try {
+            await getRepo().hideInboxItems([m.id]);
+            toast(getRoot(), '非表示にしました', 'ok');
+            const fresh = await getRepo().listInbox({ unprocessedOnly: true });
+            setState({ inboxCount: fresh.length });
+          } catch (err) {
+            toast(getRoot(), `失敗: ${(err as Error).message}`, 'error');
+          }
+        },
+      }, ['非表示']),
     ]),
   ]);
-
-  // Toggle expand on subject click (not on action buttons).
-  subjectCell.addEventListener('click', () => {
-    if (expandedIds.has(m.id)) expandedIds.delete(m.id);
-    else expandedIds.add(m.id);
-    setState({}); // re-render
-  });
-
-  if (!isOpen) return head;
-
-  return el('div', {}, [head, renderExpanded(m)]);
+  return tr;
 }
 
-function renderExpanded(m: InboxMail): HTMLElement {
-  // Header meta (細かいメタ情報)
-  const metaRow = (label: string, value: string | HTMLElement) =>
+function renderExpandedRow(m: InboxMail): HTMLElement {
+  const previewBody = el('div', { class: 'spira-th-card-body', style: 'max-height:360px;overflow:auto' });
+  if (m.bodyHtml) previewBody.innerHTML = sanitizeMailHtml(m.bodyHtml);
+  else if (m.bodyText) {
+    previewBody.style.whiteSpace = 'pre-wrap';
+    previewBody.textContent = m.bodyText;
+  } else {
+    previewBody.textContent = '(本文なし)';
+  }
+
+  const meta = (label: string, value: string | HTMLElement) =>
     el('div', { style: 'display:grid;grid-template-columns:120px 1fr;gap:var(--s-3);font-size:var(--fs-sm);padding:var(--s-1) 0' }, [
       el('span', { style: 'color:var(--ink-3)' }, [label]),
       typeof value === 'string' ? el('span', {}, [value]) : value,
     ]);
 
-  const owaLink = m.owaLink && m.owaLink !== '#'
-    ? el('a', { href: m.owaLink, target: '_blank', rel: 'noopener', style: 'color:var(--accent-strong);text-decoration:underline;word-break:break-all' }, ['Outlook で開く'])
-    : el('span', { style: 'color:var(--ink-4)' }, ['(なし)']);
-
-  const meta = el('div', {
-    style: 'background:var(--paper);border:1px solid var(--paper-3);border-radius:var(--r-2);padding:var(--s-4) var(--s-5);margin-bottom:var(--s-3)',
-  }, [
-    metaRow('差出人', `${m.fromName ?? ''} <${m.fromEmail}>`),
-    metaRow('受信日時', fmtDate(m.receivedAt)),
-    metaRow('件名', m.subject),
-    metaRow('ConversationId', m.conversationId ?? '(なし)'),
-    metaRow('添付ファイル', m.hasAttachments ? 'あり（OWA で確認）' : 'なし'),
-    metaRow('OWA リンク', owaLink),
+  const cell = el('td', { colspan: '6', style: 'background:var(--paper-2);padding:var(--s-5) var(--s-7)' }, [
+    meta('差出人', `${m.fromName ?? ''} <${m.fromEmail}>`),
+    meta('受信日時', fmtDate(m.receivedAt)),
+    meta('件名', m.subject),
+    meta('ConversationId', m.conversationId ?? '(なし)'),
+    meta('添付', m.hasAttachments ? 'あり (OWA で確認)' : 'なし'),
+    el('div', { style: 'margin-top:var(--s-3)' }, [previewBody]),
   ]);
-
-  // Body (HTML sanitized or plain text)
-  const body = el('div', { class: 'spira-th-card-body', style: 'background:var(--paper);border:1px solid var(--paper-3);border-radius:var(--r-2);padding:var(--s-5);max-height:480px;overflow:auto' });
-  if (m.bodyHtml) body.innerHTML = sanitizeMailHtml(m.bodyHtml);
-  else if (m.bodyText) {
-    body.style.whiteSpace = 'pre-wrap';
-    body.textContent = m.bodyText;
-  } else {
-    body.textContent = '(本文なし)';
-    body.style.color = 'var(--ink-4)';
-  }
-
-  return el('div', {
-    style: 'background:var(--paper-2);border-bottom:1px solid var(--paper-3);padding:var(--s-5) var(--s-7)',
-  }, [meta, body]);
-}
-
-function getRoot(): HTMLElement {
-  return document.querySelector<HTMLElement>('.spira-root') ?? document.body;
+  return el('tr', { class: 'spira-inbox-expanded' }, [cell]);
 }
 
 export function openNewTicketModal(m: InboxMail): void {
@@ -229,7 +311,7 @@ export function openNewTicketModal(m: InboxMail): void {
         });
       } catch (e) {
         toast(getRoot(), `起票に失敗: ${(e as Error).message}`, 'error');
-        throw e; // keep modal open
+        throw e;
       }
     },
   });
@@ -251,7 +333,7 @@ export function openLinkModal(m: InboxMail): void {
     const filtered = q
       ? allTickets.filter(t => String(t.id).includes(q.replace(/^#/, '')) || t.title.toLowerCase().includes(q))
       : allTickets;
-    resultList.innerHTML = '';
+    clear(resultList);
     if (filtered.length === 0) {
       resultList.appendChild(el('div', { class: 'spira-empty', style: 'padding:var(--s-7)' }, ['該当するチケットがありません']));
       return;
@@ -270,13 +352,12 @@ export function openLinkModal(m: InboxMail): void {
     }
   }
 
-  // Async load tickets
   resultList.appendChild(el('div', { class: 'spira-empty', style: 'padding:var(--s-7)' }, ['読み込み中...']));
   getRepo().listTickets().then(ts => {
     allTickets = ts.map(t => ({ id: t.id, title: t.title, status: t.status }));
     paint();
   }).catch(e => {
-    resultList.innerHTML = '';
+    clear(resultList);
     resultList.appendChild(el('div', { class: 'spira-empty', style: 'padding:var(--s-7);color:var(--danger)' }, [`読み込み失敗: ${e.message}`]));
   });
 
