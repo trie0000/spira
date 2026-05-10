@@ -32,25 +32,21 @@ export async function renderTicketDetail(ticketId: number): Promise<HTMLElement>
   const latestReceived = comments.filter(c => c.type === 'received').slice(-1)[0];
 
   return el('div', { class: 'spira-main-wrap', style: 'display:flex;flex-direction:column;height:100%;min-height:0' }, [
-    await renderTabStrip(t.id),
-    renderToolbar(t, latestReceived),
+    await renderTabStrip(t, latestReceived),
     renderTicketHeader(t),
     renderSplitPanes(t, comments),
   ]);
 }
 
-async function renderTabStrip(activeId: number): Promise<HTMLElement> {
+async function renderTabStrip(activeT: Ticket, latestReceived: Comment | undefined): Promise<HTMLElement> {
   const ids = getState().openTicketIds;
-  if (ids.length === 0) return el('div', { style: 'display:none' });
-
-  // Resolve titles in parallel.
   const tickets = await Promise.all(ids.map(id => getRepo().getTicket(id)));
 
   const tabs: HTMLElement[] = [];
   ids.forEach((id, i) => {
     const t = tickets[i];
     if (!t) return;
-    const isActive = id === activeId;
+    const isActive = id === activeT.id;
     const tab = el('div', {
       class: 'spira-tab' + (isActive ? ' active' : ''),
       onclick: () => setState({ selectedTicketId: id }),
@@ -76,47 +72,21 @@ async function renderTabStrip(activeId: number): Promise<HTMLElement> {
     tabs.push(tab);
   });
 
-  const closeAllBtn = ids.length > 1 ? el('button', {
-    type: 'button',
-    class: 'spira-tab-close-all',
-    title: 'すべて閉じる',
-    onclick: () => setState({ openTicketIds: [], selectedTicketId: null }),
-  }, ['すべて閉じる']) : null;
-
-  return el('div', { class: 'spira-tab-strip' }, [
-    ...tabs,
-    el('div', { style: 'flex:1' }),
-    ...(closeAllBtn ? [closeAllBtn] : []),
-  ]);
-}
-
-// ============================================================ toolbar
-
-function renderToolbar(t: Ticket, latestReceived: Comment | undefined): HTMLElement {
-  const idTag = `[#${String(t.id).padStart(3, '0')}]`;
-  const copyBtn = el('button', {
-    class: 'spira-detail-id-tag',
-    title: '件名タグをコピー（返信時に件名へ貼り付け）',
-    onclick: async () => {
-      try {
-        await navigator.clipboard.writeText(idTag);
-        toast(getRoot(), `${idTag} をコピーしました`, 'ok');
-      } catch {
-        toast(getRoot(), 'コピーできませんでした', 'error');
-      }
-    },
-  }, [el('span', { html: icon('copy') }), idTag]);
-
+  // Left zone: back to list
   const backBtn = el('button', {
     class: 'spira-btn spira-btn--secondary spira-btn--sm',
     onclick: () => setState({ selectedTicketId: null }),
   }, ['← 一覧']);
 
+  // Right zone: actions
   const owaBtn = el('a', {
     class: 'spira-btn spira-btn--ghost spira-btn--sm',
     href: '#', target: '_blank', rel: 'noopener',
     title: '元メールを Outlook で開く',
-  }, [el('span', { html: icon('external'), style: 'display:inline-flex;width:14px;height:14px' }), 'OWA で開く']);
+  }, [
+    el('span', { html: icon('external'), style: 'display:inline-flex;width:14px;height:14px' }),
+    'OWA で開く',
+  ]);
 
   const replyBtn = el('button', {
     class: 'spira-btn spira-btn--ghost spira-btn--sm',
@@ -126,8 +96,8 @@ function renderToolbar(t: Ticket, latestReceived: Comment | undefined): HTMLElem
     disabled: !latestReceived,
     onclick: () => {
       if (!latestReceived) return;
-      const url = buildOwaReplyUrl({ ticket: t, comment: latestReceived });
-      if (bodyWouldBeTruncated({ ticket: t, comment: latestReceived })) {
+      const url = buildOwaReplyUrl({ ticket: activeT, comment: latestReceived });
+      if (bodyWouldBeTruncated({ ticket: activeT, comment: latestReceived })) {
         toast(getRoot(), '本文が長いため引用は省略されました', 'warn');
       }
       window.open(url, '_blank', 'noopener');
@@ -142,14 +112,14 @@ function renderToolbar(t: Ticket, latestReceived: Comment | undefined): HTMLElem
     onclick: () => {
       confirmModal(getRoot(), {
         title: 'チケットを削除',
-        message: `#${String(t.id).padStart(3, '0')} 「${t.title}」 をゴミ箱に移動します。`,
+        message: `#${String(activeT.id).padStart(3, '0')} 「${activeT.title}」 をゴミ箱に移動します。`,
         primaryLabel: '削除',
         primaryVariant: 'danger',
         onConfirm: async () => {
           try {
-            await getRepo().softDeleteTicket(t.id);
+            await getRepo().softDeleteTicket(activeT.id);
             toast(getRoot(), 'チケットをゴミ箱に移動しました', 'ok');
-            const remaining = getState().openTicketIds.filter(x => x !== t.id);
+            const remaining = getState().openTicketIds.filter(x => x !== activeT.id);
             const next = remaining.length > 0 ? remaining[remaining.length - 1] ?? null : null;
             setState({
               selectedTicketId: next,
@@ -164,20 +134,34 @@ function renderToolbar(t: Ticket, latestReceived: Comment | undefined): HTMLElem
     },
   }, ['削除']);
 
-  return el('div', { class: 'spira-toolbar' }, [
-    backBtn,
-    copyBtn,
-    el('div', { class: 'spira-toolbar-spacer' }),
-    owaBtn,
-    replyBtn,
-    deleteBtn,
+  return el('div', { class: 'spira-tab-strip' }, [
+    el('div', { class: 'spira-tab-left' }, [backBtn]),
+    el('div', { class: 'spira-tab-middle' }, tabs),
+    el('div', { class: 'spira-tab-right' }, [owaBtn, replyBtn, deleteBtn]),
   ]);
 }
+
+// (toolbar moved into the tab strip — see renderTabStrip above)
 
 // ============================================================ ticket header (title + properties)
 
 function renderTicketHeader(t: Ticket): HTMLElement {
   const users = getState().users;
+  const idTag = `[#${String(t.id).padStart(3, '0')}]`;
+  const idDisplay = `#${String(t.id).padStart(3, '0')}`;
+
+  const idLabel = el('span', {
+    class: 'spira-detail-id',
+    title: 'クリックで件名タグをコピー (返信時に件名へ貼り付け)',
+    onclick: async () => {
+      try {
+        await navigator.clipboard.writeText(idTag);
+        toast(getRoot(), `${idTag} をコピーしました`, 'ok');
+      } catch {
+        toast(getRoot(), 'コピーできませんでした', 'error');
+      }
+    },
+  }, [idDisplay]);
 
   const titleInput = el('input', {
     class: 'spira-detail-title-input',
@@ -229,7 +213,7 @@ function renderTicketHeader(t: Ticket): HTMLElement {
       `起票: ${fmtDate(t.createdAt)}`, ' · ', `更新: ${fmtDate(t.updatedAt)}`,
       t.reporterName ? ` · 起票元: ${t.reporterName}` : '',
     ]),
-    titleInput,
+    el('div', { class: 'spira-detail-title-row' }, [idLabel, titleInput]),
     el('div', { style: 'display:flex;flex-wrap:wrap;gap:var(--s-3);align-items:center;margin-top:var(--s-3)' }, [
       label('ステータス'), statusSel,
       label('重要度'), prioSel,

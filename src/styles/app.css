@@ -867,15 +867,32 @@
   border-top: 1px solid var(--paper-3);
 }
 
-/* Tab strip (open tickets) */
+/* Tab strip (open tickets) — 3 zones: [back btn] [scrollable tabs] [actions] */
 #spira-root .spira-tab-strip {
   display: flex;
-  align-items: stretch;
-  gap: 2px;
+  align-items: center;
+  gap: var(--s-3);
   background: var(--paper-2);
   border-bottom: 1px solid var(--line);
-  overflow-x: auto;
   flex-shrink: 0;
+  min-height: 48px;
+  padding-top: 6px !important;
+  padding-bottom: 6px !important;
+}
+#spira-root .spira-tab-left,
+#spira-root .spira-tab-right {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  flex-shrink: 0;
+}
+#spira-root .spira-tab-middle {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  gap: 2px;
+  align-items: center;
 }
 #spira-root .spira-tab {
   display: inline-flex;
@@ -975,6 +992,31 @@
   color: var(--ink);
   padding: var(--s-1) var(--s-2);
   border-radius: var(--r-2);
+}
+
+/* Title row: #XXX tag (left, mono, clickable to copy) + title input */
+#spira-root .spira-detail-title-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+}
+#spira-root .spira-detail-id {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: var(--fs-lg);
+  font-weight: 500;
+  color: var(--ink-3);
+  background: var(--paper-2);
+  border: 1px solid var(--paper-3);
+  border-radius: var(--r-2);
+  padding: 4px 10px;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.1s, color 0.1s;
+}
+#spira-root .spira-detail-id:hover {
+  background: var(--paper-2-strong);
+  color: var(--ink);
 }
 .spira-detail-title-input:hover { background: var(--paper-2); }
 .spira-detail-title-input:focus { background: var(--paper); outline: 1px solid var(--line-strong); }
