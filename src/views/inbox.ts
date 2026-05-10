@@ -14,8 +14,8 @@ const selectedInboxIds = new Set<number>();
 
 // Inbox-local filter — separate from ticket filter.
 type InboxAttachFilter = '' | 'yes' | 'no';
-interface InboxFilter { query: string; fromEmail: string; hasAttachments: InboxAttachFilter }
-const inboxFilter: InboxFilter = { query: '', fromEmail: '', hasAttachments: '' };
+interface InboxFilter { query: string; fromEmail: string; hasAttachments: InboxAttachFilter; includeHidden: boolean }
+const inboxFilter: InboxFilter = { query: '', fromEmail: '', hasAttachments: '', includeHidden: false };
 
 function getRoot(): HTMLElement {
   return document.querySelector<HTMLElement>('#spira-root') ?? document.body;
@@ -23,7 +23,7 @@ function getRoot(): HTMLElement {
 
 export async function renderInbox(): Promise<HTMLElement> {
   const wrap = el('div', { class: 'spira-main-wrap', style: 'display:flex;flex-direction:column;height:100%;min-height:0' });
-  const allMails = await getRepo().listInbox({ unprocessedOnly: true });
+  const allMails = await getRepo().listInbox({ unprocessedOnly: true, includeHidden: inboxFilter.includeHidden });
   const filtered = applyInboxFilters(allMails);
 
   for (const id of Array.from(selectedInboxIds)) if (!filtered.find(m => m.id === id)) selectedInboxIds.delete(id);
@@ -75,8 +75,18 @@ function renderToolbar(allMails: InboxMail[]): HTMLElement {
     setState({});
   });
 
+  const showHiddenToggle = el('button', {
+    class: `spira-btn spira-btn--sm ${inboxFilter.includeHidden ? 'spira-btn--secondary' : 'spira-btn--ghost'}`,
+    title: inboxFilter.includeHidden ? '非表示メールを一覧から外す' : '非表示メールも一時的に表示',
+    onclick: () => {
+      inboxFilter.includeHidden = !inboxFilter.includeHidden;
+      setState({});
+    },
+  }, [inboxFilter.includeHidden ? '✓ 非表示も表示' : '非表示も表示']);
+
   const toolbar = el('div', { class: 'spira-toolbar' }, [
     filterBtn,
+    showHiddenToggle,
     el('div', { class: 'spira-toolbar-spacer' }),
     el('div', { class: 'spira-search-wrap' }, [el('span', { html: icon('search') }), searchInput]),
     el('button', {
@@ -365,8 +375,62 @@ function renderHeaderRow(m: InboxMail): HTMLElement {
     style: 'display:inline-block;color:var(--ink-3);font-size:var(--fs-xs);transition:transform .1s;transform:rotate(' + (isOpen ? '90' : '0') + 'deg)',
   }, ['▶']);
 
+  const isHidden = !!m.isHidden;
+
+  const subjectCell = el('td', { class: 'spira-tk-title', style: 'cursor:pointer' }, [
+    isHidden ? el('span', {
+      class: 'spira-badge spira-badge--muted',
+      style: 'margin-right:var(--s-2);font-size:var(--fs-xs)',
+    }, ['非表示']) : '',
+    m.subject,
+  ]);
+
+  const actionBtns: HTMLElement[] = [
+    el('button', {
+      class: 'spira-btn spira-btn--primary spira-btn--sm',
+      onclick: (e: Event) => { e.stopPropagation(); openNewTicketModal(m); },
+    }, ['＋ 起票']),
+    el('button', {
+      class: 'spira-btn spira-btn--secondary spira-btn--sm',
+      onclick: (e: Event) => { e.stopPropagation(); openLinkModal(m); },
+    }, ['⌬ 紐付け']),
+  ];
+  if (isHidden) {
+    actionBtns.push(el('button', {
+      class: 'spira-btn spira-btn--ghost spira-btn--sm',
+      title: '一覧に再表示',
+      onclick: async (e: Event) => {
+        e.stopPropagation();
+        try {
+          await getRepo().unhideInboxItems([m.id]);
+          toast(getRoot(), '再表示しました', 'ok');
+          const fresh = await getRepo().listInbox({ unprocessedOnly: true });
+          setState({ inboxCount: fresh.length });
+        } catch (err) {
+          toast(getRoot(), `失敗: ${(err as Error).message}`, 'error');
+        }
+      },
+    }, ['再表示']));
+  } else {
+    actionBtns.push(el('button', {
+      class: 'spira-btn spira-btn--ghost spira-btn--sm',
+      title: '一覧から非表示',
+      onclick: async (e: Event) => {
+        e.stopPropagation();
+        try {
+          await getRepo().hideInboxItems([m.id]);
+          toast(getRoot(), '非表示にしました', 'ok');
+          const fresh = await getRepo().listInbox({ unprocessedOnly: true });
+          setState({ inboxCount: fresh.length });
+        } catch (err) {
+          toast(getRoot(), `失敗: ${(err as Error).message}`, 'error');
+        }
+      },
+    }, ['非表示']));
+  }
+
   const tr = el('tr', {
-    class: 'spira-tk-row' + (selectedInboxIds.has(m.id) ? ' selected' : ''),
+    class: 'spira-tk-row' + (selectedInboxIds.has(m.id) ? ' selected' : '') + (isHidden ? ' spira-row-hidden' : ''),
     onclick: (e: Event) => {
       const target = e.target as HTMLElement;
       if (target.closest('.spira-tk-checkbox-cell')) return;
@@ -378,34 +442,10 @@ function renderHeaderRow(m: InboxMail): HTMLElement {
   }, [
     el('td', { class: 'spira-tk-checkbox-cell', onclick: (e: Event) => e.stopPropagation() }, [checkbox]),
     el('td', {}, [arrow]),
-    el('td', { class: 'spira-tk-title', style: 'cursor:pointer' }, [m.subject]),
+    subjectCell,
     el('td', {}, [`${m.fromName ?? ''} <${m.fromEmail}>`]),
     el('td', {}, [fmtDate(m.receivedAt)]),
-    el('td', { class: 'spira-inbox-actions', style: 'display:flex;gap:var(--s-2)' }, [
-      el('button', {
-        class: 'spira-btn spira-btn--primary spira-btn--sm',
-        onclick: (e: Event) => { e.stopPropagation(); openNewTicketModal(m); },
-      }, ['＋ 起票']),
-      el('button', {
-        class: 'spira-btn spira-btn--secondary spira-btn--sm',
-        onclick: (e: Event) => { e.stopPropagation(); openLinkModal(m); },
-      }, ['⌬ 紐付け']),
-      el('button', {
-        class: 'spira-btn spira-btn--ghost spira-btn--sm',
-        title: '一覧から非表示',
-        onclick: async (e: Event) => {
-          e.stopPropagation();
-          try {
-            await getRepo().hideInboxItems([m.id]);
-            toast(getRoot(), '非表示にしました', 'ok');
-            const fresh = await getRepo().listInbox({ unprocessedOnly: true });
-            setState({ inboxCount: fresh.length });
-          } catch (err) {
-            toast(getRoot(), `失敗: ${(err as Error).message}`, 'error');
-          }
-        },
-      }, ['非表示']),
-    ]),
+    el('td', { class: 'spira-inbox-actions', style: 'display:flex;gap:var(--s-2)' }, actionBtns),
   ]);
   return tr;
 }

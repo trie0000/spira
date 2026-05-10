@@ -722,6 +722,9 @@
 .spira-tk-table tr:hover td { background: var(--paper-2); }
 .spira-tk-row.active td { background: var(--accent-soft); }
 .spira-tk-row.selected td { background: var(--accent-soft); }
+/* Hidden inbox row: greyed out so the user can tell it's currently filtered-out */
+#spira-root tr.spira-row-hidden td { opacity: 0.55; }
+#spira-root tr.spira-row-hidden:hover td { opacity: 0.85; }
 .spira-tk-checkbox-cell { padding: var(--s-3) var(--s-4); cursor: default; }
 .spira-tk-checkbox-cell input[type="checkbox"] { cursor: pointer; }
 .spira-inbox-table tr.spira-inbox-expanded { cursor: default; }
@@ -930,6 +933,14 @@
   margin-bottom: -1px;
   font-weight: 500;
 }
+/* Drag-to-reorder feedback */
+#spira-root .spira-tab[draggable="true"] { cursor: grab; }
+#spira-root .spira-tab[draggable="true"]:active { cursor: grabbing; }
+#spira-root .spira-tab--dragging { opacity: 0.4; }
+#spira-root .spira-tab--drop-target {
+  box-shadow: -2px 0 0 0 var(--accent) inset;
+}
+
 /* Back-to-list button styled like a tab so heights line up */
 #spira-root .spira-tab--back {
   background: var(--paper);

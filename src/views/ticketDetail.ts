@@ -51,6 +51,8 @@ async function renderTabStrip(activeT: Ticket, latestReceived: Comment | undefin
       class: 'spira-tab' + (isActive ? ' active' : ''),
       onclick: () => setState({ selectedTicketId: id }),
       title: t.title,
+      draggable: 'true',
+      'data-tab-id': String(id),
     }, [
       el('span', { style: 'font-family:var(--font-mono);font-size:var(--fs-xs);color:var(--ink-3);margin-right:6px' }, [`#${String(id).padStart(3, '0')}`]),
       el('span', { style: 'max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap' }, [t.title]),
@@ -69,6 +71,39 @@ async function renderTabStrip(activeT: Ticket, latestReceived: Comment | undefin
         },
       }, ['×']),
     ]);
+
+    // Drag-to-reorder
+    tab.addEventListener('dragstart', (e) => {
+      e.dataTransfer?.setData('text/plain', String(id));
+      if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
+      tab.classList.add('spira-tab--dragging');
+    });
+    tab.addEventListener('dragend', () => {
+      tab.classList.remove('spira-tab--dragging');
+      document.querySelectorAll('.spira-tab--drop-target').forEach(n => n.classList.remove('spira-tab--drop-target'));
+    });
+    tab.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+      tab.classList.add('spira-tab--drop-target');
+    });
+    tab.addEventListener('dragleave', () => {
+      tab.classList.remove('spira-tab--drop-target');
+    });
+    tab.addEventListener('drop', (e) => {
+      e.preventDefault();
+      tab.classList.remove('spira-tab--drop-target');
+      const fromId = parseInt(e.dataTransfer?.getData('text/plain') ?? '', 10);
+      if (!fromId || fromId === id) return;
+      const cur = [...getState().openTicketIds];
+      const fromIdx = cur.indexOf(fromId);
+      const toIdx = cur.indexOf(id);
+      if (fromIdx < 0 || toIdx < 0) return;
+      cur.splice(fromIdx, 1);
+      cur.splice(toIdx, 0, fromId);
+      setState({ openTicketIds: cur });
+    });
+
     tabs.push(tab);
   });
 

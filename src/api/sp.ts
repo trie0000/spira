@@ -422,10 +422,11 @@ export class SpRepository implements Repository {
 
   // ---- inbox
 
-  async listInbox(opts: { unprocessedOnly?: boolean } = {}): Promise<InboxMail[]> {
-    const conds: string[] = ['IsHidden ne 1'];
+  async listInbox(opts: { unprocessedOnly?: boolean; includeHidden?: boolean } = {}): Promise<InboxMail[]> {
+    const conds: string[] = [];
+    if (!opts.includeHidden) conds.push('IsHidden ne 1');
     if (opts.unprocessedOnly) conds.push('IsProcessed eq 0');
-    const filter = `&$filter=${encodeURIComponent(conds.join(' and '))}`;
+    const filter = conds.length > 0 ? `&$filter=${encodeURIComponent(conds.join(' and '))}` : '';
     const url = `${this.listPath(this.cfg.listInbox)}/items?$top=500&$orderby=ReceivedAt desc${filter}`;
     const res = await this.tx.req<ListItemsResp<SpListItem>>(url);
     return (res.value ?? []).map(asInbox);
@@ -434,6 +435,12 @@ export class SpRepository implements Repository {
   async hideInboxItems(ids: number[]): Promise<void> {
     for (const id of ids) {
       await this.tx.update(this.listPath(this.cfg.listInbox), id, { IsHidden: true });
+    }
+  }
+
+  async unhideInboxItems(ids: number[]): Promise<void> {
+    for (const id of ids) {
+      await this.tx.update(this.listPath(this.cfg.listInbox), id, { IsHidden: false });
     }
   }
 
