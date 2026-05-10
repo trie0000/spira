@@ -17,18 +17,38 @@ export interface BuildOwaReplyArgs {
 }
 
 /** Build a KQL search string usable in OWA's search bar.
- *  Note: 件名タグ [#XXX] は最初の問い合わせメールには含まれないので検索条件から除外。
- *  from + received (日単位) の組合わせは前提として一意なので、これだけで該当メールに到達できる。
+ *  - `received:` は受信側 (mailbox 持ち主) の到着時刻なのでメンバー毎にブレる。
+ *    マルチユーザで誰が検索しても同じメールに辿り着くために `sent:` (送信日時、
+ *    メールヘッダの Date) を使う。送信日時はメール自体の属性なので
+ *    全員一致する。
+ *  - 件名タグ [#XXX] は最初の問い合わせメールには含まれないので検索条件から除外。
+ *    代わりに rawSubject (RE:/FW: と [#XXX] を除去した素の件名) を入れて
+ *    返信スレッドも精度よく絞る。
+ *  - OWA 検索は時刻レベルの絞り込みを公式サポートしないため day 精度。
  */
 export function buildOwaSearchQuery(args: BuildOwaReplyArgs): string {
   const { ticket, comment } = args;
-  void ticket;
   const day = (comment.sentAt ?? new Date().toISOString()).slice(0, 10); // YYYY-MM-DD
 
   const parts: string[] = [];
   if (comment.fromEmail) parts.push(`from:${comment.fromEmail}`);
-  parts.push(`received:${day}`);
+
+  // Subject (cleaned) で件名絞り込み
+  const subjRaw = ticket.rawSubject ?? ticket.title ?? '';
+  const subjClean = subjRaw
+    .replace(/^(RE:|Re:|FW:|Fw:)\s*/gi, '')
+    .replace(/\[#\d+\]\s*/g, '')
+    .trim();
+  if (subjClean) parts.push(`subject:${quoteIfNeeded(subjClean)}`);
+
+  parts.push(`sent:${day}`);
   return parts.join(' ');
+}
+
+function quoteIfNeeded(s: string): string {
+  // KQL で複数語の値を扱うときは引用符で囲む。引用符自体はエスケープ。
+  if (/[\s"]/.test(s)) return `"${s.replace(/"/g, '\\"')}"`;
+  return s;
 }
 
 /** Best-effort URL with embedded query for envs where it does work. Kept for completeness. */
