@@ -1005,6 +1005,53 @@
   border-radius: var(--r-2);
 }
 
+/* New-note form: send button overlaid in textarea bottom-right */
+#spira-root .spira-note-form {
+  position: relative;
+}
+#spira-root .spira-note-form .spira-note-input {
+  padding-right: 44px !important;
+  padding-bottom: 36px !important;
+  background: var(--paper) !important;
+  border: 1px solid var(--paper-3) !important;
+  border-radius: var(--r-3) !important;
+}
+#spira-root .spira-note-form .spira-note-input:focus {
+  border-color: var(--line-strong) !important;
+}
+#spira-root .spira-note-submit {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: var(--ink-3);
+  border: 1px solid var(--paper-3);
+  border-radius: var(--r-2);
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s, border-color 0.1s;
+}
+#spira-root .spira-note-submit:hover {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+#spira-root .spira-note-submit:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+#spira-root .spira-note-submit svg {
+  width: 16px;
+  height: 16px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.7;
+}
+
 /* Title row: #XXX tag (left, mono, clickable to copy) + title input */
 #spira-root .spira-detail-title-row {
   display: flex;

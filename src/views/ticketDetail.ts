@@ -586,16 +586,20 @@ function renderNoteCard(c: Comment): HTMLElement {
 
 function renderNewNoteForm(t: Ticket): HTMLElement {
   const ta = el('textarea', {
-    class: 'spira-textarea',
+    class: 'spira-textarea spira-note-input',
     placeholder: '内部メモを追加  (Cmd/Ctrl + Enter で保存)',
     rows: '3',
   }) as HTMLTextAreaElement;
   autoSizeTextarea(ta);
 
   const saveBtn = el('button', {
-    class: 'spira-btn spira-btn--primary',
+    type: 'button',
+    class: 'spira-note-submit',
+    'aria-label': 'メモを追加',
+    title: 'メモを追加 (Cmd/Ctrl + Enter)',
+    html: icon('cornerDownLeft'),
     onclick: () => save(),
-  }, ['＋ メモを追加']);
+  });
 
   async function save() {
     const v = ta.value.trim();
@@ -620,12 +624,7 @@ function renderNewNoteForm(t: Ticket): HTMLElement {
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); save(); }
   });
 
-  return el('div', {
-    style: 'background:var(--paper);border:1px solid var(--paper-3);border-radius:var(--r-3);padding:var(--s-4);display:flex;flex-direction:column;gap:var(--s-3)',
-  }, [
-    ta,
-    el('div', { style: 'display:flex;justify-content:flex-end' }, [saveBtn]),
-  ]);
+  return el('div', { class: 'spira-note-form' }, [ta, saveBtn]);
 }
 
 function getRoot(): HTMLElement {
