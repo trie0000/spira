@@ -17,23 +17,15 @@ export interface BuildOwaReplyArgs {
 }
 
 /** Build a KQL search string usable in OWA's search bar.
- *  - `internetMessageId` (RFC 822 Message-Id) があれば `messageid:<id>` 1 条件で
- *    ピンポイント特定できる (世界で一意なので絶対に 1 件)。これを最優先で使う。
- *  - 無い場合のみ from + sent (日付) のフォールバック。日付は受信時刻 (人ごとに
- *    ブレる) ではなく送信時刻 (メール固有) を使う。
- *  - 件名は重複しがちなので検索キーとしては当てにしない。
+ *  シンプルに from + sent (送信日) の AND だけ。
+ *  - subject: 件名はテストメール等で重複するので絞り込みキーにしない
+ *  - messageid: は OWA 検索バーで動かない (Microsoft の手抜き)
+ *  - sent: 受信日と違いメール固有でメンバー間ブレなし
  */
 export function buildOwaSearchQuery(args: BuildOwaReplyArgs): string {
   const { comment } = args;
-
-  // 1. Internet Message-Id があれば、それだけで一意特定できる
-  if (comment.internetMessageId) {
-    const id = comment.internetMessageId.replace(/^<|>$/g, ''); // 角括弧を剥がす
-    return `messageid:${quoteIfNeeded(id)}`;
-  }
-
-  // 2. フォールバック: 送信元 + 送信日 (day 精度)
   const day = (comment.sentAt ?? new Date().toISOString()).slice(0, 10);
+
   const parts: string[] = [];
   if (comment.fromEmail) parts.push(`from:${comment.fromEmail}`);
   parts.push(`sent:${day}`);
