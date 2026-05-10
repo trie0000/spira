@@ -268,15 +268,18 @@
   background: var(--paper);
 }
 
-.spira-toolbar {
-  height: var(--toolbar-h);
-  display: flex;
-  align-items: center;
-  gap: var(--s-3);
-  padding: 0 var(--s-7);
-  border-bottom: 1px solid var(--line);
-  flex-shrink: 0;
-  background: var(--paper);
+#spira-root .spira-toolbar {
+  height: var(--toolbar-h) !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: var(--s-3) !important;
+  padding-left: var(--s-9) !important;
+  padding-right: var(--s-9) !important;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+  border-bottom: 1px solid var(--line) !important;
+  flex-shrink: 0 !important;
+  background: var(--paper) !important;
 }
 .spira-toolbar-spacer { flex: 1; }
 
@@ -675,31 +678,61 @@
 .spira-inbox-table tr.spira-inbox-expanded:hover td { background: var(--paper-2); }
 
 /* Sub-bar (always-present): view title on the left, optional bulk actions on the right.
- * Always rendered with the same height so the layout doesn't shift when items are selected. */
+ * Always rendered with the same height so the layout doesn't shift when items are selected.
+ * !important everywhere to defeat SP host's div padding/margin resets. */
 #spira-root .spira-subbar {
-  display: flex;
-  align-items: center;
-  gap: var(--s-3);
-  padding: var(--s-3) var(--s-7);
-  border-bottom: 1px solid var(--line);
-  background: var(--paper);
-  min-height: 44px;
-  flex-shrink: 0;
-  transition: background 0.15s, border-color 0.15s;
+  display: flex !important;
+  align-items: center !important;
+  gap: var(--s-3) !important;
+  padding-top: var(--s-4) !important;
+  padding-bottom: var(--s-4) !important;
+  padding-left: var(--s-9) !important;
+  padding-right: var(--s-9) !important;
+  border-bottom: 1px solid var(--line) !important;
+  background: var(--paper) !important;
+  min-height: 48px !important;
+  flex-shrink: 0 !important;
+  transition: background 0.15s, border-color 0.15s !important;
 }
 #spira-root .spira-subbar.selected {
-  background: var(--accent-soft);
-  border-color: var(--accent);
+  background: var(--accent-soft) !important;
+  border-color: var(--accent) !important;
 }
 #spira-root .spira-subbar-title {
-  display: flex; align-items: baseline; gap: var(--s-3);
+  display: flex !important;
+  align-items: baseline !important;
+  gap: var(--s-4) !important;
 }
-#spira-root .spira-subbar-name { font-size: var(--fs-base); font-weight: 600; color: var(--ink); }
-#spira-root .spira-subbar-count { font-size: var(--fs-sm); color: var(--ink-3); }
+#spira-root .spira-subbar-name {
+  font-size: var(--fs-base) !important;
+  font-weight: 600 !important;
+  color: var(--ink) !important;
+}
+#spira-root .spira-subbar-count {
+  font-size: var(--fs-sm) !important;
+  color: var(--ink-3) !important;
+}
 
 /* Padded table wrapper — keeps sticky header working, gives the table breathing room */
 #spira-root .spira-table-wrap {
-  padding: 0 var(--s-7) var(--s-7);
+  padding-left: var(--s-9) !important;
+  padding-right: var(--s-9) !important;
+  padding-bottom: var(--s-9) !important;
+  padding-top: 0 !important;
+}
+
+/* Wider in-cell padding so columns have breathing room */
+#spira-root .spira-tk-table th,
+#spira-root .spira-tk-table td {
+  padding-left: var(--s-5) !important;
+  padding-right: var(--s-5) !important;
+}
+#spira-root .spira-tk-table th { padding-top: var(--s-4) !important; padding-bottom: var(--s-4) !important; }
+#spira-root .spira-tk-table td { padding-top: var(--s-4) !important; padding-bottom: var(--s-4) !important; }
+#spira-root .spira-tk-checkbox-cell {
+  padding-left: var(--s-3) !important;
+  padding-right: var(--s-3) !important;
+  width: 36px !important;
 }
 .spira-tk-id { font-family: var(--font-mono); color: var(--ink-3); font-size: var(--fs-sm); }
 .spira-tk-title { color: var(--ink); max-width: 360px; overflow: hidden; text-overflow: ellipsis; }
