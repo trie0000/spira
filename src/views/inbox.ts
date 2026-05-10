@@ -6,10 +6,16 @@ import { setState, getState } from '../state';
 import { sanitizeMailHtml } from '../utils/sanitize';
 import { openModal, confirmModal } from '../components/modal';
 import { toast } from '../components/toast';
+import { attachColumnResize } from '../utils/colResize';
 import type { InboxMail, TicketStatus, Priority } from '../types';
 
 const expandedIds = new Set<number>();
 const selectedInboxIds = new Set<number>();
+
+// Inbox-local filter — separate from ticket filter.
+type InboxAttachFilter = '' | 'yes' | 'no';
+interface InboxFilter { query: string; fromEmail: string; hasAttachments: InboxAttachFilter }
+const inboxFilter: InboxFilter = { query: '', fromEmail: '', hasAttachments: '' };
 
 function getRoot(): HTMLElement {
   return document.querySelector<HTMLElement>('#spira-root') ?? document.body;
@@ -17,19 +23,62 @@ function getRoot(): HTMLElement {
 
 export async function renderInbox(): Promise<HTMLElement> {
   const wrap = el('div', { class: 'spira-main-wrap', style: 'display:flex;flex-direction:column;height:100%;min-height:0' });
-  const mails = await getRepo().listInbox({ unprocessedOnly: true });
+  const allMails = await getRepo().listInbox({ unprocessedOnly: true });
+  const filtered = applyInboxFilters(allMails);
 
-  for (const id of Array.from(selectedInboxIds)) if (!mails.find(m => m.id === id)) selectedInboxIds.delete(id);
+  for (const id of Array.from(selectedInboxIds)) if (!filtered.find(m => m.id === id)) selectedInboxIds.delete(id);
 
-  wrap.appendChild(renderSubBar(mails.length));
-  wrap.appendChild(renderToolbar());
-  wrap.appendChild(renderList(mails));
+  wrap.appendChild(renderSubBar(filtered.length));
+  wrap.appendChild(renderToolbar(allMails));
+  wrap.appendChild(renderList(filtered));
   return wrap;
 }
 
-function renderToolbar(): HTMLElement {
-  return el('div', { class: 'spira-toolbar' }, [
+function applyInboxFilters(rows: InboxMail[]): InboxMail[] {
+  let out = rows;
+  if (inboxFilter.fromEmail) out = out.filter(m => m.fromEmail === inboxFilter.fromEmail);
+  if (inboxFilter.hasAttachments === 'yes') out = out.filter(m => m.hasAttachments);
+  if (inboxFilter.hasAttachments === 'no') out = out.filter(m => !m.hasAttachments);
+  if (inboxFilter.query) {
+    const q = inboxFilter.query.toLowerCase();
+    out = out.filter(m =>
+      m.subject.toLowerCase().includes(q) ||
+      (m.fromEmail ?? '').toLowerCase().includes(q) ||
+      (m.fromName ?? '').toLowerCase().includes(q),
+    );
+  }
+  return out;
+}
+
+function activeInboxFilterCount(): number {
+  return [inboxFilter.fromEmail, inboxFilter.hasAttachments].filter(Boolean).length;
+}
+
+function renderToolbar(allMails: InboxMail[]): HTMLElement {
+  const filterBtn = el('button', {
+    class: 'spira-btn spira-btn--secondary spira-btn--sm',
+    onclick: (e: Event) => { e.stopPropagation(); openInboxFilterPopover(filterBtn, allMails); },
+  }, [
+    el('span', { html: icon('filter'), style: 'display:inline-flex;width:14px;height:14px' }),
+    `フィルター${activeInboxFilterCount() > 0 ? ` (${activeInboxFilterCount()})` : ''}`,
+  ]);
+
+  const searchInput = el('input', {
+    type: 'search',
+    class: 'spira-input spira-search-input',
+    placeholder: '件名 / 送信者で検索',
+    value: inboxFilter.query,
+    'data-focus-key': 'inbox-search',
+  }) as HTMLInputElement;
+  searchInput.addEventListener('input', () => {
+    inboxFilter.query = searchInput.value;
+    setState({});
+  });
+
+  const toolbar = el('div', { class: 'spira-toolbar' }, [
+    filterBtn,
     el('div', { class: 'spira-toolbar-spacer' }),
+    el('div', { class: 'spira-search-wrap' }, [el('span', { html: icon('search') }), searchInput]),
     el('button', {
       class: 'spira-iconbtn',
       'aria-label': '同期',
@@ -38,6 +87,140 @@ function renderToolbar(): HTMLElement {
       html: icon('sync'),
     }),
   ]);
+
+  return el('div', {}, [toolbar, renderInboxFilterChips()]);
+}
+
+function renderInboxFilterChips(): HTMLElement {
+  const chips: HTMLElement[] = [];
+  function chip(label: string, key: keyof InboxFilter) {
+    chips.push(el('span', {
+      class: 'spira-filter-chip',
+      onclick: () => {
+        (inboxFilter as unknown as Record<string, string>)[key] = '';
+        setState({});
+      },
+    }, [label, el('span', { style: 'margin-left:4px;color:var(--ink-3)' }, ['×'])]));
+  }
+  if (inboxFilter.fromEmail) chip(`送信者: ${inboxFilter.fromEmail}`, 'fromEmail');
+  if (inboxFilter.hasAttachments === 'yes') chip('添付: あり', 'hasAttachments');
+  if (inboxFilter.hasAttachments === 'no') chip('添付: なし', 'hasAttachments');
+  if (chips.length === 0) return el('div', { style: 'display:none' });
+  chips.push(el('button', {
+    class: 'spira-filter-chip-clear',
+    onclick: () => {
+      inboxFilter.fromEmail = '';
+      inboxFilter.hasAttachments = '';
+      setState({});
+    },
+  }, ['すべてクリア']));
+  return el('div', { class: 'spira-filter-chipstrip' }, chips);
+}
+
+function openInboxFilterPopover(anchor: HTMLElement, allMails: InboxMail[]): void {
+  document.querySelectorAll('.spira-filter-pop').forEach(n => n.remove());
+  const root = getRoot();
+  const f: InboxFilter = { ...inboxFilter };
+
+  const senders = Array.from(new Set(allMails.map(m => m.fromEmail).filter(Boolean)));
+
+  type FieldKey = 'fromEmail' | 'hasAttachments';
+  const FIELDS: { key: FieldKey; label: string; values: { v: string; label: string }[] }[] = [
+    { key: 'fromEmail', label: '送信者', values: senders.map(s => ({ v: s, label: s })) },
+    { key: 'hasAttachments', label: '添付', values: [
+      { v: 'yes', label: 'あり' },
+      { v: 'no',  label: 'なし' },
+    ] },
+  ];
+
+  const rowsWrap = el('div', { class: 'spira-fpop-body' });
+  function paintRows() {
+    clear(rowsWrap);
+    const present = (['fromEmail', 'hasAttachments'] as FieldKey[]).filter(k => f[k]);
+    if (present.length === 0) {
+      rowsWrap.appendChild(el('div', { class: 'spira-fpop-empty' }, ['条件はまだありません']));
+    } else {
+      for (const key of present) {
+        const fieldDef = FIELDS.find(F => F.key === key);
+        if (!fieldDef) continue;
+        const valSel = el('select', { class: 'spira-fpop-val' },
+          fieldDef.values.map(o => el('option', { value: o.v, selected: o.v === f[key] }, [o.label])),
+        ) as HTMLSelectElement;
+        valSel.addEventListener('change', () => { (f as unknown as Record<string, string>)[key] = valSel.value; });
+
+        const removeBtn = el('button', {
+          class: 'spira-fpop-rm',
+          onclick: () => { (f as unknown as Record<string, string>)[key] = ''; paintRows(); },
+        }, ['×']);
+
+        rowsWrap.appendChild(el('div', { class: 'spira-fpop-row' }, [
+          el('span', { class: 'spira-fpop-field' }, [fieldDef.label]),
+          el('span', { class: 'spira-fpop-op' }, ['は']),
+          valSel,
+          removeBtn,
+        ]));
+      }
+    }
+  }
+  paintRows();
+
+  const addSel = el('select', { class: 'spira-select', style: 'flex:1' }, [
+    el('option', { value: '' }, ['＋ 条件を追加']),
+    ...FIELDS.filter(F => !f[F.key]).map(F => el('option', { value: F.key }, [F.label])),
+  ]) as HTMLSelectElement;
+  addSel.addEventListener('change', () => {
+    const key = addSel.value as FieldKey;
+    if (!key) return;
+    const def = FIELDS.find(F => F.key === key);
+    if (def) (f as unknown as Record<string, string>)[key] = def.values[0]?.v ?? '';
+    addSel.value = '';
+    paintRows();
+  });
+
+  const apply = el('button', {
+    class: 'spira-btn spira-btn--primary spira-btn--sm',
+    onclick: () => {
+      Object.assign(inboxFilter, f);
+      pop.remove();
+      setState({});
+    },
+  }, ['適用']);
+
+  const clearAll = el('button', {
+    class: 'spira-btn spira-btn--ghost spira-btn--sm',
+    onclick: () => { f.fromEmail = ''; f.hasAttachments = ''; paintRows(); },
+  }, ['クリア']);
+
+  const pop = el('div', { class: 'spira-filter-pop' }, [
+    el('div', { class: 'spira-fpop-hd' }, [
+      el('span', {}, ['フィルター']),
+      el('button', { class: 'spira-fpop-close', onclick: () => pop.remove() }, ['×']),
+    ]),
+    rowsWrap,
+    el('div', { class: 'spira-fpop-add' }, [addSel]),
+    el('div', { class: 'spira-fpop-ft' }, [
+      clearAll,
+      el('div', { style: 'flex:1' }),
+      apply,
+    ]),
+  ]);
+
+  const rect = anchor.getBoundingClientRect();
+  pop.style.position = 'fixed';
+  pop.style.top = `${rect.bottom + 4}px`;
+  pop.style.left = `${rect.left}px`;
+  pop.style.zIndex = '2147483700';
+  pop.style.width = '420px';
+  root.appendChild(pop);
+
+  setTimeout(() => {
+    const closer = (e: Event) => {
+      if (pop.contains(e.target as Node)) return;
+      pop.remove();
+      document.removeEventListener('click', closer);
+    };
+    document.addEventListener('click', closer);
+  }, 0);
 }
 
 function renderSubBar(visibleCount: number): HTMLElement {
@@ -149,13 +332,26 @@ function renderList(mails: InboxMail[]): HTMLElement {
     if (expandedIds.has(m.id)) tbody.appendChild(renderExpandedRow(m));
   }
 
-  return el('div', { class: 'spira-content', style: 'padding:0' }, [
-    el('div', { class: 'spira-table-wrap' }, [
-      el('table', { class: 'spira-tk-table spira-inbox-table', role: 'grid' }, [
-        el('thead', {}, [head]),
-        tbody,
-      ]),
+  const table = el('table', { class: 'spira-tk-table spira-inbox-table', role: 'grid' }, [
+    el('colgroup', {}, [
+      el('col', { style: 'width:36px' }),  // checkbox
+      el('col', { style: 'width:24px' }),  // disclosure arrow
+      el('col'),                            // 件名 (flex)
+      el('col', { style: 'width:240px' }),
+      el('col', { style: 'width:140px' }),
+      el('col', { style: 'width:240px' }),
     ]),
+    el('thead', {}, [head]),
+    tbody,
+  ]) as HTMLTableElement;
+
+  setTimeout(() => attachColumnResize(table, {
+    tableKey: 'inbox',
+    colKeys: [null, null, 'subject', 'from', 'date', null],
+  }), 0);
+
+  return el('div', { class: 'spira-content', style: 'padding:0' }, [
+    el('div', { class: 'spira-table-wrap' }, [table]),
   ]);
 }
 

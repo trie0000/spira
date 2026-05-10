@@ -659,6 +659,29 @@
   width: 100%;
   border-collapse: collapse;
   font-size: var(--fs-md);
+  table-layout: fixed; /* required for colgroup/col widths and resize handles */
+}
+#spira-root .spira-tk-table th,
+#spira-root .spira-tk-table td {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Column resize grabber — sits on the right edge of each <th> */
+#spira-root .spira-col-resize {
+  position: absolute;
+  top: 0; right: 0;
+  width: 6px; height: 100%;
+  cursor: col-resize;
+  user-select: none;
+  background: transparent;
+  transition: background 0.1s;
+  z-index: 2;
+}
+#spira-root .spira-col-resize:hover,
+#spira-root .spira-col-resize.dragging {
+  background: var(--accent-soft);
 }
 .spira-tk-table th {
   text-align: left;

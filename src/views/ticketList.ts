@@ -5,6 +5,7 @@ import { getRepo } from '../api/repo';
 import { getState, setFilter, setState } from '../state';
 import { confirmModal } from '../components/modal';
 import { toast } from '../components/toast';
+import { attachColumnResize } from '../utils/colResize';
 import type { Ticket, TicketStatus, Priority } from '../types';
 
 // multi-select state — module-level, persists across re-renders.
@@ -318,13 +319,29 @@ function renderTable(rows: Ticket[]): HTMLElement {
     ]);
   }
 
-  return el('div', { class: 'spira-content', style: 'padding:0' }, [
-    el('div', { class: 'spira-table-wrap' }, [
-      el('table', { class: 'spira-tk-table', role: 'grid' }, [
-        el('thead', {}, [renderHeaderRow(rows)]),
-        el('tbody', {}, rows.map(t => renderRow(t))),
-      ]),
+  const table = el('table', { class: 'spira-tk-table', role: 'grid' }, [
+    el('colgroup', {}, [
+      el('col', { style: 'width:36px' }),
+      el('col', { style: 'width:64px' }),
+      el('col'),                              // Title (flex)
+      el('col', { style: 'width:96px' }),
+      el('col', { style: 'width:120px' }),
+      el('col', { style: 'width:96px' }),
+      el('col', { style: 'width:120px' }),
+      el('col', { style: 'width:140px' }),
     ]),
+    el('thead', {}, [renderHeaderRow(rows)]),
+    el('tbody', {}, rows.map(t => renderRow(t))),
+  ]) as HTMLTableElement;
+
+  // Defer resize handle attachment until the table is in the DOM.
+  setTimeout(() => attachColumnResize(table, {
+    tableKey: 'tickets',
+    colKeys: [null, 'id', 'title', 'status', 'assignee', 'priority', 'due', null],
+  }), 0);
+
+  return el('div', { class: 'spira-content', style: 'padding:0' }, [
+    el('div', { class: 'spira-table-wrap' }, [table]),
   ]);
 }
 
