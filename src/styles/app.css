@@ -356,7 +356,8 @@
   background: transparent !important;
   color: var(--ink-3) !important;
 }
-#spira-root .spira-btn--ghost { border: 1px dashed var(--line-strong) !important; }
+/* Ghost: solid border (was dashed) so toolbar buttons look uniform with secondary/danger variants */
+#spira-root .spira-btn--ghost { border: 1px solid var(--line-strong) !important; }
 #spira-root .spira-btn--ghost:hover,
 #spira-root .spira-btn--ghost:hover * {
   border-color: var(--ink-4) !important;
@@ -434,8 +435,26 @@
   align-items: center;
   flex-shrink: 0;
 }
-.spira-search-wrap svg { position: absolute; left: 8px; width: 14px; height: 14px; color: var(--ink-4); pointer-events: none; }
-.spira-search-input { padding-left: 28px; min-width: 220px; background: var(--paper-2); border-color: var(--paper-3); }
+.spira-search-wrap > span {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 14px;
+  height: 14px;
+  color: var(--ink-4);
+  pointer-events: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.spira-search-wrap > span svg {
+  width: 14px;
+  height: 14px;
+  display: block;
+}
+#spira-root .spira-search-input,
+.spira-search-input { padding-left: 32px; min-width: 220px; background: var(--paper-2); border-color: var(--paper-3); }
 
 /* Badge */
 .spira-badge {
@@ -740,20 +759,20 @@
 .spira-th-card-head svg { width: 14px; height: 14px; stroke: currentColor; fill: none; stroke-width: 1.7; }
 .spira-th-card-from { color: var(--ink); font-weight: 500; }
 .spira-th-card-body { font-size: var(--fs-md); line-height: 1.7; word-break: break-word; }
-.spira-th-card-body--collapsed {
-  position: relative;
-  max-height: 5.6em; /* approx 3 lines */
-  overflow: hidden;
+#spira-root .spira-th-card-body[data-collapsed="true"] {
+  position: relative !important;
+  max-height: 6em !important; /* approx 3 lines */
+  overflow: hidden !important;
 }
-.spira-th-card-body--collapsed::after {
+#spira-root .spira-th-card-body[data-collapsed="true"]::after {
   content: '';
   position: absolute;
   left: 0; right: 0; bottom: 0;
   height: 2.2em;
-  background: linear-gradient(rgba(250,250,247,0), var(--paper-2));
+  background: linear-gradient(rgba(243,241,234,0), var(--paper-2));
   pointer-events: none;
 }
-.spira-th-card--note .spira-th-card-body--collapsed::after {
+#spira-root .spira-th-card--note .spira-th-card-body[data-collapsed="true"]::after {
   background: linear-gradient(rgba(250,250,247,0), var(--paper));
 }
 .spira-th-toggle {

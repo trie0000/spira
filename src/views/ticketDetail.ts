@@ -28,8 +28,10 @@ export async function renderTicketDetail(ticketId: number): Promise<HTMLElement>
     ]);
   }
 
+  const latestReceived = comments.filter(c => c.type === 'received').slice(-1)[0];
+
   return el('div', { class: 'spira-main-wrap', style: 'display:flex;flex-direction:column;height:100%;min-height:0' }, [
-    renderToolbar(t),
+    renderToolbar(t, latestReceived),
     renderTicketHeader(t),
     renderSplitPanes(t, comments),
   ]);
@@ -37,7 +39,7 @@ export async function renderTicketDetail(ticketId: number): Promise<HTMLElement>
 
 // ============================================================ toolbar
 
-function renderToolbar(t: Ticket): HTMLElement {
+function renderToolbar(t: Ticket, latestReceived: Comment | undefined): HTMLElement {
   const idTag = `[#${String(t.id).padStart(3, '0')}]`;
   const copyBtn = el('button', {
     class: 'spira-detail-id-tag',
@@ -62,6 +64,25 @@ function renderToolbar(t: Ticket): HTMLElement {
     href: '#', target: '_blank', rel: 'noopener',
     title: '元メールを Outlook で開く',
   }, [el('span', { html: icon('external'), style: 'display:inline-flex;width:14px;height:14px' }), 'OWA で開く']);
+
+  const replyBtn = el('button', {
+    class: 'spira-btn spira-btn--ghost spira-btn--sm',
+    title: latestReceived
+      ? 'OWA で返信ドラフトを開く（最新の受信メールを引用）'
+      : '受信メールがないため返信を作成できません',
+    disabled: !latestReceived,
+    onclick: () => {
+      if (!latestReceived) return;
+      const url = buildOwaReplyUrl({ ticket: t, comment: latestReceived });
+      if (bodyWouldBeTruncated({ ticket: t, comment: latestReceived })) {
+        toast(getRoot(), '本文が長いため引用は省略されました', 'warn');
+      }
+      window.open(url, '_blank', 'noopener');
+    },
+  }, [
+    el('span', { html: icon('mail'), style: 'display:inline-flex;width:14px;height:14px' }),
+    'OWA で返信',
+  ]);
 
   const deleteBtn = el('button', {
     class: 'spira-btn spira-btn--danger spira-btn--sm',
@@ -89,6 +110,7 @@ function renderToolbar(t: Ticket): HTMLElement {
     copyBtn,
     el('div', { class: 'spira-toolbar-spacer' }),
     owaBtn,
+    replyBtn,
     deleteBtn,
   ]);
 }
@@ -239,10 +261,42 @@ function paneTitle(title: string, sub: string): HTMLElement {
 
 const expandedReceived = new Set<number>();
 const expandedNotes = new Set<number>();
-const COLLAPSE_THRESHOLD = 200; // chars of textContent
 
-function shouldCollapse(text: string): boolean {
-  return text.length > COLLAPSE_THRESHOLD || text.split('\n').length > 4;
+/** Attach a "詳細を表示 / 折りたたむ" toggle to a card body if it would exceed the collapsed height. */
+function attachCollapseToggle(
+  card: HTMLElement,
+  body: HTMLElement,
+  id: number,
+  expandedSet: Set<number>,
+): void {
+  const isExpanded = expandedSet.has(id);
+
+  // Measure rendered height after layout to decide whether truncation is meaningful.
+  // Use rAF since `body` is not yet attached to the document.
+  requestAnimationFrame(() => {
+    if (!card.isConnected) return;
+    const collapsedPx = parseFloat(getComputedStyle(body).fontSize) * 6 + 4;
+    const fullHeight = body.scrollHeight;
+    const needsCollapse = fullHeight > collapsedPx + 16;
+    if (!needsCollapse) {
+      body.removeAttribute('data-collapsed');
+      return;
+    }
+    body.setAttribute('data-collapsed', isExpanded ? 'false' : 'true');
+    if (card.querySelector(':scope > .spira-th-toggle')) return;
+    const toggle = el('button', {
+      type: 'button',
+      class: 'spira-th-toggle',
+      onclick: (e: Event) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (expandedSet.has(id)) expandedSet.delete(id);
+        else expandedSet.add(id);
+        setState({});
+      },
+    }, [isExpanded ? '折りたたむ' : '詳細を表示']);
+    card.appendChild(toggle);
+  });
 }
 
 /** Auto-grow a textarea with content, capped at maxRatio of viewport, with bottom padding. */
@@ -318,29 +372,12 @@ function renderReceivedThread(t: Ticket, received: Comment[]): HTMLElement {
   return el('div', { class: 'spira-th-list' }, received.map(c => renderReceivedCard(t, c)));
 }
 
-function renderReceivedCard(t: Ticket, c: Comment): HTMLElement {
-  const replyBtn = el('button', {
-    class: 'spira-btn spira-btn--ghost spira-btn--sm',
-    style: 'flex-shrink:0',
-    title: 'OWA で返信ドラフトを開く（このメールを引用した状態）',
-    onclick: () => {
-      const url = buildOwaReplyUrl({ ticket: t, comment: c });
-      if (bodyWouldBeTruncated({ ticket: t, comment: c })) {
-        toast(getRoot(), '本文が長いため引用は省略されました（件名のみ）', 'warn');
-      }
-      window.open(url, '_blank', 'noopener');
-    },
-  }, [
-    el('span', { html: icon('mail'), style: 'display:inline-flex;width:14px;height:14px' }),
-    'OWA で返信',
-  ]);
-
+function renderReceivedCard(_t: Ticket, c: Comment): HTMLElement {
   const head = el('div', { class: 'spira-th-card-head', style: 'flex-wrap:wrap;gap:var(--s-2)' }, [
     el('span', { html: icon('mail') }),
     el('span', { class: 'spira-th-card-from' }, [c.fromName ?? c.fromEmail ?? '(unknown)']),
     c.fromEmail ? el('span', { style: 'color:var(--ink-3)' }, [` <${c.fromEmail}>`]) : '',
     el('span', { style: 'margin-left:auto;color:var(--ink-3);font-size:var(--fs-sm)' }, [fmtDate(c.sentAt)]),
-    replyBtn,
   ]);
 
   const body = el('div', { class: 'spira-th-card-body' });
@@ -348,22 +385,7 @@ function renderReceivedCard(t: Ticket, c: Comment): HTMLElement {
   else { body.style.whiteSpace = 'pre-wrap'; body.textContent = c.content; }
 
   const card = el('div', { class: 'spira-th-card spira-th-card--received' }, [head, body]);
-
-  const plain = body.textContent ?? '';
-  if (shouldCollapse(plain)) {
-    const isExpanded = expandedReceived.has(c.id);
-    if (!isExpanded) body.classList.add('spira-th-card-body--collapsed');
-    const toggle = el('button', {
-      class: 'spira-th-toggle',
-      onclick: () => {
-        if (expandedReceived.has(c.id)) expandedReceived.delete(c.id);
-        else expandedReceived.add(c.id);
-        setState({});
-      },
-    }, [isExpanded ? '折りたたむ' : '詳細を表示']);
-    card.appendChild(toggle);
-  }
-
+  attachCollapseToggle(card, body, c.id, expandedReceived);
   return card;
 }
 
@@ -427,21 +449,7 @@ function renderNoteCard(c: Comment): HTMLElement {
 
     card.appendChild(headRow);
     card.appendChild(body);
-
-    const plain = body.textContent ?? '';
-    if (shouldCollapse(plain)) {
-      const isExpanded = expandedNotes.has(c.id);
-      if (!isExpanded) body.classList.add('spira-th-card-body--collapsed');
-      const toggle = el('button', {
-        class: 'spira-th-toggle',
-        onclick: () => {
-          if (expandedNotes.has(c.id)) expandedNotes.delete(c.id);
-          else expandedNotes.add(c.id);
-          setState({});
-        },
-      }, [isExpanded ? '折りたたむ' : '詳細を表示']);
-      card.appendChild(toggle);
-    }
+    attachCollapseToggle(card, body, c.id, expandedNotes);
   };
 
   const showEdit = () => {

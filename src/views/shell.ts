@@ -42,12 +42,15 @@ async function paintMain(main: HTMLElement): Promise<void> {
   const myToken = ++paintToken;
   const s = getState();
 
+  // Capture focus state before re-render so inputs marked with `data-focus-key`
+  // can restore focus & cursor position after DOM replacement.
+  const focusInfo = captureFocus(main);
+
   // Show skeleton immediately
   clear(main);
   main.appendChild(renderSkeleton());
 
   // Wait until repo + counts are ready before fetching view data.
-  // Without this gate, the initial paint fires before initRepo() finishes.
   if (!s.ready) return;
 
   try {
@@ -64,10 +67,42 @@ async function paintMain(main: HTMLElement): Promise<void> {
     if (myToken !== paintToken) return; // stale
     clear(main);
     main.appendChild(view);
+    restoreFocus(main, focusInfo);
   } catch (e) {
     if (myToken !== paintToken) return;
     clear(main);
     main.appendChild(renderError(e as Error));
+  }
+}
+
+interface FocusInfo {
+  key: string;
+  selStart: number | null;
+  selEnd: number | null;
+}
+
+function captureFocus(main: HTMLElement): FocusInfo | null {
+  const ae = document.activeElement as (HTMLInputElement | HTMLTextAreaElement | HTMLElement) | null;
+  if (!ae || !main.contains(ae)) return null;
+  const key = (ae as HTMLElement).getAttribute('data-focus-key');
+  if (!key) return null;
+  const isText = ae instanceof HTMLInputElement || ae instanceof HTMLTextAreaElement;
+  return {
+    key,
+    selStart: isText ? ae.selectionStart : null,
+    selEnd: isText ? ae.selectionEnd : null,
+  };
+}
+
+function restoreFocus(main: HTMLElement, info: FocusInfo | null): void {
+  if (!info) return;
+  const next = main.querySelector<HTMLInputElement | HTMLTextAreaElement>(`[data-focus-key="${info.key}"]`);
+  if (!next) return;
+  next.focus();
+  if (info.selStart != null && typeof next.setSelectionRange === 'function') {
+    try {
+      next.setSelectionRange(info.selStart, info.selEnd ?? info.selStart);
+    } catch { /* unsupported on number/email — ignore */ }
   }
 }
 

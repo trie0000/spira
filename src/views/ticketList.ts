@@ -48,6 +48,7 @@ function renderToolbar(): HTMLElement {
     class: 'spira-input spira-search-input',
     placeholder: 'タイトル / ID で検索',
     value: s.filter.query,
+    'data-focus-key': 'ticket-search',
   }) as HTMLInputElement;
   searchInput.addEventListener('input', () => setFilter({ query: searchInput.value }));
 
