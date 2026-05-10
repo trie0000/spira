@@ -5,6 +5,7 @@ import { getRepo } from '../api/repo';
 import { setState, getState } from '../state';
 import { sanitizeMailHtml } from '../utils/sanitize';
 import { buildOwaReplyUrl, bodyWouldBeTruncated } from '../utils/owa';
+import { isInternalMember, colorForAuthor } from '../utils/members';
 import { renderStatusBadge, renderPriorityDot } from './ticketList';
 import { toast } from '../components/toast';
 import { confirmModal } from '../components/modal';
@@ -373,10 +374,15 @@ function renderReceivedThread(t: Ticket, received: Comment[]): HTMLElement {
 }
 
 function renderReceivedCard(_t: Ticket, c: Comment): HTMLElement {
+  const internal = isInternalMember(c.fromEmail);
+
   const head = el('div', { class: 'spira-th-card-head', style: 'flex-wrap:wrap;gap:var(--s-2)' }, [
     el('span', { html: icon('mail') }),
     el('span', { class: 'spira-th-card-from' }, [c.fromName ?? c.fromEmail ?? '(unknown)']),
     c.fromEmail ? el('span', { style: 'color:var(--ink-3)' }, [` <${c.fromEmail}>`]) : '',
+    internal
+      ? el('span', { class: 'spira-badge spira-badge--muted', style: 'margin-left:var(--s-2);font-size:var(--fs-xs)' }, ['社内'])
+      : el('span', { class: 'spira-badge spira-badge--warn', style: 'margin-left:var(--s-2);font-size:var(--fs-xs)' }, ['外部']),
     el('span', { style: 'margin-left:auto;color:var(--ink-3);font-size:var(--fs-sm)' }, [fmtDate(c.sentAt)]),
   ]);
 
@@ -384,7 +390,10 @@ function renderReceivedCard(_t: Ticket, c: Comment): HTMLElement {
   if (c.isHtml) body.innerHTML = sanitizeMailHtml(c.content);
   else { body.style.whiteSpace = 'pre-wrap'; body.textContent = c.content; }
 
-  const card = el('div', { class: 'spira-th-card spira-th-card--received' }, [head, body]);
+  const card = el('div', {
+    class: 'spira-th-card spira-th-card--received',
+    'data-side': internal ? 'internal' : 'external',
+  }, [head, body]);
   attachCollapseToggle(card, body, c.id, expandedReceived);
   return card;
 }
@@ -403,7 +412,13 @@ function renderNotesPane(t: Ticket, notes: Comment[]): HTMLElement {
 }
 
 function renderNoteCard(c: Comment): HTMLElement {
-  const card = el('div', { class: 'spira-th-card spira-th-card--note', 'data-comment-id': String(c.id) });
+  const authorKey = (c.fromEmail ?? c.fromName ?? '').toLowerCase();
+  const authorColor = colorForAuthor(authorKey);
+  const card = el('div', {
+    class: 'spira-th-card spira-th-card--note',
+    'data-comment-id': String(c.id),
+    style: `border-left-color: ${authorColor}`,
+  });
 
   const onDelete = () => {
     confirmModal(getRoot(), {

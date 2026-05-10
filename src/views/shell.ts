@@ -5,9 +5,10 @@ import { renderTicketList } from './ticketList';
 import { renderTicketDetail } from './ticketDetail';
 import { renderInbox } from './inbox';
 import { renderTrash } from './trash';
-import { confirmModal } from '../components/modal';
+import { confirmModal, openModal } from '../components/modal';
 import { toast } from '../components/toast';
 import { getRepo, getRepoMode } from '../api/repo';
+import { getInternalMembers, setInternalMembers } from '../utils/members';
 
 export function renderShell(): HTMLElement {
   // id + class — ID セレクタで host CSS の !important / ID rules を上書きできる
@@ -249,6 +250,14 @@ function openSettingsMenu(root: HTMLElement, anchor: HTMLElement): void {
   const existing = document.querySelector('.spira-settings-menu');
   if (existing) { existing.remove(); return; }
 
+  const membersItem = el('div', {
+    class: 'spira-menu-item',
+    onclick: () => { menu.remove(); openInternalMembersModal(root); },
+  }, [
+    el('span', { html: icon('user'), style: 'display:inline-flex;width:14px;height:14px' }),
+    '内部メンバー設定',
+  ]);
+
   const resetItem = el('div', {
     class: 'spira-menu-item',
     style: 'color:var(--danger)',
@@ -271,6 +280,8 @@ function openSettingsMenu(root: HTMLElement, anchor: HTMLElement): void {
     style: 'position:fixed;z-index:var(--z-modal);min-width:220px',
   }, [
     modeLabel,
+    el('div', { class: 'spira-menu-divider' }),
+    membersItem,
     el('div', { class: 'spira-menu-divider' }),
     resetItem,
   ]);
@@ -300,6 +311,90 @@ function openSettingsMenu(root: HTMLElement, anchor: HTMLElement): void {
     document.addEventListener('click', closer);
     document.addEventListener('keydown', keyCloser);
   }, 0);
+}
+
+function openInternalMembersModal(root: HTMLElement): void {
+  const adUsers = getState().users; // already loaded on bootstrap
+  let members = getInternalMembers();
+
+  const listWrap = el('div', { style: 'display:flex;flex-direction:column;gap:var(--s-2);min-height:60px;margin-bottom:var(--s-5)' });
+
+  function renderList(): void {
+    clear(listWrap);
+    if (members.length === 0) {
+      listWrap.appendChild(el('div', { class: 'spira-empty', style: 'padding:var(--s-5);font-size:var(--fs-sm)' }, ['まだ登録されていません']));
+      return;
+    }
+    for (const email of members) {
+      const adUser = adUsers.find(u => u.email.toLowerCase() === email);
+      const row = el('div', {
+        style: 'display:flex;align-items:center;gap:var(--s-3);padding:var(--s-2) var(--s-3);background:var(--paper-2);border-radius:var(--r-2)',
+      }, [
+        el('span', { style: 'flex:1' }, [adUser ? `${adUser.displayName} <${email}>` : email]),
+        el('button', {
+          class: 'spira-btn spira-btn--ghost spira-btn--sm',
+          onclick: () => {
+            members = members.filter(e => e !== email);
+            renderList();
+          },
+        }, ['削除']),
+      ]);
+      listWrap.appendChild(row);
+    }
+  }
+  renderList();
+
+  // Add control: select from AD users + free-text fallback
+  const select = el('select', { class: 'spira-select', style: 'flex:1' }, [
+    el('option', { value: '' }, ['AD ユーザーから選択...']),
+    ...adUsers
+      .filter(u => !members.includes(u.email.toLowerCase()))
+      .map(u => el('option', { value: u.email }, [`${u.displayName} <${u.email}>`])),
+  ]) as HTMLSelectElement;
+
+  const freeInput = el('input', {
+    type: 'email', class: 'spira-input', style: 'flex:1',
+    placeholder: 'または直接メールアドレスを入力',
+  }) as HTMLInputElement;
+
+  const addBtn = el('button', {
+    class: 'spira-btn spira-btn--secondary spira-btn--sm',
+    onclick: () => {
+      const v = (select.value || freeInput.value).trim().toLowerCase();
+      if (!v) return;
+      if (members.includes(v)) return;
+      members = [...members, v];
+      select.value = '';
+      freeInput.value = '';
+      renderList();
+    },
+  }, ['＋ 追加']);
+
+  const body = el('div', {}, [
+    el('div', { class: 'spira-field' }, [
+      el('label', { class: 'spira-field-label' }, ['登録済みの内部メンバー']),
+      listWrap,
+    ]),
+    el('div', { class: 'spira-field' }, [
+      el('label', { class: 'spira-field-label' }, ['追加']),
+      el('div', { style: 'display:flex;gap:var(--s-3);align-items:center' }, [select, addBtn]),
+      el('div', { style: 'display:flex;gap:var(--s-3);align-items:center;margin-top:var(--s-2)' }, [freeInput]),
+    ]),
+    el('div', { style: 'font-size:var(--fs-xs);color:var(--ink-3);margin-top:var(--s-3)' }, [
+      '※ ここに登録したメールアドレスから来たメールは「社内」扱いになり、チケット詳細画面で右側に表示されます。',
+    ]),
+  ]);
+
+  openModal(root, {
+    title: '内部メンバー設定',
+    body,
+    primaryLabel: '保存',
+    onPrimary: () => {
+      setInternalMembers(members);
+      toast(root, `内部メンバー ${members.length} 件を保存しました`, 'ok');
+      setState({}); // re-render to apply colors
+    },
+  });
 }
 
 function onResetLists(root: HTMLElement): void {

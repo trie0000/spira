@@ -99,7 +99,7 @@ function renderTable(allTickets: Ticket[]): HTMLElement {
     ]);
   }
 
-  const headers = ['#', 'Title', 'Status', '担当', '優', '期限', '更新'];
+  const headers = ['#', 'Title', 'Status', '担当', '優先度', '期限', '更新'];
   return el('div', { class: 'spira-content', style: 'padding:0' }, [
     el('table', { class: 'spira-tk-table', role: 'grid' }, [
       el('thead', {}, [el('tr', {}, headers.map(h => el('th', {}, [h])))]),

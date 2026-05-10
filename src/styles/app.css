@@ -479,13 +479,14 @@
 /* Priority dot */
 .spira-prio-dot {
   display: inline-block;
-  width: 8px; height: 8px;
+  width: 12px; height: 12px;
   border-radius: 50%;
   vertical-align: middle;
+  flex-shrink: 0;
 }
 .spira-prio-dot--high   { background: var(--danger); }
 .spira-prio-dot--medium { background: var(--warn); }
-.spira-prio-dot--low    { background: transparent; border: 1px solid var(--line-strong); }
+.spira-prio-dot--low    { background: var(--ink-4); }
 
 /* Avatar */
 .spira-avatar {
@@ -746,8 +747,19 @@
   padding: var(--s-5);
   border: 1px solid var(--paper-3);
 }
-.spira-th-card--received { background: var(--paper-2); }
-.spira-th-card--note     { background: var(--paper); border-left: 3px solid var(--warn); }
+/* Received cards — chat-bubble style. External (customer) on the left,
+ * Internal (社内メンバー) on the right with offset + accent tint. */
+.spira-th-card--received {
+  background: var(--paper-2);
+  margin-right: 28px;
+}
+.spira-th-card--received[data-side="internal"] {
+  background: rgba(122, 138, 120, 0.12);
+  margin-left: 28px;
+  margin-right: 0;
+  border-color: rgba(122, 138, 120, 0.3);
+}
+.spira-th-card--note { background: var(--paper); border-left: 3px solid var(--warn); }
 .spira-th-card-head {
   display: flex;
   align-items: center;
