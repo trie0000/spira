@@ -1,10 +1,12 @@
-import { el, fmtDate, clear } from '../utils/dom';
+import { el, fmtDate } from '../utils/dom';
 import { icon } from '../icons';
 import { ticketStatusList, priorityList } from '../api/sp';
 import { getRepo } from '../api/repo';
 import { setState, getState } from '../state';
 import { sanitizeMailHtml } from '../utils/sanitize';
 import { buildOwaSearchQuery, OWA_INBOX_URL } from '../utils/owa';
+import { createNoteEditor, htmlToMarkdown } from '../lib/note-editor';
+import { formatTicketTag, formatTicketIdShort, buildCopyableSubject } from '../utils/ticketTag';
 
 function commentHasImage(c: Comment): boolean {
   if (!c.isHtml) return false;
@@ -70,7 +72,7 @@ async function renderTabStrip(activeT: Ticket, latestReceived: Comment | undefin
       draggable: 'true',
       'data-tab-id': String(id),
     }, [
-      el('span', { style: 'font-family:var(--font-mono);font-size:var(--fs-xs);color:var(--ink-3);margin-right:6px' }, [`#${String(id).padStart(3, '0')}`]),
+      el('span', { style: 'font-family:var(--font-mono);font-size:var(--fs-xs);color:var(--ink-3);margin-right:6px' }, [formatTicketIdShort(id)]),
       el('span', { style: 'max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap' }, [t.title]),
       el('button', {
         type: 'button',
@@ -154,12 +156,32 @@ async function renderTabStrip(activeT: Ticket, latestReceived: Comment | undefin
     'OWA で返信',
   ]);
 
+  // 件名コピー — 新規送信メールにそのまま貼れる「<タグ> <整形タイトル>」を
+  // クリップボードに入れる。タイトルに残っている ML 番号や RE: 等の
+  // プレフィックスは cleanSubjectCore() で剥がす。
+  const copySubjectBtn = el('button', {
+    class: 'spira-btn spira-btn--ghost spira-btn--sm',
+    title: '件名 (ID タグ付き) をクリップボードにコピー\nML 番号・RE: 等のプレフィックスは自動で除外されます',
+    onclick: async () => {
+      const subject = buildCopyableSubject(activeT.id, activeT.title);
+      try {
+        await navigator.clipboard.writeText(subject);
+        toast(getRoot(), `件名をコピーしました: ${subject}`, 'ok', 5000);
+      } catch {
+        toast(getRoot(), `クリップボードに書き込めませんでした: ${subject}`, 'warn', 8000);
+      }
+    },
+  }, [
+    el('span', { html: icon('copy'), style: 'display:inline-flex;width:14px;height:14px' }),
+    '件名コピー',
+  ]);
+
   const deleteBtn = el('button', {
     class: 'spira-btn spira-btn--danger spira-btn--sm',
     onclick: () => {
       confirmModal(getRoot(), {
         title: 'チケットを削除',
-        message: `#${String(activeT.id).padStart(3, '0')} 「${activeT.title}」 をゴミ箱に移動します。`,
+        message: `${formatTicketIdShort(activeT.id)} 「${activeT.title}」 をゴミ箱に移動します。`,
         primaryLabel: '削除',
         primaryVariant: 'danger',
         onConfirm: async () => {
@@ -184,7 +206,7 @@ async function renderTabStrip(activeT: Ticket, latestReceived: Comment | undefin
   return el('div', { class: 'spira-tab-strip' }, [
     el('div', { class: 'spira-tab-left' }, [backBtn]),
     el('div', { class: 'spira-tab-middle' }, tabs),
-    el('div', { class: 'spira-tab-right' }, [replyBtn, deleteBtn]),
+    el('div', { class: 'spira-tab-right' }, [copySubjectBtn, replyBtn, deleteBtn]),
   ]);
 }
 
@@ -194,8 +216,8 @@ async function renderTabStrip(activeT: Ticket, latestReceived: Comment | undefin
 
 function renderTicketHeader(t: Ticket): HTMLElement {
   const users = getState().users;
-  const idTag = `[#${String(t.id).padStart(3, '0')}]`;
-  const idDisplay = `#${String(t.id).padStart(3, '0')}`;
+  const idTag = formatTicketTag(t.id);
+  const idDisplay = formatTicketIdShort(t.id);
 
   const idLabel = el('span', {
     class: 'spira-detail-id',
@@ -457,21 +479,6 @@ function toggleLabel(isExpanded: boolean): HTMLElement {
   ]);
 }
 
-/** Auto-grow a textarea with content, capped at maxRatio of viewport.
- *  Padding (including bottom-margin for the cursor) is controlled by CSS,
- *  not inline — so per-class overrides like .spira-note-input win. */
-function autoSizeTextarea(ta: HTMLTextAreaElement, maxRatio = 0.55): void {
-  const adjust = () => {
-    ta.style.height = 'auto';
-    const max = Math.max(120, Math.floor(window.innerHeight * maxRatio));
-    const desired = Math.min(ta.scrollHeight, max);
-    ta.style.height = `${desired}px`;
-    ta.style.overflowY = ta.scrollHeight > max ? 'auto' : 'hidden';
-  };
-  ta.addEventListener('input', adjust);
-  setTimeout(adjust, 0);
-}
-
 function attachResizer(resizer: HTMLElement, left: HTMLElement, right: HTMLElement): void {
   resizer.addEventListener('mouseenter', () => { resizer.style.background = 'var(--accent-soft)'; });
   resizer.addEventListener('mouseleave', () => { resizer.style.background = 'var(--paper-3)'; });
@@ -624,131 +631,144 @@ function renderNoteCard(c: Comment): HTMLElement {
     });
   };
 
-  const showView = () => {
-    clear(card);
-    const editBtn = el('button', {
-      class: 'spira-btn spira-btn--ghost spira-btn--sm',
-      style: 'flex-shrink:0',
-      onclick: showEdit,
-    }, ['編集']);
-    const deleteBtn = el('button', {
-      class: 'spira-btn spira-btn--danger spira-btn--sm',
-      style: 'flex-shrink:0',
-      onclick: onDelete,
-    }, ['削除']);
-    const headRow = el('div', { class: 'spira-th-card-head', style: 'flex-wrap:wrap;gap:var(--s-2)' }, [
-      el('span', { html: icon('note') }),
-      el('span', { class: 'spira-th-card-from' }, [c.fromName ?? c.fromEmail ?? '(unknown)']),
-      el('span', { style: 'margin-left:auto;color:var(--ink-3);font-size:var(--fs-sm)' }, [fmtDate(c.sentAt)]),
-      editBtn,
-      deleteBtn,
-    ]);
-    const body = el('div', { class: 'spira-th-card-body' });
-    if (c.isHtml) body.innerHTML = sanitizeMailHtml(c.content);
-    else { body.style.whiteSpace = 'pre-wrap'; body.textContent = c.content; }
+  // Inline editor with debounced auto-save. No "edit" / "save" toggle —
+  // typing into the card persists automatically. Unsaved status is shown
+  // next to the date so the user knows when their work has landed.
+  const status = el('span', {
+    class: 'spira-note-status',
+    style: 'margin-left:auto;color:var(--ink-3);font-size:var(--fs-sm);min-width:0;text-align:right',
+  }, [fmtDate(c.sentAt)]);
 
-    card.appendChild(headRow);
-    card.appendChild(body);
-    attachCollapseToggle(card, body, c.id, expandedNotes);
+  // Legacy HTML notes (created before the editor port) get a one-way
+  // conversion to markdown on first edit. We convert eagerly so the user
+  // sees a real markdown editor instead of an empty one — losing some
+  // formatting on the way is acceptable since plain mail HTML is mostly
+  // <p>/<br>/<a>/<b>/<i>, all of which htmlToMarkdown handles.
+  const initialMd = c.isHtml ? htmlToMarkdown(c.content) : (c.content ?? '');
+
+  let saveTimer: number | null = null;
+  let saving = false;
+  let inflight: Promise<void> = Promise.resolve();
+
+  const flashSaved = (): void => {
+    status.textContent = '保存済み';
+    setTimeout(() => {
+      // Restore the date label only if we're still in "saved" state — a
+      // subsequent edit would have flipped to "未保存".
+      if (status.textContent === '保存済み') {
+        status.textContent = fmtDate(c.sentAt);
+      }
+    }, 1200);
   };
 
-  const showEdit = () => {
-    clear(card);
-    const ta = el('textarea', { class: 'spira-textarea', rows: '4' }) as HTMLTextAreaElement;
-    ta.value = c.content;
-    autoSizeTextarea(ta);
-
-    const saveBtn = el('button', {
-      class: 'spira-btn spira-btn--primary spira-btn--sm',
-      onclick: async () => {
-        const v = ta.value.trim();
-        if (!v) { toast(getRoot(), '空のメモは保存できません', 'warn'); return; }
-        saveBtn.setAttribute('disabled', '');
-        try {
-          await getRepo().updateComment(c.id, { content: v });
-          c.content = v;
-          c.isHtml = false;
-          toast(getRoot(), 'メモを更新しました', 'ok');
-          showView();
-          setState({});
-        } catch (e) {
-          toast(getRoot(), `更新失敗: ${(e as Error).message}`, 'error');
-        } finally {
-          saveBtn.removeAttribute('disabled');
-        }
-      },
-    }, ['保存']);
-
-    const cancelBtn = el('button', {
-      class: 'spira-btn spira-btn--secondary spira-btn--sm',
-      onclick: () => showView(),
-    }, ['キャンセル']);
-
-    ta.addEventListener('keydown', (e) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); saveBtn.click(); }
-      if (e.key === 'Escape') { e.preventDefault(); showView(); }
-    });
-
-    const headRow = el('div', { class: 'spira-th-card-head' }, [
-      el('span', { html: icon('note') }),
-      el('span', { class: 'spira-th-card-from' }, [c.fromName ?? c.fromEmail ?? '(unknown)']),
-      el('span', { style: 'margin-left:auto;color:var(--ink-3);font-size:var(--fs-sm)' }, [fmtDate(c.sentAt)]),
-    ]);
-
-    card.appendChild(headRow);
-    card.appendChild(ta);
-    card.appendChild(el('div', { style: 'display:flex;gap:var(--s-3);justify-content:flex-end;margin-top:var(--s-3)' }, [cancelBtn, saveBtn]));
-
-    setTimeout(() => ta.focus(), 0);
+  const flushSave = async (): Promise<void> => {
+    if (!editor) return;
+    const v = editor.getMarkdown();
+    if (v === c.content && !c.isHtml) { status.textContent = fmtDate(c.sentAt); return; }
+    saving = true;
+    status.textContent = '保存中...';
+    try {
+      await getRepo().updateComment(c.id, { content: v });
+      c.content = v;
+      c.isHtml = false;
+      flashSaved();
+    } catch (e) {
+      status.textContent = `保存失敗: ${(e as Error).message}`;
+    } finally {
+      saving = false;
+    }
   };
 
-  showView();
+  const scheduleSave = (): void => {
+    status.textContent = '未保存';
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = window.setTimeout(() => {
+      saveTimer = null;
+      inflight = inflight.then(flushSave);
+    }, 700);
+  };
+
+  const editor = createNoteEditor({
+    value: initialMd,
+    placeholder: '内部メモ ... / でブロック挿入',
+    onDirty: scheduleSave,
+    onSubmit: () => {
+      // Explicit Cmd/Ctrl+Enter — flush pending debounce immediately.
+      if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+      inflight = inflight.then(flushSave);
+    },
+    floatingContainer: getRoot(),
+  });
+
+  const deleteBtn = el('button', {
+    class: 'spira-btn spira-btn--danger spira-btn--sm',
+    style: 'flex-shrink:0',
+    onclick: onDelete,
+  }, ['削除']);
+
+  const headRow = el('div', {
+    class: 'spira-th-card-head',
+    style: 'flex-wrap:wrap;gap:var(--s-2);align-items:center',
+  }, [
+    el('span', { html: icon('note') }),
+    el('span', { class: 'spira-th-card-from' }, [c.fromName ?? c.fromEmail ?? '(unknown)']),
+    status,
+    deleteBtn,
+  ]);
+
+  card.appendChild(headRow);
+  card.appendChild(editor.root);
+
+  // Best-effort flush on tab close / navigation. Already-debounced save
+  // races are tolerated — the worst case is one missed character.
+  const onBeforeUnload = (): void => {
+    if (saveTimer) {
+      clearTimeout(saveTimer); saveTimer = null;
+      // Synchronous best-effort. Modern browsers ignore async work here.
+      void flushSave();
+    }
+  };
+  window.addEventListener('beforeunload', onBeforeUnload);
+  // `saving` is read inside flushSave to avoid concurrent writes — referenced
+  // for the type-checker which can't see across closures.
+  void saving;
+
   return card;
 }
 
 function renderNewNoteForm(t: Ticket): HTMLElement {
-  const ta = el('textarea', {
-    class: 'spira-textarea spira-note-input',
-    placeholder: '内部メモを追加  (Cmd/Ctrl + Enter で保存)',
-    rows: '3',
-  }) as HTMLTextAreaElement;
-  // Inline style — strongest priority, defeats any host CSS that would re-enable resize.
-  ta.style.resize = 'none';
-  autoSizeTextarea(ta);
-
-  const saveBtn = el('button', {
+  // Add an empty memo card on click — the inline editor + autosave inside
+  // the new card handles content entry. No separate compose form.
+  const addBtn = el('button', {
     type: 'button',
-    class: 'spira-note-submit',
-    'aria-label': 'メモを追加',
-    title: 'メモを追加 (Cmd/Ctrl + Enter)',
-    html: icon('cornerDownLeft'),
-    onclick: () => save(),
-  });
+    class: 'spira-btn spira-btn--secondary',
+    style: 'width:100%;justify-content:center',
+    onclick: async () => {
+      addBtn.setAttribute('disabled', '');
+      try {
+        const created = await getRepo().addComment({
+          ticketId: t.id, type: 'note',
+          fromEmail: 'me@example.com', fromName: '自分',
+          content: '', isHtml: false,
+        });
+        setState({});
+        // After re-render, focus the new card's editor so the user can
+        // start typing immediately.
+        setTimeout(() => {
+          const newCard = document.querySelector<HTMLElement>(
+            `.spira-th-card--note[data-comment-id="${created.id}"] .ne-content`,
+          );
+          newCard?.focus();
+        }, 50);
+      } catch (e) {
+        toast(getRoot(), `失敗: ${(e as Error).message}`, 'error');
+      } finally {
+        addBtn.removeAttribute('disabled');
+      }
+    },
+  }, ['+ メモを追加']);
 
-  async function save() {
-    const v = ta.value.trim();
-    if (!v) return;
-    saveBtn.setAttribute('disabled', '');
-    try {
-      await getRepo().addComment({
-        ticketId: t.id, type: 'note',
-        fromEmail: 'me@example.com', fromName: '自分',
-        content: v, isHtml: false,
-      });
-      ta.value = '';
-      toast(getRoot(), 'メモを追加しました', 'ok');
-      setState({});
-    } catch (e) {
-      toast(getRoot(), `失敗: ${(e as Error).message}`, 'error');
-    } finally {
-      saveBtn.removeAttribute('disabled');
-    }
-  }
-  ta.addEventListener('keydown', (e) => {
-    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); save(); }
-  });
-
-  return el('div', { class: 'spira-note-form' }, [ta, saveBtn]);
+  return el('div', { class: 'spira-note-form spira-note-form--add' }, [addBtn]);
 }
 
 function getRoot(): HTMLElement {

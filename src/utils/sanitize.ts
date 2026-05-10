@@ -32,3 +32,18 @@ export function sanitizeMailHtml(input: string): string {
     FORBID_TAGS: ['script', 'iframe', 'object', 'embed', 'form', 'input', 'button', 'meta', 'link', 'style'],
   });
 }
+
+// Note-mode rendering allows our editor-specific structures: class names for
+// .spira-callout / .spira-todo styling, plus a disabled checkbox for todo
+// display. Used for the read-only render in renderNoteCard's view mode.
+const NOTE_ALLOWED_TAGS = [...ALLOWED_TAGS, 'input', 's', 'del'];
+const NOTE_ALLOWED_ATTR = [...ALLOWED_ATTR, 'class', 'type', 'checked', 'disabled'];
+
+export function sanitizeNoteHtml(input: string): string {
+  return DOMPurify.sanitize(input, {
+    ALLOWED_TAGS: NOTE_ALLOWED_TAGS,
+    ALLOWED_ATTR: NOTE_ALLOWED_ATTR,
+    ALLOW_DATA_ATTR: false,
+    FORBID_TAGS: ['script', 'iframe', 'object', 'embed', 'form', 'button', 'meta', 'link', 'style'],
+  });
+}

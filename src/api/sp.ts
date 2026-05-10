@@ -3,6 +3,7 @@
 import type { Ticket, Comment, InboxMail, SiteUser, InboxState, TicketStatus, Priority, CommentType } from '../types';
 import type { Repository, CreateTicketInput, AddCommentInput, SyncResult, ResetResult } from './repo';
 import { sampleInboxInputs } from './sampleInbox';
+import { parseTicketTag } from '../utils/ticketTag';
 
 export interface SpConfig {
   siteUrl: string;        // absolute, e.g. https://contoso.sharepoint.com/sites/spira
@@ -482,9 +483,8 @@ export class SpRepository implements Repository {
     const errors: string[] = [];
     for (const m of unprocessed) {
       try {
-        const tag = /\[#(\d+)\]/.exec(m.subject);
-        if (!tag) continue;
-        const tid = parseInt(tag[1]!, 10);
+        const tid = parseTicketTag(m.subject);
+        if (tid == null) continue;
         const ticket = byId.get(tid);
         if (!ticket || ticket.isDeleted) continue;
         await this.addComment({

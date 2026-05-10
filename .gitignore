@@ -1,5 +1,10 @@
 node_modules/
-dist/
+# Build artifacts: keep the standalone HTML (used by users to install /
+# open Spira) under version control; ignore the regenerable JS + sourcemap.
+dist/*
+!dist/index.html
+!dist/install.html
+!dist/bookmarklet.txt
 *.log
 .DS_Store
 .vscode/

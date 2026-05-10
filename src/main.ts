@@ -1,5 +1,6 @@
 // Spira — bookmarklet entry. Renders overlay onto <body>.
 import css from './styles/app.css';
+import noteEditorCss from './lib/note-editor/editor.css';
 import { initRepo, getRepo, getRepoMode } from './api/repo';
 import { renderShell } from './views/shell';
 import { openNewTicketModal } from './views/inbox';
@@ -19,7 +20,9 @@ export async function mount(): Promise<void> {
   if (!document.getElementById('spira-styles')) {
     const style = document.createElement('style');
     style.id = 'spira-styles';
-    style.textContent = css;
+    // App styles + note-editor package styles. Both are scoped (Spira via
+    // #spira-root, note-editor via .ne-* classes), so order doesn't matter.
+    style.textContent = css + '\n' + noteEditorCss;
     document.head.appendChild(style);
   }
 
@@ -78,6 +81,7 @@ export async function mount(): Promise<void> {
   }
 
   // Mode hint in console (dev aid)
+  console.log(`[spira] build: ${__SPIRA_BUILD_ID__}`);
   console.log(`[spira] repo mode: ${getRepoMode()}`);
 }
 

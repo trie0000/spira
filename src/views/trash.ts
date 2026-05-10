@@ -4,6 +4,7 @@ import { setState, getState } from '../state';
 import { confirmModal } from '../components/modal';
 import { toast } from '../components/toast';
 import { renderStatusBadge } from './ticketList';
+import { formatTicketIdShort } from '../utils/ticketTag';
 import type { Ticket } from '../types';
 
 export async function renderTrash(): Promise<HTMLElement> {
@@ -65,7 +66,7 @@ export async function renderTrash(): Promise<HTMLElement> {
 
 function renderRow(t: Ticket): HTMLElement {
   return el('tr', { class: 'spira-tk-row' }, [
-    el('td', { class: 'spira-tk-id' }, [`#${String(t.id).padStart(3, '0')}`]),
+    el('td', { class: 'spira-tk-id' }, [formatTicketIdShort(t.id)]),
     el('td', { class: 'spira-tk-title' }, [t.title]),
     el('td', {}, [renderStatusBadge(t.status)]),
     el('td', {}, [fmtDate(t.deletedAt)]),

@@ -6,16 +6,71 @@ import { getState, setFilter, setState } from '../state';
 import { confirmModal } from '../components/modal';
 import { toast } from '../components/toast';
 import { attachColumnResize, savedColWidth } from '../utils/colResize';
-import type { Ticket, TicketStatus, Priority } from '../types';
+import { formatTicketIdShort } from '../utils/ticketTag';
+import { isInternalMember } from '../utils/members';
+import type { Ticket, TicketStatus, Priority, Comment } from '../types';
 
 // multi-select state — module-level, persists across re-renders.
 const selectedIds = new Set<number>();
 function root(): HTMLElement { return document.querySelector<HTMLElement>('#spira-root') ?? document.body; }
 
+/** Per-ticket derived metadata used by the list view's "進捗系" columns.
+ *  Computed from `listComments(ticketId)`. Kept on the TicketMeta map
+ *  rather than the Ticket itself so the API contract stays untouched. */
+interface TicketMeta {
+  /** Whole days from the ticket's createdAt until now. */
+  elapsedDays: number | null;
+  /** Whole days since the most recent received mail. null if no received
+   *  mail yet (e.g. ticket created manually). */
+  stagnantDays: number | null;
+  /** Direction of the LAST message in the mail thread:
+   *    'internal' — last sender is an internal member
+   *    'external' — last sender is external (= waiting on us… or the
+   *                 customer responded last; caller decides meaning)
+   *    null      — no received mail yet */
+  lastReplyDirection: 'internal' | 'external' | null;
+}
+
+function daysSince(iso: string | null | undefined): number | null {
+  if (!iso) return null;
+  const t = new Date(iso).getTime();
+  if (!Number.isFinite(t)) return null;
+  return Math.max(0, Math.floor((Date.now() - t) / 86400000));
+}
+
+function deriveTicketMeta(comments: Comment[], ticket: Ticket): TicketMeta {
+  const received = comments
+    .filter(c => c.type === 'received')
+    .sort((a, b) => new Date(a.sentAt ?? '').getTime() - new Date(b.sentAt ?? '').getTime());
+  const last = received[received.length - 1];
+  return {
+    elapsedDays: daysSince(ticket.createdAt),
+    stagnantDays: last ? daysSince(last.sentAt ?? null) : null,
+    lastReplyDirection: last
+      ? (isInternalMember(last.fromEmail ?? null) ? 'internal' : 'external')
+      : null,
+  };
+}
+
 export async function renderTicketList(): Promise<HTMLElement> {
   const wrap = el('div', { class: 'spira-main-wrap', style: 'display:flex;flex-direction:column;height:100%;min-height:0' });
-  const tickets = await getRepo().listTickets();
+  const repo = getRepo();
+  const tickets = await repo.listTickets();
   for (const id of Array.from(selectedIds)) if (!tickets.find(t => t.id === id)) selectedIds.delete(id);
+
+  // Fetch comments for every ticket in parallel — needed to compute the
+  // 経過日 / 最終返信者 / 滞留日 columns. N+1 is acceptable for the typical
+  // list size (≤ 50). If this gets slow we can either cache per-render
+  // or push the metadata into the Ticket repo (PA could maintain it).
+  const metaArr = await Promise.all(tickets.map(async (t) => {
+    try {
+      const cs = await repo.listComments(t.id);
+      return [t.id, deriveTicketMeta(cs, t)] as const;
+    } catch {
+      return [t.id, { elapsedDays: daysSince(t.createdAt), stagnantDays: null, lastReplyDirection: null }] as const;
+    }
+  }));
+  const metaMap = new Map<number, TicketMeta>(metaArr);
 
   const filtered = applyFilters(tickets);
   const sorted = applySort(filtered);
@@ -23,7 +78,7 @@ export async function renderTicketList(): Promise<HTMLElement> {
   // ルール: タイトル(subbar) → コントロール(toolbar) → 本体 の順
   wrap.appendChild(renderSubBar(sorted.length));
   wrap.appendChild(renderToolbar());
-  wrap.appendChild(renderTable(sorted));
+  wrap.appendChild(renderTable(sorted, metaMap));
   return wrap;
 }
 
@@ -309,7 +364,7 @@ function openFilterPopover(anchor: HTMLElement): void {
   }, 0);
 }
 
-function renderTable(rows: Ticket[]): HTMLElement {
+function renderTable(rows: Ticket[], metaMap: Map<number, TicketMeta>): HTMLElement {
   if (rows.length === 0) {
     return el('div', { class: 'spira-content' }, [
       el('div', { class: 'spira-empty' }, [
@@ -320,14 +375,22 @@ function renderTable(rows: Ticket[]): HTMLElement {
   }
 
   const tableKey = 'tickets';
-  const colKeys: (string | null)[] = [null, 'id', 'title', 'status', 'assignee', 'priority', 'due', null];
-  const defaults = ['36px', '64px', '360px', '96px', '140px', '96px', '120px', '140px'];
+  // Column order: ☐ / # / Title / Status / 担当 / 優先度 / 期限 /
+  //                最終返信 / 滞留日 / 経過日 / 更新
+  const colKeys: (string | null)[] = [
+    null, 'id', 'title', 'status', 'assignee', 'priority', 'due',
+    'lastDir', 'stagnant', 'elapsed', null,
+  ];
+  const defaults = [
+    '36px', '64px', '320px', '96px', '120px', '80px', '110px',
+    '100px', '80px', '80px', '140px',
+  ];
   const widths = colKeys.map((k, i) => savedColWidth(tableKey, k, defaults[i]!));
 
   const table = el('table', { class: 'spira-tk-table', role: 'grid' }, [
     el('colgroup', {}, widths.map(w => el('col', { style: `width:${w}` }))),
     el('thead', {}, [renderHeaderRow(rows)]),
-    el('tbody', {}, rows.map(t => renderRow(t))),
+    el('tbody', {}, rows.map(t => renderRow(t, metaMap.get(t.id)))),
   ]) as HTMLTableElement;
 
   // Saved widths are applied synchronously above; resize handles still need DOM attach.
@@ -345,13 +408,16 @@ interface HeaderSpec {
 
 function renderHeaderRow(visibleRows: Ticket[]): HTMLElement {
   const cols: HeaderSpec[] = [
-    { label: '#',       sortKey: 'id' },
-    { label: 'Title',   sortKey: 'title' },
-    { label: 'Status',  sortKey: 'status' },
-    { label: '担当',    sortKey: 'assignee' },
-    { label: '優先度',  sortKey: 'priority' },
-    { label: '期限',    sortKey: 'due' },
-    { label: '更新',    sortKey: 'updated' },
+    { label: '#',         sortKey: 'id' },
+    { label: 'Title',     sortKey: 'title' },
+    { label: 'Status',    sortKey: 'status' },
+    { label: '担当',      sortKey: 'assignee' },
+    { label: '優先度',    sortKey: 'priority' },
+    { label: '期限',      sortKey: 'due' },
+    { label: '最終返信' },
+    { label: '滞留日' },
+    { label: '経過日' },
+    { label: '更新',      sortKey: 'updated' },
   ];
   const s = getState();
   const allChecked = visibleRows.length > 0 && visibleRows.every(t => selectedIds.has(t.id));
@@ -392,9 +458,33 @@ function renderHeaderRow(visibleRows: Ticket[]): HTMLElement {
   return el('tr', {}, headerCells);
 }
 
-function renderRow(t: Ticket): HTMLElement {
+function renderRow(t: Ticket, meta?: TicketMeta): HTMLElement {
   const overdue = t.dueDate ? isOverdue(t.dueDate) && t.status !== '完了' : false;
   const dueCell = el('td', { class: overdue ? 'spira-tk-due--overdue' : '' }, [t.dueDate ? fmtDate(t.dueDate, false) : '—']);
+
+  const dayLabel = (n: number | null | undefined): string => (n == null ? '—' : `${n}日`);
+  // Elapsed gets coloured warm if the ticket has been around a while AND
+  // isn't completed yet — quick visual cue without sorting.
+  const elapsedCls = (() => {
+    if (t.status === '完了') return '';
+    if (meta?.elapsedDays != null && meta.elapsedDays >= 7) return 'spira-tk-aged';
+    return '';
+  })();
+  // Stagnation gets coloured similarly (≥3 days without a customer reply
+  // is the fuzzy "needs follow-up" threshold). Tune later as needed.
+  const stagnantCls = (() => {
+    if (t.status === '完了') return '';
+    if (meta?.stagnantDays != null && meta.stagnantDays >= 3) return 'spira-tk-aged';
+    return '';
+  })();
+  const lastDirCell = (() => {
+    if (!meta || meta.lastReplyDirection == null) {
+      return el('span', { class: 'spira-badge' }, ['—']);
+    }
+    return meta.lastReplyDirection === 'internal'
+      ? el('span', { class: 'spira-badge spira-badge--ok' }, ['内部'])
+      : el('span', { class: 'spira-badge spira-badge--warn' }, ['外部']);
+  })();
 
   const checkbox = el('input', {
     type: 'checkbox',
@@ -420,12 +510,15 @@ function renderRow(t: Ticket): HTMLElement {
     },
   }, [
     el('td', { class: 'spira-tk-checkbox-cell', onclick: (e: Event) => e.stopPropagation() }, [checkbox]),
-    el('td', { class: 'spira-tk-id' }, [`#${String(t.id).padStart(3, '0')}`]),
+    el('td', { class: 'spira-tk-id' }, [formatTicketIdShort(t.id)]),
     el('td', { class: 'spira-tk-title' }, [t.title]),
     el('td', {}, [renderStatusBadge(t.status)]),
     el('td', {}, [renderAssignee(t.assigneeName, t.assigneeEmail)]),
     el('td', {}, [renderPriorityDot(t.priority)]),
     dueCell,
+    el('td', {}, [lastDirCell]),
+    el('td', { class: stagnantCls }, [dayLabel(meta?.stagnantDays)]),
+    el('td', { class: elapsedCls }, [dayLabel(meta?.elapsedDays)]),
     el('td', {}, [fmtDate(t.updatedAt)]),
   ]);
 }

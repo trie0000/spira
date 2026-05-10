@@ -1,0 +1,1 @@
+javascript:(function()%7Bvar%20d%3Ddocument%2Co%3Dd.getElementById('spira-script')%3Bif(o)o.remove()%3Bvar%20s%3Dd.createElement('script')%3Bs.id%3D'spira-script'%3Bs.src%3D%22__SPIRA_BUNDLE_URL__%22%2B'%3Fv%3D'%2BDate.now()%3Bd.body.appendChild(s)%3B%7D)()%3B

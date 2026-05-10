@@ -795,6 +795,7 @@
 .spira-tk-id { font-family: var(--font-mono); color: var(--ink-3); font-size: var(--fs-sm); }
 .spira-tk-title { color: var(--ink); max-width: 360px; overflow: hidden; text-overflow: ellipsis; }
 .spira-tk-due--overdue { color: var(--danger); font-weight: 500; }
+.spira-tk-aged { color: var(--warn); font-weight: 500; }
 
 /* Filter chip strip (n365 style) */
 #spira-root .spira-filter-chipstrip {
@@ -1309,3 +1310,71 @@
 
 .spira-spin { animation: spira-spin 1s linear infinite; transform-origin: center; }
 @keyframes spira-spin { to { transform: rotate(360deg); } }
+
+
+/* ============================================================
+   note-editor — Spira theme overrides + note-card layout
+   ============================================================
+   The editor itself ships its own .ne-* styles (src/lib/note-editor/
+   editor.css). Here we only:
+     1. Re-skin its CSS variables to match Spira's palette.
+     2. Define how the editor sits inside the note-form / note-card.
+   Keep this section thin — anything that's editor-internal belongs
+   in the package, not here.
+   ============================================================ */
+
+#spira-root .ne-editor,
+.ne-prose,
+.ne-slash,
+.ne-ftb,
+.ne-drag-handle {
+  --ne-override-bg:            var(--paper);
+  --ne-override-text:          var(--ink);
+  --ne-override-muted:         var(--ink-3);
+  --ne-override-faint:         var(--ink-4);
+  --ne-override-surface:       var(--paper-2);
+  --ne-override-border:        var(--line);
+  --ne-override-border-strong: var(--line-strong);
+  --ne-override-accent:        var(--accent);
+  --ne-override-accent-soft:   var(--accent-soft);
+  --ne-override-radius:        var(--r-2);
+  --ne-override-radius-lg:     var(--r-3);
+  --ne-override-font-size:     var(--fs-md);
+  --ne-override-shadow:        0 8px 24px rgba(0, 0, 0, 0.12);
+  /* Inline `<code>` accent — keep it red but theme-aware. */
+  --ne-override-inline-code:   #c7254e;
+}
+
+/* Note form: editor stretches, save button to the right */
+#spira-root .spira-note-form--editor {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--s-3);
+}
+#spira-root .spira-note-form--editor .ne-editor {
+  flex: 1;
+  min-width: 0;
+}
+#spira-root .spira-note-form--editor .spira-note-submit {
+  flex-shrink: 0;
+}
+
+/* Inside note cards, drop the editor's own box. The card already provides
+   the surface (background, colored left border); duplicating with another
+   border + radius around .ne-content double-frames the content. We also
+   pull margin-left to 0 so text snugs up against the card's left border —
+   the floating drag handle still works because it positions via fixed
+   coordinates from getBoundingClientRect, not via the gutter. */
+#spira-root .spira-th-card--note .ne-content,
+#spira-root .spira-th-card--note .ne-content:focus {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  margin-left: 0;
+  min-height: 0;
+}
+/* Empty-state placeholder follows the new (zero) padding. */
+#spira-root .spira-th-card--note .ne-content.ne-empty::before {
+  top: 0;
+  left: 0;
+}

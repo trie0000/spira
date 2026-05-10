@@ -7,7 +7,45 @@ import { sanitizeMailHtml } from '../utils/sanitize';
 import { openModal, confirmModal } from '../components/modal';
 import { toast } from '../components/toast';
 import { attachColumnResize, savedColWidth } from '../utils/colResize';
-import type { InboxMail, TicketStatus, Priority } from '../types';
+import { formatTicketIdShort } from '../utils/ticketTag';
+import type { InboxMail, TicketStatus, Priority, Ticket } from '../types';
+
+/** Find an existing (non-deleted) ticket whose source mail matches this
+ *  inbox mail — used to block duplicate ticket creation when PA delivered
+ *  the same email twice (or the user clicks 起票 on an already-imported
+ *  mail).
+ *
+ *  Match priority:
+ *    1. internetMessageId — strongest signal, set by Outlook per-message.
+ *    2. (fromEmail, sentAt) — what the user explicitly asked us to dedupe
+ *       on. Comparing ISO timestamps as strings is fine; PA always emits
+ *       the same shape.
+ *
+ *  N+1 cost: one listComments() per ticket. List size is small in
+ *  practice; if it gets slow we can push the lookup into the repo with
+ *  a server-side $filter on the Comments list. */
+async function findDuplicateTicketForMail(m: InboxMail): Promise<Ticket | null> {
+  if (!m.fromEmail && !m.internetMessageId) return null; // nothing reliable to match on
+  const repo = getRepo();
+  const tickets = await repo.listTickets();
+  for (const t of tickets) {
+    let comments;
+    try { comments = await repo.listComments(t.id); }
+    catch { continue; }
+    for (const c of comments) {
+      if (c.type !== 'received') continue;
+      if (m.internetMessageId && c.internetMessageId &&
+          c.internetMessageId === m.internetMessageId) {
+        return t;
+      }
+      if (m.fromEmail && m.receivedAt &&
+          c.fromEmail === m.fromEmail && c.sentAt === m.receivedAt) {
+        return t;
+      }
+    }
+  }
+  return null;
+}
 
 const expandedIds = new Set<number>();
 const selectedInboxIds = new Set<number>();
@@ -524,6 +562,34 @@ export function openNewTicketModal(m: InboxMail): void {
       const title = titleInput.value.trim() || m.subject || '(無題)';
       try {
         const repo = getRepo();
+        // Pre-flight: refuse to create a duplicate ticket for the same
+        // source mail. Same sender + same sent time (or matching
+        // internetMessageId) → jump to the existing ticket instead.
+        if (m.id > 0) {
+          const dup = await findDuplicateTicketForMail(m);
+          if (dup) {
+            const idShort = formatTicketIdShort(dup.id);
+            toast(
+              getRoot(),
+              `${idShort} 「${dup.title}」 が同じメール (送信者・送信時刻一致) ですでに起票済みです。そのチケットを開きます`,
+              'warn',
+              7000,
+            );
+            // Optionally also flag this inbox row processed against the
+            // existing ticket so it stops appearing as un-triaged.
+            try {
+              await repo.markInboxProcessed(m.id, { ticketId: dup.id, result: 'auto-linked' });
+            } catch { /* non-fatal */ }
+            const open = getState().openTicketIds;
+            setState({
+              view: 'tickets',
+              selectedTicketId: dup.id,
+              openTicketIds: open.includes(dup.id) ? open : [...open, dup.id],
+              inboxCount: Math.max(0, getState().inboxCount - 1),
+            });
+            return;
+          }
+        }
         const t = await repo.createTicket({
           title,
           status: statusSel.value as TicketStatus,
@@ -546,7 +612,7 @@ export function openNewTicketModal(m: InboxMail): void {
           });
           await repo.markInboxProcessed(m.id, { ticketId: t.id, result: 'created' });
         }
-        toast(getRoot(), `#${String(t.id).padStart(3, '0')} を起票しました`, 'ok');
+        toast(getRoot(), `${formatTicketIdShort(t.id)} を起票しました`, 'ok');
         const inboxCount = m.id > 0 ? Math.max(0, getState().inboxCount - 1) : getState().inboxCount;
         const open = getState().openTicketIds;
         setState({
@@ -590,7 +656,7 @@ export function openLinkModal(m: InboxMail): void {
         style: `padding:var(--s-3) var(--s-5);${selectedId === t.id ? 'background:var(--accent-soft)' : ''}`,
         onclick: () => { selectedId = t.id; paint(); },
       }, [
-        el('span', { style: 'font-family:var(--font-mono);color:var(--ink-3);min-width:60px' }, [`#${String(t.id).padStart(3, '0')}`]),
+        el('span', { style: 'font-family:var(--font-mono);color:var(--ink-3);min-width:60px' }, [formatTicketIdShort(t.id)]),
         el('span', { style: 'flex:1' }, [t.title]),
         el('span', { class: 'spira-badge spira-badge--muted' }, [t.status]),
       ]);
@@ -637,7 +703,7 @@ export function openLinkModal(m: InboxMail): void {
           internetMessageId: m.internetMessageId,
         });
         await repo.markInboxProcessed(m.id, { ticketId: selectedId, result: 'manual-linked' });
-        toast(getRoot(), `#${String(selectedId).padStart(3, '0')} に紐付けました`, 'ok');
+        toast(getRoot(), `${formatTicketIdShort(selectedId)} に紐付けました`, 'ok');
         const open = getState().openTicketIds;
         setState({
           view: 'tickets',

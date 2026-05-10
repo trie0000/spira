@@ -2,6 +2,7 @@
 import type { Ticket, Comment, InboxMail, SiteUser, InboxState } from '../types';
 import type { Repository, CreateTicketInput, AddCommentInput, SyncResult, ResetResult } from './repo';
 import { sampleInboxInputs, toMockInbox } from './sampleInbox';
+import { formatTicketTag, parseTicketTag } from '../utils/ticketTag';
 
 interface DataStore {
   tickets: Ticket[];
@@ -295,9 +296,8 @@ export class MockRepository implements Repository {
     const errors: string[] = [];
     for (const m of store.inbox.filter(x => !x.isProcessed)) {
       try {
-        const tagMatch = /\[#(\d+)\]/.exec(m.subject);
-        if (!tagMatch) continue;
-        const tid = parseInt(tagMatch[1]!, 10);
+        const tid = parseTicketTag(m.subject);
+        if (tid == null) continue;
         const ticket = store.tickets.find(t => t.id === tid && !t.isDeleted);
         if (!ticket) continue;
         await this.addComment({
@@ -335,7 +335,7 @@ export class MockRepository implements Repository {
   injectFakeReply(ticketId: number): void {
     const id = store.nextInboxId++;
     store.inbox.push({
-      id, subject: `RE: [#${String(ticketId).padStart(3, '0')}] サンプル返信`,
+      id, subject: `RE: ${formatTicketTag(ticketId)} サンプル返信`,
       bodyHtml: '<p>返信です。タグ付き件名で送ってきたので自動で紐付くはずです。</p>',
       bodyText: '返信です。',
       fromEmail: 'customer@external.example', fromName: '取引先 山田',

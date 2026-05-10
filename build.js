@@ -3,11 +3,29 @@ import * as esbuild from 'esbuild';
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
+import { execSync } from 'node:child_process';
 
 const watch = process.argv.includes('--watch');
 const serve = process.argv.includes('--serve');
 const makeBookmarklet = process.argv.includes('--bookmarklet');
 const prod = process.argv.includes('--prod') || makeBookmarklet;
+
+// Build identity — baked in at compile time so the running bundle can show
+// "which build is this" in the settings menu. Cache-confusion is the #1
+// source of "なにも変わってない" reports.
+const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+let gitSha = 'nogit';
+let gitDirty = '';
+try {
+  gitSha = execSync('git rev-parse --short HEAD', { stdio: ['ignore', 'pipe', 'ignore'] })
+    .toString().trim();
+  const dirty = execSync('git status --porcelain', { stdio: ['ignore', 'pipe', 'ignore'] })
+    .toString().trim();
+  if (dirty) gitDirty = '+';
+} catch { /* not a git repo or git missing */ }
+const buildTime = new Date().toISOString().replace(/\.\d+Z$/, 'Z');
+const buildId = `${pkg.version}-${gitSha}${gitDirty} (${buildTime})`;
+console.log(`[build] id: ${buildId}`);
 
 const buildOptions = {
   entryPoints: ['src/main.ts'],
@@ -19,7 +37,13 @@ const buildOptions = {
   minify: prod,
   sourcemap: !prod,
   loader: { '.css': 'text' },
-  define: { 'process.env.NODE_ENV': prod ? '"production"' : '"development"' },
+  define: {
+    'process.env.NODE_ENV': prod ? '"production"' : '"development"',
+    __SPIRA_BUILD_ID__: JSON.stringify(buildId),
+    __SPIRA_BUILD_TIME__: JSON.stringify(buildTime),
+    __SPIRA_BUILD_SHA__: JSON.stringify(gitSha + gitDirty),
+    __SPIRA_VERSION__: JSON.stringify(pkg.version),
+  },
   logLevel: 'info',
 };
 

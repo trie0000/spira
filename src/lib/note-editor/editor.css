@@ -1,0 +1,319 @@
+/* ============================================================
+   note-editor — drop-in styles
+   ============================================================
+   - All selectors are scoped to `.ne-editor` (the editor root) or
+     `.ne-prose` (for read-only rendering of markdown output).
+   - Floating widgets (.ne-slash, .ne-ftb, .ne-drag-handle) attach
+     to document.body, so they're styled at the top level.
+   - Theme via CSS variables with sensible fallbacks. Override them
+     by setting --ne-* on .ne-editor (or any ancestor) in your app.
+   ============================================================ */
+
+.ne-editor,
+.ne-prose,
+.ne-slash,
+.ne-ftb,
+.ne-drag-handle {
+  --ne-bg:           var(--ne-override-bg,           #ffffff);
+  --ne-text:         var(--ne-override-text,         #1f1f1f);
+  --ne-muted:        var(--ne-override-muted,        #6b6b6b);
+  --ne-faint:        var(--ne-override-faint,        #a8a39a);
+  --ne-surface:      var(--ne-override-surface,      #f5f5f3);
+  --ne-border:       var(--ne-override-border,       rgba(0, 0, 0, 0.10));
+  --ne-border-strong:var(--ne-override-border-strong,rgba(0, 0, 0, 0.18));
+  --ne-accent:       var(--ne-override-accent,       #4a7c59);
+  --ne-accent-soft:  var(--ne-override-accent-soft,  rgba(74, 124, 89, 0.16));
+  --ne-radius:       var(--ne-override-radius,       4px);
+  --ne-radius-lg:    var(--ne-override-radius-lg,    6px);
+  --ne-font-size:    var(--ne-override-font-size,    13px);
+  --ne-line-height:  var(--ne-override-line-height,  1.65);
+  --ne-mono:         var(--ne-override-mono,         ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace);
+  --ne-shadow:       var(--ne-override-shadow,       0 8px 24px rgba(0, 0, 0, 0.12));
+  /* Inline `<code>` text colour. Code blocks (<pre><code>) inherit the
+     normal text colour so syntax-highlighted snippets aren't tinted. */
+  --ne-inline-code:  var(--ne-override-inline-code,  #c7254e);
+  /* Floating widgets sit at near-max z so they punch through host overlays
+     (e.g. SharePoint UI, fixed-positioned modals). Override with
+     --ne-override-z-floating if your host needs a different stacking. */
+  --ne-z-floating:   var(--ne-override-z-floating,   2147483647);
+}
+
+/* ────────────────────────── Editor root + content ───────────────────── */
+
+.ne-editor {
+  position: relative;
+  min-height: 80px;
+}
+
+.ne-content {
+  position: relative;
+  min-height: 80px;
+  padding: 8px 12px;
+  background: var(--ne-bg);
+  color: var(--ne-text);
+  border: 1px solid var(--ne-border);
+  border-radius: var(--ne-radius);
+  font-size: var(--ne-font-size);
+  line-height: var(--ne-line-height);
+  outline: none;
+  white-space: pre-wrap;
+  word-break: break-word;
+  cursor: text;
+  /* Reserve a small left gutter so the floating drag handle has room to sit
+     just outside the editor border without clipping. */
+  margin-left: 24px;
+}
+.ne-content:focus { border-color: var(--ne-accent); }
+
+/* Placeholder — shown only while the editor is empty.
+   `<br>` (used by browsers in empty contenteditable paragraphs) is a void
+   element and ignores ::before, so the editor toggles `.ne-empty` itself
+   via JS to drive this rule. */
+.ne-content.ne-empty::before {
+  content: attr(data-placeholder);
+  position: absolute;
+  top: 8px;
+  left: 12px;
+  color: var(--ne-faint);
+  pointer-events: none;
+  white-space: nowrap;
+  overflow: hidden;
+  max-width: calc(100% - 24px);
+  text-overflow: ellipsis;
+}
+
+/* ────────────────────────── Prose (live + read-only) ────────────────── */
+
+.ne-prose > * { margin: 0; }
+.ne-prose > * + * { margin-top: 8px; }
+.ne-prose h1 { font-size: 1.6em;  font-weight: 600; line-height: 1.3; }
+.ne-prose h2 { font-size: 1.35em; font-weight: 600; line-height: 1.3; }
+.ne-prose h3 { font-size: 1.15em; font-weight: 600; line-height: 1.3; }
+.ne-prose blockquote {
+  padding: 0 12px;
+  border-left: 3px solid var(--ne-accent);
+  color: var(--ne-muted);
+}
+.ne-prose pre {
+  padding: 8px 12px;
+  background: var(--ne-surface);
+  border: 1px solid var(--ne-border);
+  border-radius: var(--ne-radius);
+  font-family: var(--ne-mono);
+  font-size: 12px;
+  white-space: pre;
+  overflow-x: auto;
+}
+.ne-prose code {
+  padding: 1px 4px;
+  background: var(--ne-surface);
+  border: 1px solid var(--ne-border);
+  border-radius: 3px;
+  font-family: var(--ne-mono);
+  font-size: 0.92em;
+  color: var(--ne-inline-code);
+}
+/* Code block content stays at normal text colour — only inline `<code>`
+   gets the accent. */
+.ne-prose pre code {
+  padding: 0;
+  background: transparent;
+  border: 0;
+  color: inherit;
+}
+.ne-prose hr {
+  border: 0;
+  border-top: 1px solid var(--ne-border-strong);
+  margin: 10px 0;
+}
+.ne-prose ul,
+.ne-prose ol { padding-left: 1.5em; }
+
+.ne-prose img.ne-img,
+.ne-prose img {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--ne-radius);
+  display: block;
+  margin: 8px 0;
+}
+
+/* Todo */
+.ne-prose .ne-todo {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 2px 0;
+}
+.ne-prose .ne-todo-cb {
+  margin-top: 4px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+.ne-prose .ne-todo-txt { flex: 1; min-width: 0; }
+.ne-prose .ne-todo-txt.done {
+  text-decoration: line-through;
+  color: var(--ne-muted);
+}
+
+/* Callout */
+.ne-prose .ne-callout {
+  display: flex;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--ne-accent-soft);
+  border-left: 3px solid var(--ne-accent);
+  border-radius: var(--ne-radius);
+}
+.ne-prose .ne-callout-ic {
+  flex-shrink: 0;
+  font-size: 1.1em;
+  line-height: 1.5;
+}
+.ne-prose .ne-callout-body { flex: 1; min-width: 0; }
+.ne-prose .ne-callout-body > * { margin: 0; }
+.ne-prose .ne-callout-body > * + * { margin-top: 6px; }
+
+/* Tables */
+.ne-prose .ne-table-wrap {
+  overflow-x: auto;
+  margin: 8px 0;
+}
+.ne-prose .ne-table {
+  border-collapse: collapse;
+  width: max-content;
+  min-width: 240px;
+}
+.ne-prose .ne-table td,
+.ne-prose .ne-table th {
+  border: 1px solid var(--ne-border);
+  padding: 4px 8px;
+  min-width: 60px;
+  vertical-align: top;
+  outline: none;
+}
+.ne-content .ne-table td:focus { background: var(--ne-accent-soft); }
+.ne-prose .ne-table th { background: var(--ne-surface); font-weight: 600; }
+
+/* ────────────────────────── Floating widgets ──────────────────────── */
+
+/* Drag handle (viewport-fixed so it floats above any host stacking context) */
+.ne-drag-handle {
+  position: fixed;
+  width: 18px;
+  align-items: center;
+  justify-content: center;
+  color: var(--ne-faint);
+  cursor: grab;
+  border-radius: var(--ne-radius);
+  background: transparent;
+  z-index: var(--ne-z-floating);
+  user-select: none;
+}
+.ne-drag-handle:hover {
+  background: var(--ne-surface);
+  color: var(--ne-muted);
+}
+.ne-drag-handle:active { cursor: grabbing; }
+
+.ne-block-dragging { opacity: 0.4; }
+
+.ne-drop-line {
+  height: 2px;
+  background: var(--ne-accent);
+  margin: 1px 0;
+  border-radius: 1px;
+  pointer-events: none;
+}
+
+/* Slash menu */
+.ne-slash {
+  position: fixed;
+  z-index: var(--ne-z-floating);
+  display: none;
+  width: 280px;
+  max-height: 360px;
+  overflow-y: auto;
+  background: var(--ne-bg);
+  color: var(--ne-text);
+  border: 1px solid var(--ne-border-strong);
+  border-radius: var(--ne-radius-lg);
+  box-shadow: var(--ne-shadow);
+  padding: 4px;
+  font-size: var(--ne-font-size);
+  line-height: 1.4;
+}
+.ne-slash.on { display: block; }
+.ne-slash-section {
+  padding: 6px 8px 2px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ne-faint);
+}
+.ne-slash-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: var(--ne-radius);
+  cursor: pointer;
+}
+.ne-slash-item:hover,
+.ne-slash-item.sel { background: var(--ne-accent-soft); }
+
+.ne-slash-icon {
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ne-text);
+  background: var(--ne-surface);
+  border: 1px solid var(--ne-border);
+  border-radius: var(--ne-radius);
+}
+.ne-slash-body { flex: 1; min-width: 0; }
+.ne-slash-name { font-size: var(--ne-font-size); color: var(--ne-text); line-height: 1.2; }
+.ne-slash-desc { font-size: 11px; color: var(--ne-muted); margin-top: 1px; }
+.ne-slash-kbd {
+  flex-shrink: 0;
+  font-family: var(--ne-mono);
+  font-size: 10px;
+  color: var(--ne-muted);
+  background: var(--ne-surface);
+  border: 1px solid var(--ne-border);
+  border-radius: 2px;
+  padding: 1px 5px;
+}
+
+/* Floating selection toolbar */
+.ne-ftb {
+  position: fixed;
+  z-index: var(--ne-z-floating);
+  display: none;
+  transform: translateX(-50%);
+  padding: 2px;
+  background: var(--ne-bg);
+  border: 1px solid var(--ne-border-strong);
+  border-radius: var(--ne-radius);
+  box-shadow: var(--ne-shadow);
+  gap: 1px;
+}
+.ne-ftb.on { display: flex; }
+.ne-ftb-b {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  padding: 4px 8px;
+  cursor: pointer;
+  font-size: var(--ne-font-size);
+  color: var(--ne-text);
+  border-radius: 2px;
+  line-height: 1;
+}
+.ne-ftb-b:hover { background: var(--ne-surface); }

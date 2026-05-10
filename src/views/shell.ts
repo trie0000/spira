@@ -9,6 +9,9 @@ import { confirmModal, openModal } from '../components/modal';
 import { toast } from '../components/toast';
 import { getRepo, getRepoMode } from '../api/repo';
 import { getInternalMembers, setInternalMembers } from '../utils/members';
+import {
+  getTicketIdPrefix, setTicketIdPrefix, formatTicketTagWith, sanitizePrefix,
+} from '../utils/ticketTag';
 
 export function renderShell(): HTMLElement {
   // id + class — ID セレクタで host CSS の !important / ID rules を上書きできる
@@ -258,6 +261,22 @@ function openSettingsMenu(root: HTMLElement, anchor: HTMLElement): void {
     '内部メンバー設定',
   ]);
 
+  const idFormatItem = el('div', {
+    class: 'spira-menu-item',
+    onclick: () => { menu.remove(); openTicketIdFormatModal(root); },
+  }, [
+    el('span', { html: icon('hash'), style: 'display:inline-flex;width:14px;height:14px' }),
+    'チケット ID 形式',
+  ]);
+
+  const helpItem = el('div', {
+    class: 'spira-menu-item',
+    onclick: () => { menu.remove(); openHelpModal(root); },
+  }, [
+    el('span', { html: icon('help'), style: 'display:inline-flex;width:14px;height:14px' }),
+    'ヘルプ (PA フロー作成手順)',
+  ]);
+
   const resetItem = el('div', {
     class: 'spira-menu-item',
     style: 'color:var(--danger)',
@@ -275,13 +294,30 @@ function openSettingsMenu(root: HTMLElement, anchor: HTMLElement): void {
     style: 'cursor:default;color:var(--ink-3);font-size:var(--fs-xs);pointer-events:none',
   }, [`モード: ${getRepoMode()}`]);
 
+  // Build identity — clickable to copy to clipboard for bug reports.
+  const buildLabel = el('div', {
+    class: 'spira-menu-item',
+    style: 'cursor:pointer;color:var(--ink-3);font-size:var(--fs-xs);font-family:ui-monospace,Menlo,monospace;white-space:normal;word-break:break-all;line-height:1.4',
+    title: 'クリックでコピー',
+    onclick: async () => {
+      try {
+        await navigator.clipboard.writeText(__SPIRA_BUILD_ID__);
+        buildLabel.textContent = '✓ コピーしました';
+        setTimeout(() => { buildLabel.textContent = `build: ${__SPIRA_BUILD_ID__}`; }, 1200);
+      } catch { /* ignore */ }
+    },
+  }, [`build: ${__SPIRA_BUILD_ID__}`]);
+
   const menu = el('div', {
     class: 'spira-menu spira-settings-menu',
-    style: 'position:fixed;z-index:var(--z-modal);min-width:220px',
+    style: 'position:fixed;z-index:var(--z-modal);min-width:280px',
   }, [
     modeLabel,
+    buildLabel,
     el('div', { class: 'spira-menu-divider' }),
     membersItem,
+    idFormatItem,
+    helpItem,
     el('div', { class: 'spira-menu-divider' }),
     resetItem,
   ]);
@@ -394,6 +430,298 @@ function openInternalMembersModal(root: HTMLElement): void {
       toast(root, `内部メンバー ${members.length} 件を保存しました`, 'ok');
       setState({}); // re-render to apply colors
     },
+  });
+}
+
+function openTicketIdFormatModal(root: HTMLElement): void {
+  // Format is fixed as `[<prefix>#NNNNN]`. Only the prefix is editable
+  // (e.g. "CASE", "SUP", or empty). Everything else — brackets, hash,
+  // 5-digit padding — is locked.
+  let prefix = getTicketIdPrefix();
+
+  const previewSubject = el('div', {
+    style: 'font-family:ui-monospace,Menlo,monospace;font-size:var(--fs-md);padding:var(--s-3) var(--s-4);background:var(--paper-2);border:1px solid var(--line);border-radius:var(--r-2)',
+  });
+  const previewExample = el('div', {
+    style: 'font-size:var(--fs-xs);color:var(--ink-3);margin-top:var(--s-2)',
+  });
+
+  const refreshPreview = (): void => {
+    const tag = formatTicketTagWith(1, prefix);
+    previewSubject.textContent = tag;
+    previewExample.textContent = `件名サンプル → "RE: ${tag} お問い合わせの件"`;
+  };
+
+  const input = el('input', {
+    type: 'text',
+    value: prefix,
+    placeholder: '例: CASE / SUP / 空欄も可',
+    maxlength: '12',
+    style: 'width:100%;padding:var(--s-3) var(--s-4);border:1px solid var(--line);border-radius:var(--r-2);font-size:var(--fs-md);font-family:ui-monospace,Menlo,monospace;background:var(--paper);color:var(--ink)',
+    oninput: (e: Event) => {
+      const raw = (e.target as HTMLInputElement).value;
+      const safe = sanitizePrefix(raw);
+      // Reflect sanitized value back so the user sees what gets stored.
+      if (raw !== safe) (e.target as HTMLInputElement).value = safe;
+      prefix = safe;
+      refreshPreview();
+    },
+  }) as HTMLInputElement;
+
+  refreshPreview();
+
+  const body = el('div', { style: 'display:flex;flex-direction:column;gap:var(--s-4)' }, [
+    el('div', { style: 'font-size:var(--fs-sm);color:var(--ink);line-height:1.6' }, [
+      '送信メール件名に挿入する形式は ',
+      el('code', { style: 'background:var(--paper-2);padding:1px 4px;border-radius:3px' }, ['[<prefix>#NNNNN]']),
+      ' 固定です。',
+      el('br'),
+      'プレフィックス部分のみ自由に変更できます (英数字・ハイフン・アンダースコアのみ、最大 12 文字)。',
+    ]),
+    el('div', { style: 'display:flex;flex-direction:column;gap:var(--s-2)' }, [
+      el('label', { style: 'font-size:var(--fs-sm);color:var(--ink)' }, ['プレフィックス']),
+      input,
+    ]),
+    el('div', { style: 'display:flex;flex-direction:column;gap:0' }, [
+      el('div', { style: 'font-size:var(--fs-xs);color:var(--ink-3);margin-bottom:var(--s-2)' }, ['プレビュー']),
+      previewSubject,
+      previewExample,
+    ]),
+    el('div', { style: 'font-size:var(--fs-xs);color:var(--ink-3)' }, [
+      '※ ID は 5 桁ゼロ埋め固定。既存メールの件名は再生成されません。',
+      el('br'),
+      '※ 受信時のパースは過去のフォーマット (',
+      el('code', { style: 'background:var(--paper-2);padding:0 3px;border-radius:2px' }, ['[CASE-NNN]']),
+      ', ',
+      el('code', { style: 'background:var(--paper-2);padding:0 3px;border-radius:2px' }, ['(#NNN)']),
+      ' 等) も引き続き受け付けます。',
+    ]),
+  ]);
+
+  openModal(root, {
+    title: 'チケット ID 形式',
+    body,
+    primaryLabel: '保存',
+    onPrimary: () => {
+      setTicketIdPrefix(prefix);
+      const tag = formatTicketTagWith(1, prefix);
+      toast(root, `ID 形式を ${tag} に変更しました`, 'ok');
+      setState({});
+    },
+  });
+}
+
+function openHelpModal(root: HTMLElement): void {
+  // The PA flow ingests email into the SP `InboxMails` list. From there
+  // Spira's syncInbox auto-links replies (subject contains a ticket tag)
+  // and surfaces unprocessed mails for manual triage.
+  //
+  // Steps below match the column schema declared in api/sp.ts
+  // (`inboxFieldSpecs`) — keep in sync if the schema changes.
+
+  const h = (text: string): HTMLElement =>
+    el('h3', { style: 'margin:var(--s-5) 0 var(--s-2);font-size:var(--fs-md);font-weight:600;color:var(--ink)' }, [text]);
+
+  const p = (text: string): HTMLElement =>
+    el('p', { style: 'margin:0 0 var(--s-3);line-height:1.7;font-size:var(--fs-sm);color:var(--ink)' }, [text]);
+
+  const ol = (items: (string | HTMLElement)[]): HTMLElement =>
+    el('ol', {
+      style: 'margin:var(--s-2) 0;padding-left:1.4em;line-height:1.8;font-size:var(--fs-sm);color:var(--ink)',
+    }, items.map((it) => el('li', { style: 'margin-bottom:var(--s-2)' }, [it])));
+
+  const code = (text: string): HTMLElement =>
+    el('code', {
+      style: 'background:var(--paper-2);padding:1px 5px;border-radius:3px;font-family:ui-monospace,Menlo,monospace;font-size:0.92em;color:#c7254e',
+    }, [text]);
+
+  const codeBlock = (text: string): HTMLElement =>
+    el('pre', {
+      style: 'background:var(--paper-2);padding:var(--s-3) var(--s-4);border:1px solid var(--line);border-radius:var(--r-2);font-family:ui-monospace,Menlo,monospace;font-size:12px;line-height:1.5;overflow-x:auto;white-space:pre;color:var(--ink);margin:var(--s-2) 0',
+    }, [text]);
+
+  const row = (k: string, v: string, hint?: string): HTMLElement =>
+    el('tr', {}, [
+      el('td', { style: 'padding:6px 10px;border-bottom:1px solid var(--line);vertical-align:top;white-space:nowrap;font-family:ui-monospace,Menlo,monospace;font-size:12px;color:var(--ink)' }, [k]),
+      el('td', { style: 'padding:6px 10px;border-bottom:1px solid var(--line);vertical-align:top' }, [
+        el('div', { style: 'font-family:ui-monospace,Menlo,monospace;font-size:12px;color:var(--ink)' }, [v]),
+        ...(hint ? [el('div', { style: 'font-size:11px;color:var(--ink-3);margin-top:2px' }, [hint])] : []),
+      ]),
+    ]);
+
+  // ── Content sections ───────────────────────────────────────────────
+
+  const intro = el('div', {}, [
+    p('Spira は SharePoint 上の 3 つのリスト (Tickets / Comments / InboxMails) のみで動作します。受信メールをアプリに取り込むには Power Automate (PA) フローを 1 本作成し、メールが届いたら InboxMails リストに行を追加するように設定してください。'),
+    p('PA で取り込まれたメールは画面左側の「受信メール」に表示され、件名に含まれるチケット ID タグから自動で既存チケットへ紐付けられます (タグが無いものは「新規起票」または「既存に紐付け」のボタンで手動処理)。'),
+  ]);
+
+  const prereq = el('div', {}, [
+    h('1. 必要なもの'),
+    ol([
+      el('div', {}, ['SharePoint サイト (Spira を入れたサイトと同じテナント)']),
+      el('div', {}, [
+        '取り込み対象のメールが届くメールボックス: 共有メールボックス、グループ メール、または個人メール',
+      ]),
+      el('div', {}, ['Power Automate のフロー作成権限']),
+      el('div', {}, [
+        '初回起動済みの Spira (SP リストが ',
+        code('ensureLists'),
+        ' で作成済み)',
+      ]),
+    ]),
+  ]);
+
+  const trigger = el('div', {}, [
+    h('2. トリガーの設定'),
+    p('Microsoft 365 Outlook コネクタの「新しいメールが届いたとき (V3)」または「共有メールボックスに新しいメールが届いたとき (V2)」を使います。'),
+    ol([
+      el('div', {}, ['Power Automate を開き「+ 作成」 → 「自動化したクラウド フロー」']),
+      el('div', {}, [
+        'フロー名 (例: ',
+        code('Spira – Inbox Ingest'),
+        ') を入力し、トリガーで ',
+        code('When a new email arrives (V3)'),
+        ' を選択',
+      ]),
+      el('div', {}, [
+        'パラメータ:',
+        el('ul', { style: 'margin:6px 0;padding-left:1.2em;line-height:1.7' }, [
+          el('li', {}, ['Folder: ', code('Inbox'), ' (もしくは取り込み対象のフォルダ)']),
+          el('li', {}, ['Importance: ', code('Any')]),
+          el('li', {}, ['Include Attachments: ', code('No'), ' (添付の中身までは保存しない)']),
+          el('li', {}, ['Only with Attachments: ', code('No')]),
+          el('li', {}, ['Subject Filter: 空欄 (全件取り込みたい場合) / ', code('[#'), ' などでフィルタしてもよい']),
+        ]),
+      ]),
+    ]),
+  ]);
+
+  // Column mapping table — matches inboxFieldSpecs() in api/sp.ts
+  const mappingTable = el('table', {
+    style: 'width:100%;border-collapse:collapse;font-size:12px;margin-top:var(--s-2)',
+  }, [
+    el('thead', {}, [
+      el('tr', {}, [
+        el('th', { style: 'text-align:left;padding:6px 10px;border-bottom:2px solid var(--line);font-size:11px;color:var(--ink-3);text-transform:uppercase' }, ['列名 (SP)']),
+        el('th', { style: 'text-align:left;padding:6px 10px;border-bottom:2px solid var(--line);font-size:11px;color:var(--ink-3);text-transform:uppercase' }, ['動的コンテンツ / 値']),
+      ]),
+    ]),
+    el('tbody', {}, [
+      row('Title', 'Subject から (式: trigger().subject)', '実質ダミー。SP の必須列なので埋めるだけ。'),
+      row('Subject', 'Subject', 'メール件名そのまま。'),
+      row('BodyHtml', 'Body', 'HTML 形式の本文。Spira がサニタイズして表示。'),
+      row('BodyText', 'Body Preview', 'プレーン テキスト本文 (短縮版で OK)。'),
+      row('FromEmail', 'From', '差出人アドレス。内部/外部判定にも使われます。'),
+      row('FromName', 'From - Name', '差出人表示名。'),
+      row('HasAttachments', 'Has Attachment', 'true/false。'),
+      row('ConversationId', 'Conversation Id', 'スレッド ID。受信パネルで会話単位の紐付けに使用。'),
+      row('ReceivedAt', 'Received Time', '受信日時。'),
+      row('OwaLink', 'Web Link', 'OWA でメールを直接開くための URL。'),
+      row('IsProcessed', 'false (固定)', 'Spira 側で取り込み完了時に true に更新。'),
+      row('IsHidden', 'false (固定)', '非表示フラグ。'),
+      row('InternetMessageId', 'Internet Message Id', 'メールの一意 ID。重複防止に使用。'),
+    ]),
+  ]);
+
+  const action = el('div', {}, [
+    h('3. アクション: SharePoint に項目を作成'),
+    p('トリガーの後に SharePoint コネクタの「項目の作成」を追加します。'),
+    ol([
+      el('div', {}, [
+        'Site Address: Spira を導入した SP サイト URL (例: ',
+        code('https://<tenant>.sharepoint.com/sites/<site>'),
+        ')',
+      ]),
+      el('div', {}, [
+        'List Name: ',
+        code('InboxMails'),
+        ' を選択',
+      ]),
+      el('div', {}, [
+        '以下の列に動的コンテンツをマッピング (',
+        el('strong', {}, ['列名は大文字小文字含めて完全一致']),
+        '):',
+      ]),
+    ]),
+    mappingTable,
+    p('式の入力例 (IsProcessed / IsHidden 用):'),
+    codeBlock('false'),
+  ]);
+
+  const verify = el('div', {}, [
+    h('4. 動作確認'),
+    ol([
+      el('div', {}, ['フローを「保存」 → 「テスト」 → 手動でテスト メールを送信']),
+      el('div', {}, [
+        'SP リスト ',
+        code('InboxMails'),
+        ' に行が増えていれば成功',
+      ]),
+      el('div', {}, [
+        'Spira 画面左の「受信メール」に表示されるか確認 (右上の同期ボタンで強制リロード可能)',
+      ]),
+      el('div', {}, [
+        '件名に既存チケットの ID タグ (例: ',
+        code('[#00001]'),
+        ') を含めて返信メールを送ると、自動でそのチケットの履歴に追加されます',
+      ]),
+    ]),
+  ]);
+
+  const trouble = el('div', {}, [
+    h('5. トラブルシューティング'),
+    el('ul', { style: 'margin:0;padding-left:1.2em;line-height:1.8;font-size:var(--fs-sm);color:var(--ink)' }, [
+      el('li', {}, [
+        el('strong', {}, ['列マッピング エラー']),
+        ': SP の列名と PA で指定する列名が一致しているか確認。Spira リスト リセット後に列が増えていれば再設定が必要。',
+      ]),
+      el('li', {}, [
+        el('strong', {}, ['400 InvalidColumnName']),
+        ': SP リストが古いスキーマのまま。Spira を一度起動すると ',
+        code('ensureLists'),
+        ' が走って不足列を追加します。',
+      ]),
+      el('li', {}, [
+        el('strong', {}, ['同じメールが何度も取り込まれる']),
+        ': InternetMessageId 列が空欄になっていないか確認。',
+      ]),
+      el('li', {}, [
+        el('strong', {}, ['返信が紐付かない']),
+        ': 件名にタグがあるか、現在の ID 形式 (設定 → ',
+        el('em', {}, ['チケット ID 形式']),
+        ') と整合しているか確認。レガシー形式 ',
+        code('[CASE-NNN]'),
+        ' / ',
+        code('(#NNN)'),
+        ' / ',
+        code('<#NNN>'),
+        ' も読み込み可能。',
+      ]),
+      el('li', {}, [
+        el('strong', {}, ['SP リストをリセットしたら PA フローが動かなくなった']),
+        ': リセットは「中身を空にする」のみで List GUID は変わらないため通常は影響なし。それでも壊れる場合は PA の SharePoint アクションで List を再選択してください。',
+      ]),
+    ]),
+  ]);
+
+  const body = el('div', {
+    style: 'max-width:720px;line-height:1.7',
+  }, [
+    intro,
+    prereq,
+    trigger,
+    action,
+    verify,
+    trouble,
+  ]);
+
+  openModal(root, {
+    title: 'ヘルプ — Power Automate フロー作成手順',
+    body,
+    size: 'lg',
+    primaryLabel: '閉じる',
+    hideCancel: true,
   });
 }
 
