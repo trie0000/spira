@@ -78,16 +78,61 @@ function renderSkeleton(): HTMLElement {
 }
 
 function renderError(e: Error): HTMLElement {
+  const fullText = errorToText(e);
+  const msgEl = el('pre', {
+    style: 'max-width:560px;max-height:240px;overflow:auto;white-space:pre-wrap;word-break:break-all;background:var(--paper-2);border:1px solid var(--paper-3);border-radius:var(--r-2);padding:var(--s-4);font-family:var(--font-mono);font-size:var(--fs-xs);color:var(--ink);user-select:text',
+  }, [fullText]);
+
+  const copyBtn = el('button', {
+    class: 'spira-btn spira-btn--secondary spira-btn--sm',
+    onclick: async () => {
+      try {
+        await navigator.clipboard.writeText(fullText);
+        copyBtn.textContent = '✓ コピーしました';
+        setTimeout(() => { copyBtn.replaceChildren(...copyLabel()); }, 1500);
+      } catch {
+        // fallback: select + execCommand
+        const range = document.createRange();
+        range.selectNodeContents(msgEl);
+        const sel = window.getSelection();
+        sel?.removeAllRanges();
+        sel?.addRange(range);
+        document.execCommand('copy');
+        copyBtn.textContent = '✓ コピーしました';
+        setTimeout(() => { copyBtn.replaceChildren(...copyLabel()); }, 1500);
+      }
+    },
+  }, copyLabel());
+
   return el('div', { class: 'spira-content' }, [
-    el('div', { class: 'spira-empty' }, [
+    el('div', { class: 'spira-empty', style: 'gap:var(--s-5)' }, [
       el('div', { class: 'spira-empty-title', style: 'color:var(--danger)' }, ['データの取得に失敗しました']),
-      el('div', { style: 'max-width:480px;word-break:break-word' }, [e.message]),
-      el('button', {
-        class: 'spira-btn spira-btn--secondary',
-        onclick: () => setState({}),
-      }, ['再試行']),
+      msgEl,
+      el('div', { style: 'display:flex;gap:var(--s-3)' }, [
+        copyBtn,
+        el('button', {
+          class: 'spira-btn spira-btn--secondary spira-btn--sm',
+          onclick: () => setState({}),
+        }, ['再試行']),
+      ]),
     ]),
   ]);
+}
+
+function copyLabel(): (HTMLElement | string)[] {
+  return [
+    el('span', { html: icon('copy'), style: 'display:inline-flex;width:14px;height:14px' }),
+    'エラーをコピー',
+  ];
+}
+
+function errorToText(e: Error): string {
+  // Compose a richer text payload than just e.message for copy/paste debugging.
+  // For SpError we already include status/url/body in message; fall back to stack otherwise.
+  const lines = [e.message];
+  if (e.stack && e.stack !== e.message) lines.push('', '--- stack ---', e.stack);
+  lines.push('', `(time: ${new Date().toISOString()})`, `(ua: ${navigator.userAgent})`);
+  return lines.join('\n');
 }
 
 function paintErrorBanner(slot: HTMLElement): void {
