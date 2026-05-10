@@ -321,14 +321,14 @@ function renderTable(rows: Ticket[]): HTMLElement {
 
   const table = el('table', { class: 'spira-tk-table', role: 'grid' }, [
     el('colgroup', {}, [
-      el('col', { style: 'width:36px' }),
-      el('col', { style: 'width:64px' }),
-      el('col'),                              // Title (flex)
-      el('col', { style: 'width:96px' }),
-      el('col', { style: 'width:120px' }),
-      el('col', { style: 'width:96px' }),
-      el('col', { style: 'width:120px' }),
-      el('col', { style: 'width:140px' }),
+      el('col', { style: 'width:36px' }),    // checkbox
+      el('col', { style: 'width:64px' }),    // #
+      el('col', { style: 'width:360px' }),   // Title
+      el('col', { style: 'width:96px' }),    // Status
+      el('col', { style: 'width:140px' }),   // 担当
+      el('col', { style: 'width:96px' }),    // 優先度
+      el('col', { style: 'width:120px' }),   // 期限
+      el('col', { style: 'width:140px' }),   // 更新
     ]),
     el('thead', {}, [renderHeaderRow(rows)]),
     el('tbody', {}, rows.map(t => renderRow(t))),

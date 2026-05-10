@@ -656,10 +656,16 @@
 /* ---------- 4. Views ---------- */
 /* Ticket list (dense table) */
 .spira-tk-table {
-  width: 100%;
+  /* Use max-content + min-width:100% so each column keeps its own width when
+   * one is resized — the table grows wider rather than squeezing siblings. */
+  width: max-content;
+  min-width: 100%;
   border-collapse: collapse;
   font-size: var(--fs-md);
   table-layout: fixed; /* required for colgroup/col widths and resize handles */
+}
+#spira-root .spira-table-wrap {
+  overflow-x: auto;
 }
 #spira-root .spira-tk-table th,
 #spira-root .spira-tk-table td {

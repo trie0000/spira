@@ -40,6 +40,15 @@ export function attachColumnResize(table: HTMLTableElement, opts: ResizeOptions)
       e.stopPropagation();
       const startX = e.clientX;
       const col = cols[i];
+      // Lock all sibling cols to their current rendered widths so they don't
+      // redistribute when the active col grows/shrinks.
+      cols.forEach((c, ci) => {
+        if (ci === i) return;
+        if (!c.style.width) {
+          const sibTh = ths[ci] as HTMLElement | undefined;
+          if (sibTh) c.style.width = `${Math.round(sibTh.getBoundingClientRect().width)}px`;
+        }
+      });
       const startWidth = (th as HTMLElement).getBoundingClientRect().width;
       const prevCursor = document.body.style.cursor;
       const prevSelect = document.body.style.userSelect;

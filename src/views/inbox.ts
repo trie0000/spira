@@ -334,12 +334,12 @@ function renderList(mails: InboxMail[]): HTMLElement {
 
   const table = el('table', { class: 'spira-tk-table spira-inbox-table', role: 'grid' }, [
     el('colgroup', {}, [
-      el('col', { style: 'width:36px' }),  // checkbox
-      el('col', { style: 'width:24px' }),  // disclosure arrow
-      el('col'),                            // 件名 (flex)
-      el('col', { style: 'width:240px' }),
-      el('col', { style: 'width:140px' }),
-      el('col', { style: 'width:240px' }),
+      el('col', { style: 'width:36px' }),    // checkbox
+      el('col', { style: 'width:24px' }),    // disclosure arrow
+      el('col', { style: 'width:380px' }),   // 件名
+      el('col', { style: 'width:240px' }),   // 送信者
+      el('col', { style: 'width:140px' }),   // 受信日時
+      el('col', { style: 'width:240px' }),   // 操作
     ]),
     el('thead', {}, [head]),
     tbody,
