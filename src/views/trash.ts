@@ -11,7 +11,6 @@ export async function renderTrash(): Promise<HTMLElement> {
   const rows = await getRepo().listDeletedTickets();
 
   const toolbar = el('div', { class: 'spira-toolbar' }, [
-    el('div', { style: 'font-weight:500;color:var(--ink);font-size:var(--fs-md)' }, [`ゴミ箱 (${rows.length})`]),
     el('div', { class: 'spira-toolbar-spacer' }),
     el('button', {
       class: 'spira-btn spira-btn--danger spira-btn--sm',
@@ -36,6 +35,12 @@ export async function renderTrash(): Promise<HTMLElement> {
     }, ['ゴミ箱を空にする']),
   ]);
   wrap.appendChild(toolbar);
+  wrap.appendChild(el('div', { class: 'spira-subbar' }, [
+    el('div', { class: 'spira-subbar-title' }, [
+      el('span', { class: 'spira-subbar-name' }, ['ゴミ箱']),
+      el('span', { class: 'spira-subbar-count' }, [`${rows.length} 件`]),
+    ]),
+  ]));
 
   if (rows.length === 0) {
     wrap.appendChild(el('div', { class: 'spira-content' }, [
@@ -52,7 +57,9 @@ export async function renderTrash(): Promise<HTMLElement> {
     ]),
     el('tbody', {}, rows.map(t => renderRow(t))),
   ]);
-  wrap.appendChild(el('div', { class: 'spira-content', style: 'padding:0' }, [table]));
+  wrap.appendChild(el('div', { class: 'spira-content', style: 'padding:0' }, [
+    el('div', { class: 'spira-table-wrap' }, [table]),
+  ]));
   return wrap;
 }
 

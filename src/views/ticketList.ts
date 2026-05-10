@@ -14,48 +14,104 @@ function root(): HTMLElement { return document.querySelector<HTMLElement>('#spir
 export async function renderTicketList(): Promise<HTMLElement> {
   const wrap = el('div', { class: 'spira-main-wrap', style: 'display:flex;flex-direction:column;height:100%;min-height:0' });
   const tickets = await getRepo().listTickets();
-  // prune selection of deleted IDs
   for (const id of Array.from(selectedIds)) if (!tickets.find(t => t.id === id)) selectedIds.delete(id);
+
+  const filtered = applyFilters(tickets);
+  const sorted = applySort(filtered);
+
   wrap.appendChild(renderToolbar());
-  if (selectedIds.size > 0) wrap.appendChild(renderBulkBar(tickets));
-  wrap.appendChild(renderTable(tickets));
+  wrap.appendChild(renderSubBar(sorted.length));
+  wrap.appendChild(renderTable(sorted));
   return wrap;
 }
 
-function renderBulkBar(allTickets: Ticket[]): HTMLElement {
-  const count = selectedIds.size;
-  return el('div', { class: 'spira-bulkbar' }, [
-    el('span', { style: 'font-size:var(--fs-sm);color:var(--ink)' }, [`${count} 件選択中`]),
+function renderSubBar(visibleCount: number): HTMLElement {
+  const selCount = selectedIds.size;
+  const right: (HTMLElement | string)[] = [];
+  if (selCount > 0) {
+    right.push(
+      el('span', { style: 'font-size:var(--fs-sm);color:var(--ink);margin-right:var(--s-3)' }, [`${selCount} 件選択中`]),
+      el('button', {
+        class: 'spira-btn spira-btn--secondary spira-btn--sm',
+        onclick: () => { selectedIds.clear(); setState({}); },
+      }, ['選択解除']),
+      el('button', {
+        class: 'spira-btn spira-btn--danger spira-btn--sm',
+        onclick: () => onBulkDelete(),
+      }, [`${selCount} 件を削除`]),
+    );
+  }
+
+  return el('div', { class: 'spira-subbar' + (selCount > 0 ? ' selected' : '') }, [
+    el('div', { class: 'spira-subbar-title' }, [
+      el('span', { class: 'spira-subbar-name' }, ['チケット一覧']),
+      el('span', { class: 'spira-subbar-count' }, [`${visibleCount} 件`]),
+    ]),
     el('div', { style: 'flex:1' }),
-    el('button', {
-      class: 'spira-btn spira-btn--secondary spira-btn--sm',
-      onclick: () => { selectedIds.clear(); setState({}); },
-    }, ['選択解除']),
-    el('button', {
-      class: 'spira-btn spira-btn--danger spira-btn--sm',
-      onclick: () => {
-        const ids = Array.from(selectedIds);
-        confirmModal(root(), {
-          title: 'まとめて削除',
-          message: `${count} 件のチケットをゴミ箱に移動します。`,
-          primaryLabel: '削除',
-          primaryVariant: 'danger',
-          onConfirm: async () => {
-            try {
-              for (const id of ids) await getRepo().softDeleteTicket(id);
-              toast(root(), `${ids.length} 件をゴミ箱に移動しました`, 'ok');
-              selectedIds.clear();
-              setState({ trashCount: getState().trashCount + ids.length });
-            } catch (e) {
-              toast(root(), `削除失敗: ${(e as Error).message}`, 'error');
-            }
-          },
-        });
-        // suppress unused
-        void allTickets;
-      },
-    }, [`${count} 件を削除`]),
+    ...right,
   ]);
+}
+
+function onBulkDelete(): void {
+  const ids = Array.from(selectedIds);
+  if (ids.length === 0) return;
+  confirmModal(root(), {
+    title: 'まとめて削除',
+    message: `${ids.length} 件のチケットをゴミ箱に移動します。`,
+    primaryLabel: '削除',
+    primaryVariant: 'danger',
+    onConfirm: async () => {
+      try {
+        for (const id of ids) await getRepo().softDeleteTicket(id);
+        toast(root(), `${ids.length} 件をゴミ箱に移動しました`, 'ok');
+        selectedIds.clear();
+        setState({ trashCount: getState().trashCount + ids.length });
+      } catch (e) {
+        toast(root(), `削除失敗: ${(e as Error).message}`, 'error');
+      }
+    },
+  });
+}
+
+function applyFilters(rows: Ticket[]): Ticket[] {
+  const s = getState();
+  let out = rows;
+  if (s.filter.status) out = out.filter(r => r.status === (s.filter.status as TicketStatus));
+  if (s.filter.assignee === '__unset__') out = out.filter(r => !r.assigneeEmail);
+  else if (s.filter.assignee) out = out.filter(r => r.assigneeEmail === s.filter.assignee);
+  if (s.filter.priority) out = out.filter(r => r.priority === (s.filter.priority as Priority));
+  if (s.filter.query) {
+    const q = s.filter.query.toLowerCase();
+    out = out.filter(r => r.title.toLowerCase().includes(q) || String(r.id).includes(q));
+  }
+  return out;
+}
+
+function applySort(rows: Ticket[]): Ticket[] {
+  const s = getState();
+  const prioOrder: Record<Priority, number> = { High: 0, Medium: 1, Low: 2 };
+  const statusOrder: Record<TicketStatus, number> = { '新規': 0, '対応中': 1, '確認待ち': 2, '完了': 3 };
+  const dir = s.sortDir === 'asc' ? 1 : -1;
+  return [...rows].sort((a, b) => {
+    let cmp = 0;
+    switch (s.sortBy) {
+      case 'id':       cmp = a.id - b.id; break;
+      case 'title':    cmp = a.title.localeCompare(b.title, 'ja'); break;
+      case 'status':   cmp = statusOrder[a.status] - statusOrder[b.status]; break;
+      case 'assignee': cmp = (a.assigneeName ?? a.assigneeEmail ?? '').localeCompare(b.assigneeName ?? b.assigneeEmail ?? '', 'ja'); break;
+      case 'priority': cmp = prioOrder[a.priority] - prioOrder[b.priority]; break;
+      case 'due': {
+        const da = a.dueDate ? Date.parse(a.dueDate) : Number.MAX_SAFE_INTEGER;
+        const db = b.dueDate ? Date.parse(b.dueDate) : Number.MAX_SAFE_INTEGER;
+        cmp = da - db;
+        break;
+      }
+      case 'updated':
+      default:
+        cmp = Date.parse(a.updatedAt) - Date.parse(b.updatedAt);
+    }
+    return cmp * dir;
+  });
 }
 
 function renderToolbar(): HTMLElement {
@@ -251,56 +307,22 @@ function openFilterPopover(anchor: HTMLElement): void {
   }, 0);
 }
 
-function renderTable(allTickets: Ticket[]): HTMLElement {
-  const s = getState();
-  let rows = allTickets;
-
-  if (s.filter.status) rows = rows.filter(r => r.status === (s.filter.status as TicketStatus));
-  if (s.filter.assignee === '__unset__') rows = rows.filter(r => !r.assigneeEmail);
-  else if (s.filter.assignee) rows = rows.filter(r => r.assigneeEmail === s.filter.assignee);
-  if (s.filter.priority) rows = rows.filter(r => r.priority === (s.filter.priority as Priority));
-  if (s.filter.query) {
-    const q = s.filter.query.toLowerCase();
-    rows = rows.filter(r => r.title.toLowerCase().includes(q) || String(r.id).includes(q));
-  }
-
-  const prioOrder: Record<Priority, number> = { High: 0, Medium: 1, Low: 2 };
-  const statusOrder: Record<TicketStatus, number> = { '新規': 0, '対応中': 1, '確認待ち': 2, '完了': 3 };
-  const dir = s.sortDir === 'asc' ? 1 : -1;
-  rows = [...rows].sort((a, b) => {
-    let cmp = 0;
-    switch (s.sortBy) {
-      case 'id':       cmp = a.id - b.id; break;
-      case 'title':    cmp = a.title.localeCompare(b.title, 'ja'); break;
-      case 'status':   cmp = statusOrder[a.status] - statusOrder[b.status]; break;
-      case 'assignee': cmp = (a.assigneeName ?? a.assigneeEmail ?? '').localeCompare(b.assigneeName ?? b.assigneeEmail ?? '', 'ja'); break;
-      case 'priority': cmp = prioOrder[a.priority] - prioOrder[b.priority]; break;
-      case 'due': {
-        const da = a.dueDate ? Date.parse(a.dueDate) : Number.MAX_SAFE_INTEGER;
-        const db = b.dueDate ? Date.parse(b.dueDate) : Number.MAX_SAFE_INTEGER;
-        cmp = da - db;
-        break;
-      }
-      case 'updated':
-      default:
-        cmp = Date.parse(a.updatedAt) - Date.parse(b.updatedAt);
-    }
-    return cmp * dir;
-  });
-
+function renderTable(rows: Ticket[]): HTMLElement {
   if (rows.length === 0) {
     return el('div', { class: 'spira-content' }, [
       el('div', { class: 'spira-empty' }, [
-        el('div', { class: 'spira-empty-title' }, [allTickets.length === 0 ? 'チケットはありません' : '該当するチケットがありません']),
+        el('div', { class: 'spira-empty-title' }, ['該当するチケットがありません']),
         el('div', {}, ['受信メールから起票するか、右上の「新規チケット」から作成してください']),
       ]),
     ]);
   }
 
   return el('div', { class: 'spira-content', style: 'padding:0' }, [
-    el('table', { class: 'spira-tk-table', role: 'grid' }, [
-      el('thead', {}, [renderHeaderRow(rows)]),
-      el('tbody', {}, rows.map(t => renderRow(t))),
+    el('div', { class: 'spira-table-wrap' }, [
+      el('table', { class: 'spira-tk-table', role: 'grid' }, [
+        el('thead', {}, [renderHeaderRow(rows)]),
+        el('tbody', {}, rows.map(t => renderRow(t))),
+      ]),
     ]),
   ]);
 }

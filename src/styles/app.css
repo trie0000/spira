@@ -674,14 +674,32 @@
 .spira-inbox-table tr.spira-inbox-expanded { cursor: default; }
 .spira-inbox-table tr.spira-inbox-expanded:hover td { background: var(--paper-2); }
 
-/* Bulk action bar — appears above table when items are selected */
-#spira-root .spira-bulkbar {
+/* Sub-bar (always-present): view title on the left, optional bulk actions on the right.
+ * Always rendered with the same height so the layout doesn't shift when items are selected. */
+#spira-root .spira-subbar {
   display: flex;
   align-items: center;
   gap: var(--s-3);
   padding: var(--s-3) var(--s-7);
+  border-bottom: 1px solid var(--line);
+  background: var(--paper);
+  min-height: 44px;
+  flex-shrink: 0;
+  transition: background 0.15s, border-color 0.15s;
+}
+#spira-root .spira-subbar.selected {
   background: var(--accent-soft);
-  border-bottom: 1px solid var(--accent);
+  border-color: var(--accent);
+}
+#spira-root .spira-subbar-title {
+  display: flex; align-items: baseline; gap: var(--s-3);
+}
+#spira-root .spira-subbar-name { font-size: var(--fs-base); font-weight: 600; color: var(--ink); }
+#spira-root .spira-subbar-count { font-size: var(--fs-sm); color: var(--ink-3); }
+
+/* Padded table wrapper — keeps sticky header working, gives the table breathing room */
+#spira-root .spira-table-wrap {
+  padding: 0 var(--s-7) var(--s-7);
 }
 .spira-tk-id { font-family: var(--font-mono); color: var(--ink-3); font-size: var(--fs-sm); }
 .spira-tk-title { color: var(--ink); max-width: 360px; overflow: hidden; text-overflow: ellipsis; }

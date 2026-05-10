@@ -19,18 +19,16 @@ export async function renderInbox(): Promise<HTMLElement> {
   const wrap = el('div', { class: 'spira-main-wrap', style: 'display:flex;flex-direction:column;height:100%;min-height:0' });
   const mails = await getRepo().listInbox({ unprocessedOnly: true });
 
-  // prune selection of removed ids
   for (const id of Array.from(selectedInboxIds)) if (!mails.find(m => m.id === id)) selectedInboxIds.delete(id);
 
   wrap.appendChild(renderToolbar());
-  if (selectedInboxIds.size > 0) wrap.appendChild(renderBulkBar(mails));
+  wrap.appendChild(renderSubBar(mails.length));
   wrap.appendChild(renderList(mails));
   return wrap;
 }
 
 function renderToolbar(): HTMLElement {
   return el('div', { class: 'spira-toolbar' }, [
-    el('div', { style: 'font-weight:500;color:var(--ink);font-size:var(--fs-md)' }, ['未処理メール']),
     el('div', { class: 'spira-toolbar-spacer' }),
     el('button', {
       class: 'spira-iconbtn',
@@ -42,40 +40,53 @@ function renderToolbar(): HTMLElement {
   ]);
 }
 
-function renderBulkBar(allMails: InboxMail[]): HTMLElement {
-  const count = selectedInboxIds.size;
-  return el('div', { class: 'spira-bulkbar' }, [
-    el('span', { style: 'font-size:var(--fs-sm);color:var(--ink)' }, [`${count} 件選択中`]),
+function renderSubBar(visibleCount: number): HTMLElement {
+  const selCount = selectedInboxIds.size;
+  const right: (HTMLElement | string)[] = [];
+  if (selCount > 0) {
+    right.push(
+      el('span', { style: 'font-size:var(--fs-sm);color:var(--ink);margin-right:var(--s-3)' }, [`${selCount} 件選択中`]),
+      el('button', {
+        class: 'spira-btn spira-btn--secondary spira-btn--sm',
+        onclick: () => { selectedInboxIds.clear(); setState({}); },
+      }, ['選択解除']),
+      el('button', {
+        class: 'spira-btn spira-btn--secondary spira-btn--sm',
+        onclick: () => onBulkHide(),
+      }, [`${selCount} 件を非表示`]),
+    );
+  }
+
+  return el('div', { class: 'spira-subbar' + (selCount > 0 ? ' selected' : '') }, [
+    el('div', { class: 'spira-subbar-title' }, [
+      el('span', { class: 'spira-subbar-name' }, ['受信メール']),
+      el('span', { class: 'spira-subbar-count' }, [`${visibleCount} 件`]),
+    ]),
     el('div', { style: 'flex:1' }),
-    el('button', {
-      class: 'spira-btn spira-btn--secondary spira-btn--sm',
-      onclick: () => { selectedInboxIds.clear(); setState({}); },
-    }, ['選択解除']),
-    el('button', {
-      class: 'spira-btn spira-btn--secondary spira-btn--sm',
-      onclick: () => {
-        const ids = Array.from(selectedInboxIds);
-        confirmModal(getRoot(), {
-          title: 'まとめて非表示',
-          message: `${count} 件を一覧から非表示にします。\n（チケット起票や紐付けは行いません。受信メールリスト上では IsHidden = true になります）`,
-          primaryLabel: '非表示にする',
-          primaryVariant: 'primary',
-          onConfirm: async () => {
-            try {
-              await getRepo().hideInboxItems(ids);
-              toast(getRoot(), `${ids.length} 件を非表示にしました`, 'ok');
-              selectedInboxIds.clear();
-              const fresh = await getRepo().listInbox({ unprocessedOnly: true });
-              setState({ inboxCount: fresh.length });
-            } catch (e) {
-              toast(getRoot(), `失敗: ${(e as Error).message}`, 'error');
-            }
-          },
-        });
-        void allMails;
-      },
-    }, [`${count} 件を非表示`]),
+    ...right,
   ]);
+}
+
+function onBulkHide(): void {
+  const ids = Array.from(selectedInboxIds);
+  if (ids.length === 0) return;
+  confirmModal(getRoot(), {
+    title: 'まとめて非表示',
+    message: `${ids.length} 件を一覧から非表示にします。\n（チケット起票や紐付けは行いません。受信メールリスト上では IsHidden = true になります）`,
+    primaryLabel: '非表示にする',
+    primaryVariant: 'primary',
+    onConfirm: async () => {
+      try {
+        await getRepo().hideInboxItems(ids);
+        toast(getRoot(), `${ids.length} 件を非表示にしました`, 'ok');
+        selectedInboxIds.clear();
+        const fresh = await getRepo().listInbox({ unprocessedOnly: true });
+        setState({ inboxCount: fresh.length });
+      } catch (e) {
+        toast(getRoot(), `失敗: ${(e as Error).message}`, 'error');
+      }
+    },
+  });
 }
 
 function renderList(mails: InboxMail[]): HTMLElement {
@@ -139,9 +150,11 @@ function renderList(mails: InboxMail[]): HTMLElement {
   }
 
   return el('div', { class: 'spira-content', style: 'padding:0' }, [
-    el('table', { class: 'spira-tk-table spira-inbox-table', role: 'grid' }, [
-      el('thead', {}, [head]),
-      tbody,
+    el('div', { class: 'spira-table-wrap' }, [
+      el('table', { class: 'spira-tk-table spira-inbox-table', role: 'grid' }, [
+        el('thead', {}, [head]),
+        tbody,
+      ]),
     ]),
   ]);
 }
