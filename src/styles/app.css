@@ -441,7 +441,12 @@
 .spira-input::placeholder,
 .spira-textarea::placeholder { color: var(--ink-4); }
 
-.spira-textarea { min-height: 72px; resize: vertical; line-height: 1.6; }
+.spira-textarea {
+  min-height: 72px;
+  resize: vertical;
+  line-height: 1.6;
+  padding-bottom: 14px; /* default — give cursor room from the bottom edge */
+}
 
 .spira-input--inline {
   font-size: var(--fs-h3);
@@ -1011,9 +1016,11 @@
   border-radius: var(--r-2);
 }
 
-/* New-note form: send button overlaid in textarea bottom-right */
+/* New-note form: send button overlaid in textarea bottom-right
+ * !important everywhere to defeat host CSS position/dimension resets. */
 #spira-root .spira-note-form {
-  position: relative;
+  position: relative !important;
+  display: block !important;
 }
 #spira-root .spira-note-form .spira-note-input {
   padding-right: 44px !important;
@@ -1026,36 +1033,39 @@
   border-color: var(--line-strong) !important;
 }
 #spira-root .spira-note-submit {
-  position: absolute;
-  right: 8px;
-  bottom: 8px;
-  width: 28px;
-  height: 28px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: transparent;
-  color: var(--ink-3);
-  border: 1px solid var(--paper-3);
-  border-radius: var(--r-2);
-  cursor: pointer;
-  transition: background 0.1s, color 0.1s, border-color 0.1s;
+  position: absolute !important;
+  right: 10px !important;
+  bottom: 10px !important;
+  width: 30px !important;
+  height: 30px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  background: transparent !important;
+  color: var(--ink-3) !important;
+  border: 1px solid var(--paper-3) !important;
+  border-radius: var(--r-2) !important;
+  cursor: pointer !important;
+  padding: 0 !important;
+  transition: background 0.1s, color 0.1s, border-color 0.1s !important;
+  z-index: 2 !important;
 }
 #spira-root .spira-note-submit:hover {
-  background: var(--accent);
-  color: #fff;
-  border-color: var(--accent);
+  background: var(--accent) !important;
+  color: #fff !important;
+  border-color: var(--accent) !important;
 }
 #spira-root .spira-note-submit:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
+  opacity: 0.4 !important;
+  cursor: not-allowed !important;
 }
 #spira-root .spira-note-submit svg {
-  width: 16px;
-  height: 16px;
-  stroke: currentColor;
-  fill: none;
-  stroke-width: 1.7;
+  width: 16px !important;
+  height: 16px !important;
+  display: block !important;
+  stroke: currentColor !important;
+  fill: none !important;
+  stroke-width: 1.7 !important;
 }
 
 /* Title row: #XXX tag (left, mono, clickable to copy) + title input */

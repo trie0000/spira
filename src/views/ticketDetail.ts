@@ -363,7 +363,9 @@ function toggleLabel(isExpanded: boolean): HTMLElement {
   ]);
 }
 
-/** Auto-grow a textarea with content, capped at maxRatio of viewport, with bottom padding. */
+/** Auto-grow a textarea with content, capped at maxRatio of viewport.
+ *  Padding (including bottom-margin for the cursor) is controlled by CSS,
+ *  not inline — so per-class overrides like .spira-note-input win. */
 function autoSizeTextarea(ta: HTMLTextAreaElement, maxRatio = 0.55): void {
   const adjust = () => {
     ta.style.height = 'auto';
@@ -373,9 +375,6 @@ function autoSizeTextarea(ta: HTMLTextAreaElement, maxRatio = 0.55): void {
     ta.style.overflowY = ta.scrollHeight > max ? 'auto' : 'hidden';
   };
   ta.addEventListener('input', adjust);
-  // ensure bottom padding so cursor doesn't sit at the edge
-  ta.style.paddingBottom = '14px';
-  // initial sizing after attach
   setTimeout(adjust, 0);
 }
 
