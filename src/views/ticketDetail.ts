@@ -4,7 +4,7 @@ import { ticketStatusList, priorityList } from '../api/sp';
 import { getRepo } from '../api/repo';
 import { setState, getState } from '../state';
 import { sanitizeMailHtml } from '../utils/sanitize';
-import { buildOwaReplyUrl } from '../utils/owa';
+import { buildOwaSearchQuery, OWA_INBOX_URL } from '../utils/owa';
 import { isInternalMember, colorForAuthor } from '../utils/members';
 import { renderStatusBadge, renderPriorityLabel } from './ticketList';
 import { toast } from '../components/toast';
@@ -119,13 +119,19 @@ async function renderTabStrip(activeT: Ticket, latestReceived: Comment | undefin
   const replyBtn = el('button', {
     class: 'spira-btn spira-btn--ghost spira-btn--sm',
     title: latestReceived
-      ? 'OWA で元メールを検索して開く (差出人 + 件名 + 受信日)。\n結果から該当メールを開いて「返信」を押せばスレッドが維持されます。'
+      ? '検索文字列を clipboard にコピーして OWA を開く。\nOWA の検索バーに Cmd/Ctrl + V → Enter で該当メールを表示し、\n「返信」を押せばスレッドが維持されます。'
       : '受信メールがないため返信を作成できません',
     disabled: !latestReceived,
-    onclick: () => {
+    onclick: async () => {
       if (!latestReceived) return;
-      const url = buildOwaReplyUrl({ ticket: activeT, comment: latestReceived });
-      window.open(url, '_blank', 'noopener');
+      const q = buildOwaSearchQuery({ ticket: activeT, comment: latestReceived });
+      try {
+        await navigator.clipboard.writeText(q);
+        toast(getRoot(), `検索文字列をコピーしました。OWA の検索バーに貼り付けて Enter → 結果から「返信」`, 'ok', 8000);
+      } catch {
+        toast(getRoot(), `OWA で次を検索してください: ${q}`, 'warn', 12000);
+      }
+      window.open(OWA_INBOX_URL, '_blank', 'noopener');
     },
   }, [
     el('span', { html: icon('mail'), style: 'display:inline-flex;width:14px;height:14px' }),
