@@ -10,7 +10,8 @@ import { toast } from '../components/toast';
 import { getRepo, getRepoMode } from '../api/repo';
 
 export function renderShell(): HTMLElement {
-  const root = el('div', { class: 'spira-root', 'data-theme': 'light' });
+  // id + class — ID セレクタで host CSS の !important / ID rules を上書きできる
+  const root = el('div', { id: 'spira-root', class: 'spira-root', 'data-theme': 'light' });
   const main = el('main', { class: 'spira-main' });
   const sideWrap = el('div', { style: 'display:contents' });
   sideWrap.appendChild(renderSidebar());

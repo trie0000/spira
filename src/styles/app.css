@@ -294,12 +294,12 @@
  * here as well — this is the documented escape hatch for namespaced overlays.
  * The color is also applied to children so SP's icon-stack rules can't recolor text.
  */
-.spira-root .spira-btn,
-.spira-root .spira-btn * {
+#spira-root .spira-btn,
+#spira-root .spira-btn * {
   font-family: inherit !important;
   font-size: var(--fs-md) !important;
 }
-.spira-root .spira-btn {
+#spira-root .spira-btn {
   height: 34px !important;
   padding: 0 var(--s-7) !important;
   display: inline-flex !important;
@@ -316,70 +316,70 @@
   white-space: nowrap !important;
   text-decoration: none !important;
 }
-.spira-root .spira-btn:hover { filter: brightness(0.96) !important; }
-.spira-root .spira-btn:focus-visible {
+#spira-root .spira-btn:hover { filter: brightness(0.96) !important; }
+#spira-root .spira-btn:focus-visible {
   outline: 2px solid var(--accent-soft) !important;
   outline-offset: 1px !important;
 }
-.spira-root .spira-btn:disabled { opacity: 0.5 !important; cursor: not-allowed !important; filter: none !important; }
+#spira-root .spira-btn:disabled { opacity: 0.5 !important; cursor: not-allowed !important; filter: none !important; }
 
-.spira-root .spira-btn--primary,
-.spira-root .spira-btn--primary * {
+#spira-root .spira-btn--primary,
+#spira-root .spira-btn--primary * {
   background: var(--accent) !important;
   color: #ffffff !important;
   border-color: var(--accent) !important;
 }
-.spira-root .spira-btn--primary { background: var(--accent) !important; color: #ffffff !important; border-color: var(--accent) !important; }
-.spira-root .spira-btn--primary:hover {
+#spira-root .spira-btn--primary { background: var(--accent) !important; color: #ffffff !important; border-color: var(--accent) !important; }
+#spira-root .spira-btn--primary:hover {
   background: var(--accent-strong) !important;
   border-color: var(--accent-strong) !important;
   color: #ffffff !important;
   filter: none !important;
 }
 
-.spira-root .spira-btn--dark,
-.spira-root .spira-btn--dark * {
+#spira-root .spira-btn--dark,
+#spira-root .spira-btn--dark * {
   background: var(--ink) !important;
   color: var(--paper) !important;
   border-color: var(--ink) !important;
 }
 
-.spira-root .spira-btn--secondary,
-.spira-root .spira-btn--secondary * {
+#spira-root .spira-btn--secondary,
+#spira-root .spira-btn--secondary * {
   background: var(--paper-2) !important;
   color: var(--ink) !important;
   border-color: var(--paper-3) !important;
 }
 
-.spira-root .spira-btn--ghost,
-.spira-root .spira-btn--ghost * {
+#spira-root .spira-btn--ghost,
+#spira-root .spira-btn--ghost * {
   background: transparent !important;
   color: var(--ink-3) !important;
 }
-.spira-root .spira-btn--ghost { border: 1px dashed var(--line-strong) !important; }
-.spira-root .spira-btn--ghost:hover,
-.spira-root .spira-btn--ghost:hover * {
+#spira-root .spira-btn--ghost { border: 1px dashed var(--line-strong) !important; }
+#spira-root .spira-btn--ghost:hover,
+#spira-root .spira-btn--ghost:hover * {
   border-color: var(--ink-4) !important;
   color: var(--ink) !important;
   filter: none !important;
 }
 
-.spira-root .spira-btn--danger,
-.spira-root .spira-btn--danger * {
+#spira-root .spira-btn--danger,
+#spira-root .spira-btn--danger * {
   background: transparent !important;
   color: var(--danger) !important;
 }
-.spira-root .spira-btn--danger { border-color: var(--danger) !important; }
-.spira-root .spira-btn--danger:hover {
+#spira-root .spira-btn--danger { border-color: var(--danger) !important; }
+#spira-root .spira-btn--danger:hover {
   background: var(--danger-soft) !important;
   color: var(--danger) !important;
   filter: none !important;
 }
 
-.spira-root .spira-btn--sm { height: 28px !important; padding: 0 var(--s-5) !important; font-size: var(--fs-sm) !important; }
+#spira-root .spira-btn--sm { height: 28px !important; padding: 0 var(--s-5) !important; font-size: var(--fs-sm) !important; }
 
 /* Icon button (square) — also force-shielded from host CSS. */
-.spira-root .spira-iconbtn {
+#spira-root .spira-iconbtn {
   width: 30px !important; height: 30px !important;
   display: inline-flex !important; align-items: center !important; justify-content: center !important;
   border: none !important;
@@ -389,9 +389,9 @@
   color: var(--ink) !important;
   padding: 0 !important;
 }
-.spira-root .spira-iconbtn:hover { background: var(--paper-2-strong) !important; }
-.spira-root .spira-iconbtn:focus-visible { outline: 2px solid var(--accent-soft) !important; outline-offset: 1px !important; }
-.spira-root .spira-iconbtn svg { width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-width: 1.7; }
+#spira-root .spira-iconbtn:hover { background: var(--paper-2-strong) !important; }
+#spira-root .spira-iconbtn:focus-visible { outline: 2px solid var(--accent-soft) !important; outline-offset: 1px !important; }
+#spira-root .spira-iconbtn svg { width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-width: 1.7; }
 
 /* Input */
 .spira-input,
