@@ -4,6 +4,7 @@ import { ticketStatusList, priorityList } from '../api/sp';
 import { getRepo } from '../api/repo';
 import { setState, getState } from '../state';
 import { sanitizeMailHtml } from '../utils/sanitize';
+import { buildOwaReplyUrl, bodyWouldBeTruncated } from '../utils/owa';
 import { renderStatusBadge, renderPriorityDot } from './ticketList';
 import { toast } from '../components/toast';
 import { confirmModal } from '../components/modal';
@@ -186,7 +187,7 @@ function renderSplitPanes(t: Ticket, comments: Comment[]): HTMLElement {
 
   const leftPane = el('div', { class: 'spira-split-pane', style: 'flex:1 1 50%;min-width:0;overflow:auto;padding:var(--s-5) var(--s-7)' }, [
     paneTitle('📧 メールスレッド', `${received.length} 件`),
-    renderReceivedThread(received),
+    renderReceivedThread(t, received),
   ]);
 
   const rightPane = el('div', { class: 'spira-split-pane', style: 'flex:1 1 50%;min-width:0;overflow:auto;padding:var(--s-5) var(--s-7);background:var(--paper-2)' }, [
@@ -276,21 +277,38 @@ function attachResizer(resizer: HTMLElement, left: HTMLElement, right: HTMLEleme
 
 // ============================================================ left: received thread
 
-function renderReceivedThread(received: Comment[]): HTMLElement {
+function renderReceivedThread(t: Ticket, received: Comment[]): HTMLElement {
   if (received.length === 0) {
     return el('div', { class: 'spira-empty', style: 'padding:var(--s-7)' }, [
       'メールのやり取りはまだありません',
     ]);
   }
-  return el('div', { class: 'spira-th-list' }, received.map(c => renderReceivedCard(c)));
+  return el('div', { class: 'spira-th-list' }, received.map(c => renderReceivedCard(t, c)));
 }
 
-function renderReceivedCard(c: Comment): HTMLElement {
+function renderReceivedCard(t: Ticket, c: Comment): HTMLElement {
+  const replyBtn = el('button', {
+    class: 'spira-btn spira-btn--ghost spira-btn--sm',
+    style: 'flex-shrink:0',
+    title: 'OWA で返信ドラフトを開く（このメールを引用した状態）',
+    onclick: () => {
+      const url = buildOwaReplyUrl({ ticket: t, comment: c });
+      if (bodyWouldBeTruncated({ ticket: t, comment: c })) {
+        toast(getRoot(), '本文が長いため引用は省略されました（件名のみ）', 'warn');
+      }
+      window.open(url, '_blank', 'noopener');
+    },
+  }, [
+    el('span', { html: icon('mail'), style: 'display:inline-flex;width:14px;height:14px' }),
+    'OWA で返信',
+  ]);
+
   const head = el('div', { class: 'spira-th-card-head' }, [
     el('span', { html: icon('mail') }),
     el('span', { class: 'spira-th-card-from' }, [c.fromName ?? c.fromEmail ?? '(unknown)']),
     c.fromEmail ? ` <${c.fromEmail}>` : '',
     el('span', { style: 'margin-left:auto;color:var(--ink-3);font-size:var(--fs-sm)' }, [fmtDate(c.sentAt)]),
+    replyBtn,
   ]);
   const body = el('div', { class: 'spira-th-card-body' });
   if (c.isHtml) body.innerHTML = sanitizeMailHtml(c.content);
