@@ -1,4 +1,5 @@
 import { el, qs } from '../utils/dom';
+import { icon } from '../icons';
 
 type Variant = 'default' | 'ok' | 'warn' | 'error';
 
@@ -11,21 +12,39 @@ function ensureStack(root: HTMLElement): HTMLElement {
   return stack;
 }
 
-export function toast(root: HTMLElement, msg: string, variant: Variant = 'default', durationMs = 4000): void {
+export function toast(root: HTMLElement, msg: string, variant: Variant = 'default', durationMs?: number): void {
   const stack = ensureStack(root);
   const cls = ['spira-toast'];
   if (variant !== 'default') cls.push(`spira-toast--${variant}`);
-  const node = el('div', { class: cls.join(' ') }, [msg]);
-  stack.appendChild(node);
-  const ttl = variant === 'error' ? 0 : durationMs;
-  if (ttl > 0) {
-    setTimeout(() => {
-      node.style.transition = 'opacity .2s';
-      node.style.opacity = '0';
-      setTimeout(() => node.remove(), 220);
-    }, ttl);
-  } else {
-    node.style.cursor = 'pointer';
-    node.addEventListener('click', () => node.remove());
+
+  const closeBtn = el('button', {
+    class: 'spira-iconbtn',
+    'aria-label': '閉じる',
+    style: 'width:22px;height:22px;flex-shrink:0;color:var(--ink-3)',
+    html: icon('x'),
+  });
+
+  const node = el('div', {
+    class: cls.join(' '),
+    style: 'display:flex;align-items:flex-start;gap:var(--s-3)',
+  }, [
+    el('div', { style: 'flex:1;min-width:0;word-break:break-word' }, [msg]),
+    closeBtn,
+  ]);
+
+  function dismiss(): void {
+    if (!node.isConnected) return;
+    node.style.transition = 'opacity .15s, transform .15s';
+    node.style.opacity = '0';
+    node.style.transform = 'translateY(-4px)';
+    setTimeout(() => node.remove(), 160);
   }
+
+  closeBtn.addEventListener('click', (e) => { e.stopPropagation(); dismiss(); });
+
+  stack.appendChild(node);
+
+  // default TTL: 2s for ok/info, 3s for warn, error stays until dismissed.
+  const ttl = durationMs ?? (variant === 'error' ? 0 : variant === 'warn' ? 3000 : 2000);
+  if (ttl > 0) setTimeout(dismiss, ttl);
 }
