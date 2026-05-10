@@ -72,22 +72,15 @@ async function renderTabStrip(activeT: Ticket, latestReceived: Comment | undefin
     tabs.push(tab);
   });
 
-  // Left zone: back to list
-  const backBtn = el('button', {
-    class: 'spira-btn spira-btn--secondary spira-btn--sm',
+  // Left zone: back to list — styled to match tab height
+  const backBtn = el('div', {
+    class: 'spira-tab spira-tab--back',
+    role: 'button',
+    tabindex: '0',
     onclick: () => setState({ selectedTicketId: null }),
   }, ['← 一覧']);
 
-  // Right zone: actions
-  const owaBtn = el('a', {
-    class: 'spira-btn spira-btn--ghost spira-btn--sm',
-    href: '#', target: '_blank', rel: 'noopener',
-    title: '元メールを Outlook で開く',
-  }, [
-    el('span', { html: icon('external'), style: 'display:inline-flex;width:14px;height:14px' }),
-    'OWA で開く',
-  ]);
-
+  // Right zone: actions (OWA で開く は削除済み — 返信時は OWA で返信 から)
   const replyBtn = el('button', {
     class: 'spira-btn spira-btn--ghost spira-btn--sm',
     title: latestReceived
@@ -137,7 +130,7 @@ async function renderTabStrip(activeT: Ticket, latestReceived: Comment | undefin
   return el('div', { class: 'spira-tab-strip' }, [
     el('div', { class: 'spira-tab-left' }, [backBtn]),
     el('div', { class: 'spira-tab-middle' }, tabs),
-    el('div', { class: 'spira-tab-right' }, [owaBtn, replyBtn, deleteBtn]),
+    el('div', { class: 'spira-tab-right' }, [replyBtn, deleteBtn]),
   ]);
 }
 

@@ -920,6 +920,17 @@
   margin-bottom: -1px;
   font-weight: 500;
 }
+/* Back-to-list button styled like a tab so heights line up */
+#spira-root .spira-tab--back {
+  background: var(--paper);
+  border-color: var(--line);
+  color: var(--ink);
+  font-weight: 500;
+  user-select: none;
+}
+#spira-root .spira-tab--back:hover {
+  background: var(--paper-2);
+}
 #spira-root .spira-tab-close {
   background: transparent;
   border: none;
