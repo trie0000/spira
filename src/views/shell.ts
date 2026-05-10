@@ -401,9 +401,9 @@ function onResetLists(root: HTMLElement): void {
   const isMock = getRepoMode() === 'mock';
   const message = isMock
     ? 'mock データを初期化します。チケット / コメント / 受信メールがすべて消えてサンプルに戻ります。'
-    : 'SP の Tickets / Comments / InboxMails リストを物理削除して再作成します。' +
-      '\nこれら 3 リストの中身（チケット・コメント・受信メール）はすべて失われ、戻せません。' +
-      '\n本当に実行しますか？';
+    : 'SP の Tickets / Comments / InboxMails の **アイテム（中身）をすべて削除** します。' +
+      '\nリスト本体は残るので Power Automate の参照は壊れません。' +
+      '\nチケット・コメント・受信メールのデータは戻せません。本当に実行しますか？';
 
   confirmModal(root, {
     title: 'SP リストをリセット',
@@ -415,7 +415,7 @@ function onResetLists(root: HTMLElement): void {
         const r = await getRepo().resetLists();
         const msg = isMock
           ? 'mock データをリセットしました'
-          : `${r.deleted.length} リストを削除 → ${r.recreated.length} リストを再作成しました`;
+          : `中身を削除しました: ${r.deleted.join(' / ')}`;
         toast(root, msg, 'ok', 6000);
         // 再読み込みで完全なクリーン状態へ
         setTimeout(() => location.reload(), 800);

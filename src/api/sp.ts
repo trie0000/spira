@@ -225,29 +225,45 @@ export class SpRepository implements Repository {
     return { created, addedFields };
   }
 
-  // ---- destructive: reset all lists
+  // ---- destructive: clear all items (NOT drop the lists themselves)
+  //
+  // 注意: リスト本体を DELETE すると List GUID が変わって PA フローの参照が
+  // 無効になる (PA の「項目の作成」が止まる)。なので中身だけ全削除する。
+  // スキーマが古い場合は ensureLists で列追加だけ走らせる。
 
   async resetLists(): Promise<ResetResult> {
     const titles = [this.cfg.listTickets, this.cfg.listComments, this.cfg.listInbox];
-    const deleted: string[] = [];
+    const cleared: string[] = [];
     for (const t of titles) {
-      try {
-        await this.deleteList(t);
-        deleted.push(t);
-      } catch (e) {
-        if (e instanceof SpError && e.status === 404) continue;
-        throw new Error(`list delete failed: ${t} — ${(e as Error).message}`);
-      }
+      if (!(await this.listExists(t))) continue;
+      const n = await this.truncateList(t);
+      cleared.push(`${t} (${n} 件)`);
     }
+    // 念のためスキーマも整合 (列が増えていれば自動追加)
     const r = await this.ensureLists();
-    return { deleted, recreated: r.created, addedFields: r.addedFields ?? [] };
+    return { deleted: cleared, recreated: r.created, addedFields: r.addedFields ?? [] };
   }
 
-  private async deleteList(title: string): Promise<void> {
-    await this.tx.req(this.listPath(title), {
-      method: 'POST',
-      headers: { 'X-HTTP-Method': 'DELETE', 'IF-MATCH': '*' },
-    });
+  private async truncateList(title: string): Promise<number> {
+    let count = 0;
+    // ページング考慮: 一度に最大 2000 件、なくなるまでループ
+    while (true) {
+      const url = `${this.listPath(title)}/items?$select=Id&$top=2000`;
+      const res = await this.tx.req<ListItemsResp<{ Id: number }>>(url);
+      const items = res.value ?? [];
+      if (items.length === 0) break;
+      for (const item of items) {
+        try {
+          await this.tx.remove(this.listPath(title), item.Id);
+          count++;
+        } catch (e) {
+          if (e instanceof SpError && e.status === 404) continue; // already gone
+          throw e;
+        }
+      }
+      if (items.length < 2000) break;
+    }
+    return count;
   }
 
   private async listExists(title: string): Promise<boolean> {
