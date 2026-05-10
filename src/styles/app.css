@@ -703,8 +703,7 @@
   gap: var(--s-3) !important;
   padding-top: var(--s-4) !important;
   padding-bottom: var(--s-4) !important;
-  padding-left: var(--s-9) !important;
-  padding-right: var(--s-9) !important;
+  /* horizontal padding intentionally NOT set here — the unified --gutter rule above wins */
   border-bottom: 1px solid var(--line) !important;
   background: var(--paper) !important;
   min-height: 48px !important;
