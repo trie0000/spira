@@ -34,13 +34,13 @@ export async function renderTrash(): Promise<HTMLElement> {
       },
     }, ['ゴミ箱を空にする']),
   ]);
-  wrap.appendChild(toolbar);
   wrap.appendChild(el('div', { class: 'spira-subbar' }, [
     el('div', { class: 'spira-subbar-title' }, [
       el('span', { class: 'spira-subbar-name' }, ['ゴミ箱']),
       el('span', { class: 'spira-subbar-count' }, [`${rows.length} 件`]),
     ]),
   ]));
+  wrap.appendChild(toolbar);
 
   if (rows.length === 0) {
     wrap.appendChild(el('div', { class: 'spira-content' }, [

@@ -21,8 +21,8 @@ export async function renderInbox(): Promise<HTMLElement> {
 
   for (const id of Array.from(selectedInboxIds)) if (!mails.find(m => m.id === id)) selectedInboxIds.delete(id);
 
-  wrap.appendChild(renderToolbar());
   wrap.appendChild(renderSubBar(mails.length));
+  wrap.appendChild(renderToolbar());
   wrap.appendChild(renderList(mails));
   return wrap;
 }

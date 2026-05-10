@@ -19,8 +19,9 @@ export async function renderTicketList(): Promise<HTMLElement> {
   const filtered = applyFilters(tickets);
   const sorted = applySort(filtered);
 
-  wrap.appendChild(renderToolbar());
+  // ルール: タイトル(subbar) → コントロール(toolbar) → 本体 の順
   wrap.appendChild(renderSubBar(sorted.length));
+  wrap.appendChild(renderToolbar());
   wrap.appendChild(renderTable(sorted));
   return wrap;
 }
