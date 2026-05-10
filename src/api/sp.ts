@@ -250,7 +250,7 @@ export class SpRepository implements Repository {
 
   /** Idempotent: adds only missing fields. Returns names added. */
   private async ensureFields(title: string, fields: FieldSpec[]): Promise<string[]> {
-    const existing = await this.listFieldNames(title);
+    let existing = await this.listFieldNames(title);
     const added: string[] = [];
     for (const f of fields) {
       if (existing.has(f.name)) continue;
@@ -262,8 +262,11 @@ export class SpRepository implements Repository {
         });
         added.push(f.name);
       } catch (e) {
-        // Tolerate "field already exists" (race) but rethrow real errors.
-        if (e instanceof SpError && e.status === 400 && /already exists/i.test(e.body)) continue;
+        // Race / retry: maybe the field actually got created on a previous attempt.
+        // Re-fetch the field list and check before re-throwing.
+        existing = await this.listFieldNames(title);
+        if (existing.has(f.name)) continue;
+        if (e instanceof SpError && e.status === 400 && isDuplicateFieldError(e.body)) continue;
         throw new Error(`field create failed: ${title}.${f.name} — ${(e as Error).message}`);
       }
     }
@@ -547,4 +550,16 @@ export function ticketStatusList(): TicketStatus[] {
 }
 export function priorityList(): Priority[] {
   return ['High', 'Medium', 'Low'];
+}
+
+// SP error message patterns indicating "field/column already exists".
+// Covers English + Japanese messages observed across SP Online tenants.
+function isDuplicateFieldError(body: string): boolean {
+  return (
+    /already exists/i.test(body) ||
+    /duplicate/i.test(body) ||
+    /既に存在/.test(body) ||
+    /重複/.test(body) ||
+    /同じ名前/.test(body)
+  );
 }
