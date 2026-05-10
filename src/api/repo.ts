@@ -23,6 +23,7 @@ export interface AddCommentInput {
   isHtml: boolean;
   sentAt?: string;
   sourceEmailId?: number;
+  hasAttachments?: boolean;
 }
 
 export interface SyncResult {

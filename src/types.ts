@@ -34,6 +34,7 @@ export interface Comment {
   isHtml: boolean;
   sentAt: string;
   sourceEmailId?: number;
+  hasAttachments?: boolean;    // true when the source mail had real attachments
 }
 
 export interface InboxMail {

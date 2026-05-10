@@ -5,6 +5,22 @@ import { getRepo } from '../api/repo';
 import { setState, getState } from '../state';
 import { sanitizeMailHtml } from '../utils/sanitize';
 import { buildOwaSearchQuery, OWA_INBOX_URL } from '../utils/owa';
+
+function commentHasImage(c: Comment): boolean {
+  if (!c.isHtml) return false;
+  return /<img\b/i.test(c.content);
+}
+
+async function copySearchAndOpenOwa(ticket: Ticket, c: Comment): Promise<void> {
+  const q = buildOwaSearchQuery({ ticket, comment: c });
+  try {
+    await navigator.clipboard.writeText(q);
+    toast(getRoot(), '検索文字列をコピーしました。OWA の検索バーに貼り付けて Enter', 'ok', 8000);
+  } catch {
+    toast(getRoot(), `OWA で次を検索: ${q}`, 'warn', 12000);
+  }
+  window.open(OWA_INBOX_URL, '_blank', 'noopener');
+}
 import { isInternalMember, colorForAuthor } from '../utils/members';
 import { renderStatusBadge, renderPriorityLabel } from './ticketList';
 import { toast } from '../components/toast';
@@ -513,8 +529,35 @@ function renderReceivedThread(t: Ticket, received: Comment[]): HTMLElement {
   return el('div', { class: 'spira-th-list' }, received.map(c => renderReceivedCard(t, c)));
 }
 
-function renderReceivedCard(_t: Ticket, c: Comment): HTMLElement {
+function renderReceivedCard(t: Ticket, c: Comment): HTMLElement {
   const internal = isInternalMember(c.fromEmail);
+  const hasImage = commentHasImage(c);
+
+  const tagPills: HTMLElement[] = [];
+  if (c.hasAttachments) {
+    tagPills.push(el('span', {
+      class: 'spira-badge spira-badge--muted',
+      style: 'font-size:var(--fs-xs)',
+      title: '添付ファイルあり',
+    }, ['📎 添付あり']));
+  }
+  if (hasImage) {
+    tagPills.push(el('span', {
+      class: 'spira-badge spira-badge--muted',
+      style: 'font-size:var(--fs-xs)',
+      title: '本文中に画像あり',
+    }, ['🖼 画像あり']));
+  }
+
+  const searchBtn = el('button', {
+    class: 'spira-btn spira-btn--ghost spira-btn--sm',
+    style: 'flex-shrink:0',
+    title: 'このメールの検索文字列をコピーして OWA を開く',
+    onclick: (e: Event) => { e.stopPropagation(); copySearchAndOpenOwa(t, c); },
+  }, [
+    el('span', { html: icon('search'), style: 'display:inline-flex;width:14px;height:14px' }),
+    'OWA で検索',
+  ]);
 
   const head = el('div', { class: 'spira-th-card-head', style: 'flex-wrap:wrap;gap:var(--s-2)' }, [
     el('span', { html: icon('mail') }),
@@ -523,7 +566,9 @@ function renderReceivedCard(_t: Ticket, c: Comment): HTMLElement {
     internal
       ? el('span', { class: 'spira-badge spira-badge--muted', style: 'margin-left:var(--s-2);font-size:var(--fs-xs)' }, ['内部'])
       : el('span', { class: 'spira-badge spira-badge--warn', style: 'margin-left:var(--s-2);font-size:var(--fs-xs)' }, ['外部']),
+    ...tagPills,
     el('span', { style: 'margin-left:auto;color:var(--ink-3);font-size:var(--fs-sm)' }, [fmtDate(c.sentAt)]),
+    searchBtn,
   ]);
 
   const body = el('div', { class: 'spira-th-card-body' });

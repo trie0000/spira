@@ -147,6 +147,7 @@ function asComment(it: SpListItem): Comment {
     isHtml: Boolean(it.IsHtml),
     sentAt: String(it.SentAt ?? it.Created),
     sourceEmailId: it.SourceEmailId != null ? Number(it.SourceEmailId) : undefined,
+    hasAttachments: it.HasAttachments != null ? Boolean(it.HasAttachments) : undefined,
   };
 }
 
@@ -412,6 +413,7 @@ export class SpRepository implements Repository {
       IsHtml: input.isHtml,
       SentAt: input.sentAt ?? new Date().toISOString(),
       SourceEmailId: input.sourceEmailId ?? null,
+      HasAttachments: input.hasAttachments ?? false,
     };
     const created = await this.tx.req<SpListItem>(`${this.listPath(this.cfg.listComments)}/items`, {
       method: 'POST',
@@ -471,6 +473,7 @@ export class SpRepository implements Repository {
           fromEmail: m.fromEmail, fromName: m.fromName,
           content: m.bodyHtml || m.bodyText, isHtml: !!m.bodyHtml,
           sentAt: m.receivedAt, sourceEmailId: m.id,
+          hasAttachments: m.hasAttachments,
         });
         await this.markInboxProcessed(m.id, { ticketId: tid, result: 'auto-linked' });
         autoLinked++;
@@ -574,6 +577,7 @@ function commentFieldSpecs(): FieldSpec[] {
     { name: 'IsHtml', type: 'Boolean' },
     { name: 'SentAt', type: 'DateTime' },
     { name: 'SourceEmailId', type: 'Number' },
+    { name: 'HasAttachments', type: 'Boolean' },
   ];
 }
 

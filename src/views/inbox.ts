@@ -541,6 +541,7 @@ export function openNewTicketModal(m: InboxMail): void {
             fromEmail: m.fromEmail, fromName: m.fromName,
             content: m.bodyHtml || m.bodyText, isHtml: !!m.bodyHtml,
             sentAt: m.receivedAt, sourceEmailId: m.id,
+            hasAttachments: m.hasAttachments,
           });
           await repo.markInboxProcessed(m.id, { ticketId: t.id, result: 'created' });
         }
@@ -631,6 +632,7 @@ export function openLinkModal(m: InboxMail): void {
           fromEmail: m.fromEmail, fromName: m.fromName,
           content: m.bodyHtml || m.bodyText, isHtml: !!m.bodyHtml,
           sentAt: m.receivedAt, sourceEmailId: m.id,
+          hasAttachments: m.hasAttachments,
         });
         await repo.markInboxProcessed(m.id, { ticketId: selectedId, result: 'manual-linked' });
         toast(getRoot(), `#${String(selectedId).padStart(3, '0')} に紐付けました`, 'ok');

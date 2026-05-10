@@ -94,8 +94,8 @@ export function seedMock(): void {
     {
       id: 4, ticketId: 3, type: 'received',
       fromEmail: 'ops@external.example', fromName: '運用',
-      content: '<p>サーバ応答が断続的に消えています。Grafana のメトリクスをご確認ください。</p>',
-      isHtml: true, sentAt: minus(30),
+      content: '<p>サーバ応答が断続的に消えています。Grafana のメトリクスをご確認ください。</p><p><img src="data:image/svg+xml;utf8,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'80\' height=\'40\'%3E%3Crect width=\'80\' height=\'40\' fill=\'%23c47f1c\'/%3E%3C/svg%3E" alt="chart"/></p>',
+      isHtml: true, sentAt: minus(30), hasAttachments: true,
     },
     {
       id: 5, ticketId: 3, type: 'note',
@@ -257,6 +257,7 @@ export class MockRepository implements Repository {
       isHtml: input.isHtml,
       sentAt: input.sentAt ?? now(),
       sourceEmailId: input.sourceEmailId,
+      hasAttachments: input.hasAttachments,
     };
     store.comments.push(c);
     const t = store.tickets.find(x => x.id === input.ticketId);
@@ -302,6 +303,7 @@ export class MockRepository implements Repository {
           fromEmail: m.fromEmail, fromName: m.fromName,
           content: m.bodyHtml, isHtml: true,
           sentAt: m.receivedAt, sourceEmailId: m.id,
+          hasAttachments: m.hasAttachments,
         });
         await this.markInboxProcessed(m.id, { ticketId: tid, result: 'auto-linked' });
         autoLinked++;
