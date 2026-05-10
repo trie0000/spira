@@ -728,6 +728,26 @@
 }
 .spira-empty-title { color: var(--ink); font-size: var(--fs-lg); font-weight: 500; }
 
+/* Ensure error / message text is always drag-selectable, even though
+   parent overlay uses `all: initial` and some browsers' UA defaults reset
+   `user-select` to `none` on focused interactive elements. */
+.spira-root .spira-empty,
+.spira-root .spira-empty *,
+.spira-root pre,
+.spira-root .spira-th-card-body,
+.spira-root .spira-th-card-body *,
+.spira-root .spira-toast,
+.spira-root .spira-error-banner {
+  -webkit-user-select: text;
+  user-select: text;
+  cursor: text;
+}
+.spira-root .spira-empty button,
+.spira-root .spira-toast button,
+.spira-root .spira-error-banner button {
+  cursor: pointer;
+}
+
 .spira-skeleton {
   background: linear-gradient(90deg, var(--paper-2) 0%, var(--paper-2-strong) 50%, var(--paper-2) 100%);
   background-size: 200% 100%;
