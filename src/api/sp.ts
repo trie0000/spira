@@ -202,21 +202,24 @@ export class SpRepository implements Repository {
 
   // ---- bootstrap
 
-  async ensureLists(): Promise<{ created: string[] }> {
+  async ensureLists(): Promise<{ created: string[]; addedFields: string[] }> {
     const created: string[] = [];
-    if (!(await this.listExists(this.cfg.listTickets))) {
-      await this.createList(this.cfg.listTickets, ticketFieldSpecs());
-      created.push(this.cfg.listTickets);
-    }
-    if (!(await this.listExists(this.cfg.listComments))) {
-      await this.createList(this.cfg.listComments, commentFieldSpecs());
-      created.push(this.cfg.listComments);
-    }
-    if (!(await this.listExists(this.cfg.listInbox))) {
-      await this.createList(this.cfg.listInbox, inboxFieldSpecs());
-      created.push(this.cfg.listInbox);
-    }
-    return { created };
+    const addedFields: string[] = [];
+
+    const ensure = async (title: string, fields: FieldSpec[]) => {
+      if (!(await this.listExists(title))) {
+        await this.createListBare(title);
+        created.push(title);
+      }
+      const added = await this.ensureFields(title, fields);
+      for (const a of added) addedFields.push(`${title}.${a}`);
+    };
+
+    await ensure(this.cfg.listTickets, ticketFieldSpecs());
+    await ensure(this.cfg.listComments, commentFieldSpecs());
+    await ensure(this.cfg.listInbox, inboxFieldSpecs());
+
+    return { created, addedFields };
   }
 
   private async listExists(title: string): Promise<boolean> {
@@ -229,7 +232,7 @@ export class SpRepository implements Repository {
     }
   }
 
-  private async createList(title: string, fields: FieldSpec[]): Promise<void> {
+  private async createListBare(title: string): Promise<void> {
     // /_api/web/lists POST requires verbose payload with typed __metadata.
     await this.tx.req('/_api/web/lists', {
       method: 'POST',
@@ -242,13 +245,40 @@ export class SpRepository implements Repository {
         ContentTypesEnabled: false,
       }),
     });
+  }
+
+  /** Idempotent: adds only missing fields. Returns names added. */
+  private async ensureFields(title: string, fields: FieldSpec[]): Promise<string[]> {
+    const existing = await this.listFieldNames(title);
+    const added: string[] = [];
     for (const f of fields) {
-      await this.tx.req(`${this.listPath(title)}/fields`, {
-        method: 'POST',
-        odata: 'verbose',
-        body: JSON.stringify(toFieldSchema(f)),
-      });
+      if (existing.has(f.name)) continue;
+      try {
+        await this.tx.req(`${this.listPath(title)}/fields`, {
+          method: 'POST',
+          odata: 'verbose',
+          body: JSON.stringify(toFieldSchema(f)),
+        });
+        added.push(f.name);
+      } catch (e) {
+        // Tolerate "field already exists" (race) but rethrow real errors.
+        if (e instanceof SpError && e.status === 400 && /already exists/i.test(e.body)) continue;
+        throw new Error(`field create failed: ${title}.${f.name} — ${(e as Error).message}`);
+      }
     }
+    return added;
+  }
+
+  private async listFieldNames(title: string): Promise<Set<string>> {
+    const url = `${this.listPath(title)}/fields?$select=InternalName,Title,StaticName&$top=500`;
+    const res = await this.tx.req<{ value: { InternalName: string; Title: string; StaticName: string }[] }>(url);
+    const set = new Set<string>();
+    for (const f of res.value ?? []) {
+      if (f.InternalName) set.add(f.InternalName);
+      if (f.Title) set.add(f.Title);
+      if (f.StaticName) set.add(f.StaticName);
+    }
+    return set;
   }
 
   // ---- tickets

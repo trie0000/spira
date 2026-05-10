@@ -49,10 +49,11 @@ export async function mount(): Promise<void> {
     const repo = getRepo();
 
     if (initRes.mode === 'sp') {
-      const r = await repo.ensureLists();
-      if (r.created.length > 0) {
-        toast(root, `初期セットアップ: ${r.created.join(' / ')} を作成しました`, 'ok', 8000);
-      }
+      const r = await repo.ensureLists() as { created: string[]; addedFields?: string[] };
+      const msgs: string[] = [];
+      if (r.created.length > 0) msgs.push(`リスト作成: ${r.created.join(' / ')}`);
+      if (r.addedFields && r.addedFields.length > 0) msgs.push(`列追加: ${r.addedFields.length}件`);
+      if (msgs.length > 0) toast(root, `初期セットアップ完了 — ${msgs.join(' / ')}`, 'ok', 8000);
     }
 
     // load counts & users
