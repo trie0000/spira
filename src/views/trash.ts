@@ -1,17 +1,14 @@
 import { el, fmtDate } from '../utils/dom';
-import {
-  listDeletedTicketsMock, restoreTicketMock,
-  hardDeleteTicketMock, emptyTrashMock,
-} from '../api/mock';
-import { setState } from '../state';
+import { getRepo } from '../api/repo';
+import { setState, getState } from '../state';
 import { confirmModal } from '../components/modal';
 import { toast } from '../components/toast';
 import { renderStatusBadge } from './ticketList';
 import type { Ticket } from '../types';
 
-export function renderTrash(): HTMLElement {
+export async function renderTrash(): Promise<HTMLElement> {
   const wrap = el('div', { class: 'spira-main-wrap', style: 'display:flex;flex-direction:column;height:100%;min-height:0' });
-  const rows = listDeletedTicketsMock().sort((a, b) => (b.deletedAt ?? '').localeCompare(a.deletedAt ?? ''));
+  const rows = await getRepo().listDeletedTickets();
 
   const toolbar = el('div', { class: 'spira-toolbar' }, [
     el('div', { style: 'font-weight:500;color:var(--ink);font-size:var(--fs-md)' }, [`ゴミ箱 (${rows.length})`]),
@@ -25,10 +22,14 @@ export function renderTrash(): HTMLElement {
           message: `${rows.length} 件のチケットと関連 Comments を物理削除します。元に戻せません。`,
           primaryLabel: '空にする',
           primaryVariant: 'danger',
-          onConfirm: () => {
-            emptyTrashMock();
-            toast(getRoot(), 'ゴミ箱を空にしました', 'ok');
-            setState({});
+          onConfirm: async () => {
+            try {
+              await getRepo().emptyTrash();
+              toast(getRoot(), 'ゴミ箱を空にしました', 'ok');
+              setState({ trashCount: 0 });
+            } catch (e) {
+              toast(getRoot(), `失敗: ${(e as Error).message}`, 'error');
+            }
           },
         });
       },
@@ -64,10 +65,14 @@ function renderRow(t: Ticket): HTMLElement {
     el('td', { style: 'text-align:right' }, [
       el('button', {
         class: 'spira-btn spira-btn--secondary spira-btn--sm',
-        onclick: () => {
-          restoreTicketMock(t.id);
-          toast(getRoot(), `#${String(t.id).padStart(3, '0')} を復元しました`, 'ok');
-          setState({});
+        onclick: async () => {
+          try {
+            await getRepo().restoreTicket(t.id);
+            toast(getRoot(), `#${String(t.id).padStart(3, '0')} を復元しました`, 'ok');
+            setState({ trashCount: Math.max(0, getState().trashCount - 1) });
+          } catch (e) {
+            toast(getRoot(), `復元失敗: ${(e as Error).message}`, 'error');
+          }
         },
       }, ['復元']),
       ' ',
@@ -79,10 +84,14 @@ function renderRow(t: Ticket): HTMLElement {
             message: `#${String(t.id).padStart(3, '0')} 「${t.title}」 を完全に削除します。元に戻せません。`,
             primaryLabel: '物理削除',
             primaryVariant: 'danger',
-            onConfirm: () => {
-              hardDeleteTicketMock(t.id);
-              toast(getRoot(), '物理削除しました', 'ok');
-              setState({});
+            onConfirm: async () => {
+              try {
+                await getRepo().hardDeleteTicket(t.id);
+                toast(getRoot(), '物理削除しました', 'ok');
+                setState({ trashCount: Math.max(0, getState().trashCount - 1) });
+              } catch (e) {
+                toast(getRoot(), `失敗: ${(e as Error).message}`, 'error');
+              }
             },
           });
         },

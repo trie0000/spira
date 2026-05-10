@@ -1,20 +1,18 @@
 import { el, fmtDate } from '../utils/dom';
 import { icon } from '../icons';
-import {
-  listInboxMock, listTicketsMock, listSiteUsersMock,
-  createTicketMock, addCommentMock, markInboxProcessedMock,
-} from '../api/mock';
 import { ticketStatusList, priorityList } from '../api/sp';
-import { setState } from '../state';
+import { getRepo } from '../api/repo';
+import { setState, getState } from '../state';
 import { sanitizeMailHtml } from '../utils/sanitize';
 import { openModal } from '../components/modal';
 import { toast } from '../components/toast';
 import type { InboxMail, TicketStatus, Priority } from '../types';
 
-export function renderInbox(): HTMLElement {
+export async function renderInbox(): Promise<HTMLElement> {
   const wrap = el('div', { class: 'spira-main-wrap', style: 'display:flex;flex-direction:column;height:100%;min-height:0' });
+  const mails = await getRepo().listInbox({ unprocessedOnly: true });
   wrap.appendChild(renderToolbar());
-  wrap.appendChild(renderList());
+  wrap.appendChild(renderList(mails));
   return wrap;
 }
 
@@ -32,8 +30,7 @@ function renderToolbar(): HTMLElement {
   ]);
 }
 
-function renderList(): HTMLElement {
-  const mails = listInboxMock({ unprocessedOnly: true });
+function renderList(mails: InboxMail[]): HTMLElement {
   if (mails.length === 0) {
     return el('div', { class: 'spira-content' }, [
       el('div', { class: 'spira-empty' }, [
@@ -42,7 +39,6 @@ function renderList(): HTMLElement {
       ]),
     ]);
   }
-
   return el('div', { class: 'spira-content', style: 'padding:0' }, [
     el('div', { class: 'spira-inbox-list' }, mails.map(m => renderRow(m))),
   ]);
@@ -71,9 +67,9 @@ function getRoot(): HTMLElement {
 }
 
 export function openNewTicketModal(m: InboxMail): void {
-  const users = listSiteUsersMock();
+  const users = getState().users;
 
-  const titleInput = el('input', { type: 'text', class: 'spira-input', value: m.subject }) as HTMLInputElement;
+  const titleInput = el('input', { type: 'text', class: 'spira-input', value: m.subject || '' }) as HTMLInputElement;
   const statusSel = el('select', { class: 'spira-select' }, ticketStatusList().map(v => el('option', { value: v, selected: v === '新規' }, [v]))) as HTMLSelectElement;
   const prioSel = el('select', { class: 'spira-select' }, priorityList().map(v => el('option', { value: v, selected: v === 'Medium' }, [v]))) as HTMLSelectElement;
   const assigneeSel = el('select', { class: 'spira-select' }, [
@@ -82,21 +78,23 @@ export function openNewTicketModal(m: InboxMail): void {
   ]) as HTMLSelectElement;
   const dueInput = el('input', { type: 'date', class: 'spira-input' }) as HTMLInputElement;
 
-  const preview = el('div', { class: 'spira-th-card spira-th-card--received', style: 'max-height:240px;overflow:auto' }, [
-    el('div', { class: 'spira-th-card-head' }, [
-      el('span', { html: icon('mail') }),
-      el('span', { class: 'spira-th-card-from' }, [m.fromName ?? m.fromEmail]),
-      el('span', { style: 'margin-left:auto;color:var(--ink-3);font-size:var(--fs-sm)' }, [fmtDate(m.receivedAt)]),
-    ]),
-    (() => {
-      const body = el('div', { class: 'spira-th-card-body' });
-      body.innerHTML = sanitizeMailHtml(m.bodyHtml);
-      return body;
-    })(),
-  ]);
+  const previewBody = el('div', { class: 'spira-th-card-body' });
+  if (m.bodyHtml) previewBody.innerHTML = sanitizeMailHtml(m.bodyHtml);
+  else previewBody.textContent = m.bodyText || '(本文なし)';
+
+  const preview = m.id > 0
+    ? el('div', { class: 'spira-th-card spira-th-card--received', style: 'max-height:240px;overflow:auto' }, [
+        el('div', { class: 'spira-th-card-head' }, [
+          el('span', { html: icon('mail') }),
+          el('span', { class: 'spira-th-card-from' }, [m.fromName ?? m.fromEmail]),
+          el('span', { style: 'margin-left:auto;color:var(--ink-3);font-size:var(--fs-sm)' }, [fmtDate(m.receivedAt)]),
+        ]),
+        previewBody,
+      ])
+    : null;
 
   const body = el('div', {}, [
-    el('div', { class: 'spira-field' }, [el('label', { class: 'spira-field-label' }, ['メールプレビュー']), preview]),
+    ...(preview ? [el('div', { class: 'spira-field' }, [el('label', { class: 'spira-field-label' }, ['メールプレビュー']), preview])] : []),
     el('div', { class: 'spira-field' }, [el('label', { class: 'spira-field-label' }, ['タイトル']), titleInput]),
     el('div', { style: 'display:grid;grid-template-columns:1fr 1fr;gap:var(--s-5)' }, [
       el('div', { class: 'spira-field' }, [el('label', { class: 'spira-field-label' }, ['ステータス']), statusSel]),
@@ -111,47 +109,57 @@ export function openNewTicketModal(m: InboxMail): void {
     body,
     primaryLabel: '起票',
     primaryVariant: 'primary',
-    onPrimary: () => {
-      const t = createTicketMock({
-        title: titleInput.value.trim() || m.subject,
-        status: statusSel.value as TicketStatus,
-        priority: prioSel.value as Priority,
-        assigneeEmail: assigneeSel.value || undefined,
-        reporterEmail: m.fromEmail,
-        reporterName: m.fromName,
-        dueDate: dueInput.value ? new Date(dueInput.value).toISOString() : undefined,
-        rawSubject: m.subject,
-        initialConversationId: m.conversationId,
-      });
-      addCommentMock({
-        ticketId: t.id, type: 'received',
-        fromEmail: m.fromEmail, fromName: m.fromName,
-        content: m.bodyHtml, isHtml: true,
-        sentAt: m.receivedAt, sourceEmailId: m.id,
-      });
-      markInboxProcessedMock(m.id, { ticketId: t.id, result: 'created' });
-      toast(getRoot(), `#${String(t.id).padStart(3, '0')} を起票しました`, 'ok');
-      setState({ view: 'tickets', selectedTicketId: t.id });
+    onPrimary: async () => {
+      const title = titleInput.value.trim() || m.subject || '(無題)';
+      try {
+        const repo = getRepo();
+        const t = await repo.createTicket({
+          title,
+          status: statusSel.value as TicketStatus,
+          priority: prioSel.value as Priority,
+          assigneeEmail: assigneeSel.value || undefined,
+          reporterEmail: m.fromEmail || undefined,
+          reporterName: m.fromName,
+          dueDate: dueInput.value ? new Date(dueInput.value).toISOString() : undefined,
+          rawSubject: m.subject || undefined,
+          initialConversationId: m.conversationId,
+        });
+        if (m.id > 0) {
+          await repo.addComment({
+            ticketId: t.id, type: 'received',
+            fromEmail: m.fromEmail, fromName: m.fromName,
+            content: m.bodyHtml || m.bodyText, isHtml: !!m.bodyHtml,
+            sentAt: m.receivedAt, sourceEmailId: m.id,
+          });
+          await repo.markInboxProcessed(m.id, { ticketId: t.id, result: 'created' });
+        }
+        toast(getRoot(), `#${String(t.id).padStart(3, '0')} を起票しました`, 'ok');
+        const inboxCount = m.id > 0 ? Math.max(0, getState().inboxCount - 1) : getState().inboxCount;
+        setState({ view: 'tickets', selectedTicketId: t.id, inboxCount });
+      } catch (e) {
+        toast(getRoot(), `起票に失敗: ${(e as Error).message}`, 'error');
+        throw e; // keep modal open
+      }
     },
   });
 }
 
 export function openLinkModal(m: InboxMail): void {
-  const tickets = listTicketsMock();
   const queryInput = el('input', {
     type: 'search',
     class: 'spira-input',
     placeholder: '#001 や 件名で検索',
   }) as HTMLInputElement;
-  const resultList = el('div', { style: 'max-height:280px;overflow:auto;border:1px solid var(--paper-3);border-radius:var(--r-2)' });
+  const resultList = el('div', { style: 'max-height:280px;overflow:auto;border:1px solid var(--paper-3);border-radius:var(--r-2);min-height:120px' });
 
   let selectedId: number | null = null;
+  let allTickets: { id: number; title: string; status: string }[] = [];
 
-  function refresh() {
+  function paint() {
     const q = queryInput.value.trim().toLowerCase();
     const filtered = q
-      ? tickets.filter(t => String(t.id).includes(q.replace(/^#/, '')) || t.title.toLowerCase().includes(q))
-      : tickets;
+      ? allTickets.filter(t => String(t.id).includes(q.replace(/^#/, '')) || t.title.toLowerCase().includes(q))
+      : allTickets;
     resultList.innerHTML = '';
     if (filtered.length === 0) {
       resultList.appendChild(el('div', { class: 'spira-empty', style: 'padding:var(--s-7)' }, ['該当するチケットがありません']));
@@ -161,7 +169,7 @@ export function openLinkModal(m: InboxMail): void {
       const item = el('div', {
         class: 'spira-menu-item',
         style: `padding:var(--s-3) var(--s-5);${selectedId === t.id ? 'background:var(--accent-soft)' : ''}`,
-        onclick: () => { selectedId = t.id; refresh(); },
+        onclick: () => { selectedId = t.id; paint(); },
       }, [
         el('span', { style: 'font-family:var(--font-mono);color:var(--ink-3);min-width:60px' }, [`#${String(t.id).padStart(3, '0')}`]),
         el('span', { style: 'flex:1' }, [t.title]),
@@ -171,8 +179,17 @@ export function openLinkModal(m: InboxMail): void {
     }
   }
 
-  queryInput.addEventListener('input', refresh);
-  refresh();
+  // Async load tickets
+  resultList.appendChild(el('div', { class: 'spira-empty', style: 'padding:var(--s-7)' }, ['読み込み中...']));
+  getRepo().listTickets().then(ts => {
+    allTickets = ts.map(t => ({ id: t.id, title: t.title, status: t.status }));
+    paint();
+  }).catch(e => {
+    resultList.innerHTML = '';
+    resultList.appendChild(el('div', { class: 'spira-empty', style: 'padding:var(--s-7);color:var(--danger)' }, [`読み込み失敗: ${e.message}`]));
+  });
+
+  queryInput.addEventListener('input', paint);
 
   const body = el('div', {}, [
     el('div', { class: 'spira-field' }, [
@@ -186,20 +203,30 @@ export function openLinkModal(m: InboxMail): void {
     title: '既存チケットに紐付け',
     body,
     primaryLabel: '紐付ける',
-    onPrimary: () => {
+    onPrimary: async () => {
       if (selectedId == null) {
         toast(getRoot(), 'チケットを選択してください', 'warn');
         throw new Error('no selection');
       }
-      addCommentMock({
-        ticketId: selectedId, type: 'received',
-        fromEmail: m.fromEmail, fromName: m.fromName,
-        content: m.bodyHtml, isHtml: true,
-        sentAt: m.receivedAt, sourceEmailId: m.id,
-      });
-      markInboxProcessedMock(m.id, { ticketId: selectedId, result: 'manual-linked' });
-      toast(getRoot(), `#${String(selectedId).padStart(3, '0')} に紐付けました`, 'ok');
-      setState({ view: 'tickets', selectedTicketId: selectedId });
+      try {
+        const repo = getRepo();
+        await repo.addComment({
+          ticketId: selectedId, type: 'received',
+          fromEmail: m.fromEmail, fromName: m.fromName,
+          content: m.bodyHtml || m.bodyText, isHtml: !!m.bodyHtml,
+          sentAt: m.receivedAt, sourceEmailId: m.id,
+        });
+        await repo.markInboxProcessed(m.id, { ticketId: selectedId, result: 'manual-linked' });
+        toast(getRoot(), `#${String(selectedId).padStart(3, '0')} に紐付けました`, 'ok');
+        setState({
+          view: 'tickets',
+          selectedTicketId: selectedId,
+          inboxCount: Math.max(0, getState().inboxCount - 1),
+        });
+      } catch (e) {
+        toast(getRoot(), `紐付け失敗: ${(e as Error).message}`, 'error');
+        throw e;
+      }
     },
   });
 }

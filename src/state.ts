@@ -1,5 +1,5 @@
 // Tiny global state — single store with subscribe.
-import type { ViewName } from './types';
+import type { ViewName, SiteUser } from './types';
 
 interface State {
   view: ViewName;
@@ -12,6 +12,14 @@ interface State {
   };
   sortBy: 'updated' | 'priority' | 'due';
   sortDir: 'asc' | 'desc';
+  // cached counts shown in sidebar
+  inboxCount: number;
+  trashCount: number;
+  // cached AD picker users
+  users: SiteUser[];
+  // bootstrap status
+  ready: boolean;
+  errorBanner: string | null;
 }
 
 type Listener = () => void;
@@ -22,6 +30,11 @@ const state: State = {
   filter: { status: '', assignee: '', priority: '', query: '' },
   sortBy: 'updated',
   sortDir: 'desc',
+  inboxCount: 0,
+  trashCount: 0,
+  users: [],
+  ready: false,
+  errorBanner: null,
 };
 
 const listeners = new Set<Listener>();

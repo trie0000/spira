@@ -1,60 +1,219 @@
-// SharePoint REST API client + bootstrap (list auto-creation).
-// Same-origin認証前提。MVP は最小実装。
-import type { Ticket, Comment, InboxMail, SiteUser, TicketStatus, Priority } from '../types';
+// SharePoint REST API repository — same-origin auth, MERGE/DELETE via X-HTTP-Method.
+// All endpoints are relative to siteUrl.
+import type { Ticket, Comment, InboxMail, SiteUser, InboxState, TicketStatus, Priority, CommentType } from '../types';
+import type { Repository, CreateTicketInput, AddCommentInput, SyncResult } from './repo';
 
 export interface SpConfig {
-  siteUrl: string;             // e.g. https://contoso.sharepoint.com/sites/spira
-  listTickets: string;         // 'Tickets'
-  listComments: string;        // 'Comments'
-  listInbox: string;           // 'InboxMails'
+  siteUrl: string;        // absolute, e.g. https://contoso.sharepoint.com/sites/spira
+  listTickets: string;
+  listComments: string;
+  listInbox: string;
 }
 
-export class SpClient {
-  constructor(public cfg: SpConfig) {}
+const DEFAULT_LISTS = {
+  listTickets:  'Tickets',
+  listComments: 'Comments',
+  listInbox:    'InboxMails',
+};
 
-  private async req<T = unknown>(path: string, init: RequestInit = {}): Promise<T> {
-    const url = path.startsWith('http') ? path : `${this.cfg.siteUrl}${path}`;
+export function detectSpConfig(): SpConfig {
+  // Prefer SP page context if available.
+  const ctx = (window as unknown as { _spPageContextInfo?: { webAbsoluteUrl?: string } })._spPageContextInfo;
+  let siteUrl = ctx?.webAbsoluteUrl;
+  // Fallback: derive from location (`/sites/<x>` or root).
+  if (!siteUrl) {
+    const m = location.pathname.match(/^(\/sites\/[^/]+|\/teams\/[^/]+)/i);
+    siteUrl = location.origin + (m ? m[0] : '');
+  }
+  return { siteUrl, ...DEFAULT_LISTS };
+}
+
+export class SpError extends Error {
+  constructor(public status: number, public body: string, public url?: string) {
+    super(`SP ${status} ${url ?? ''}: ${body.slice(0, 200)}`);
+  }
+}
+
+// ---------------------------------------------------------------- transport
+
+class SpTransport {
+  constructor(public siteUrl: string) {}
+
+  private digest?: { value: string; expires: number };
+
+  /**
+   * @param init.odata - 'nometadata' (default, slim responses) or 'verbose' (required by some
+   *   write endpoints like POST /_api/web/lists which need typed payloads with __metadata).
+   */
+  async req<T = unknown>(path: string, init: RequestInit & { odata?: 'nometadata' | 'verbose' } = {}): Promise<T> {
+    const url = path.startsWith('http') ? path : `${this.siteUrl}${path}`;
     const headers = new Headers(init.headers);
-    headers.set('Accept', 'application/json;odata=nometadata');
-    if (init.body) headers.set('Content-Type', 'application/json;odata=nometadata');
-    const digest = await this.formDigest();
-    if (init.method && init.method !== 'GET') headers.set('X-RequestDigest', digest);
+    const odata = init.odata ?? 'nometadata';
+    if (!headers.has('Accept')) headers.set('Accept', `application/json;odata=${odata}`);
+    if (init.body && !headers.has('Content-Type')) {
+      headers.set('Content-Type', `application/json;odata=${odata}`);
+    }
+    const method = (init.method ?? 'GET').toUpperCase();
+    const isWrite = method !== 'GET' && method !== 'HEAD';
+    if (isWrite) headers.set('X-RequestDigest', await this.formDigest());
     const res = await fetch(url, { ...init, headers, credentials: 'include' });
-    if (!res.ok) throw new SpError(res.status, await res.text());
+    if (!res.ok) throw new SpError(res.status, await res.text(), url);
     if (res.status === 204) return undefined as T;
-    return res.json() as Promise<T>;
+    const text = await res.text();
+    if (!text) return undefined as T;
+    try {
+      const parsed = JSON.parse(text);
+      // verbose responses wrap in { d: ... } — unwrap.
+      if (odata === 'verbose' && parsed && typeof parsed === 'object' && 'd' in parsed) {
+        return (parsed as { d: T }).d;
+      }
+      return parsed as T;
+    }
+    catch { return text as unknown as T; }
   }
 
-  private digestCache?: { value: string; expires: number };
-  private async formDigest(): Promise<string> {
-    if (this.digestCache && this.digestCache.expires > Date.now()) return this.digestCache.value;
-    const res = await fetch(`${this.cfg.siteUrl}/_api/contextinfo`, {
+  async formDigest(): Promise<string> {
+    if (this.digest && this.digest.expires > Date.now()) return this.digest.value;
+    const res = await fetch(`${this.siteUrl}/_api/contextinfo`, {
       method: 'POST',
       headers: { Accept: 'application/json;odata=nometadata' },
       credentials: 'include',
     });
-    if (!res.ok) throw new SpError(res.status, 'contextinfo failed');
+    if (!res.ok) throw new SpError(res.status, 'contextinfo failed', `${this.siteUrl}/_api/contextinfo`);
     const data = await res.json() as { FormDigestValue: string; FormDigestTimeoutSeconds: number };
-    this.digestCache = {
+    this.digest = {
       value: data.FormDigestValue,
       expires: Date.now() + (data.FormDigestTimeoutSeconds - 60) * 1000,
     };
     return data.FormDigestValue;
   }
 
-  // ---- bootstrap: ensure lists exist ----
+  async update(listPath: string, id: number, body: Record<string, unknown>): Promise<void> {
+    await this.req(`${listPath}/items(${id})`, {
+      method: 'POST',
+      headers: { 'X-HTTP-Method': 'MERGE', 'IF-MATCH': '*' },
+      body: JSON.stringify(body),
+    });
+  }
+
+  async remove(listPath: string, id: number): Promise<void> {
+    await this.req(`${listPath}/items(${id})`, {
+      method: 'POST',
+      headers: { 'X-HTTP-Method': 'DELETE', 'IF-MATCH': '*' },
+    });
+  }
+}
+
+// ---------------------------------------------------------------- field mapping
+
+interface SpListItem {
+  Id: number;
+  Title?: string;
+  Created: string;
+  Modified: string;
+  [k: string]: unknown;
+}
+
+function asTicket(it: SpListItem): Ticket {
+  return {
+    id: it.Id,
+    title: String(it.Title ?? ''),
+    description: it.Description ? String(it.Description) : undefined,
+    status: (it.Status as TicketStatus) || '新規',
+    priority: (it.Priority as Priority) || 'Medium',
+    assigneeEmail: it.AssigneeEmail ? String(it.AssigneeEmail) : undefined,
+    assigneeName: it.AssigneeName ? String(it.AssigneeName) : undefined,
+    reporterEmail: it.ReporterEmail ? String(it.ReporterEmail) : undefined,
+    reporterName: it.ReporterName ? String(it.ReporterName) : undefined,
+    dueDate: it.DueDate ? String(it.DueDate) : undefined,
+    rawSubject: it.RawSubject ? String(it.RawSubject) : undefined,
+    initialConversationId: it.InitialConversationId ? String(it.InitialConversationId) : undefined,
+    isDeleted: Boolean(it.IsDeleted),
+    deletedAt: it.DeletedAt ? String(it.DeletedAt) : undefined,
+    createdAt: it.Created,
+    updatedAt: it.Modified,
+  };
+}
+
+function asComment(it: SpListItem): Comment {
+  return {
+    id: it.Id,
+    ticketId: Number(it.TicketId ?? 0),
+    type: (it.Type as CommentType) || 'note',
+    fromEmail: it.FromEmail ? String(it.FromEmail) : undefined,
+    fromName: it.FromName ? String(it.FromName) : undefined,
+    content: String(it.Content ?? ''),
+    isHtml: Boolean(it.IsHtml),
+    sentAt: String(it.SentAt ?? it.Created),
+    sourceEmailId: it.SourceEmailId != null ? Number(it.SourceEmailId) : undefined,
+  };
+}
+
+function asInbox(it: SpListItem): InboxMail {
+  return {
+    id: it.Id,
+    subject: String(it.Subject ?? it.Title ?? ''),
+    bodyHtml: String(it.BodyHtml ?? ''),
+    bodyText: String(it.BodyText ?? ''),
+    fromEmail: String(it.FromEmail ?? ''),
+    fromName: it.FromName ? String(it.FromName) : undefined,
+    receivedAt: String(it.ReceivedAt ?? it.Created),
+    hasAttachments: Boolean(it.HasAttachments),
+    conversationId: it.ConversationId ? String(it.ConversationId) : undefined,
+    owaLink: it.OwaLink ? String(it.OwaLink) : undefined,
+    isProcessed: Boolean(it.IsProcessed),
+    ticketId: it.TicketId != null ? Number(it.TicketId) : undefined,
+    processedAt: it.ProcessedAt ? String(it.ProcessedAt) : undefined,
+    processResult: it.ProcessResult ? (String(it.ProcessResult) as InboxState) : undefined,
+  };
+}
+
+function ticketBody(input: Partial<Ticket> | CreateTicketInput): Record<string, unknown> {
+  const b: Record<string, unknown> = {};
+  if ('title' in input && input.title !== undefined) b.Title = input.title;
+  if ('description' in input) b.Description = input.description ?? null;
+  if ('status' in input) b.Status = input.status;
+  if ('priority' in input) b.Priority = input.priority;
+  if ('assigneeEmail' in input) b.AssigneeEmail = input.assigneeEmail ?? null;
+  if ('assigneeName' in input) b.AssigneeName = input.assigneeName ?? null;
+  if ('reporterEmail' in input) b.ReporterEmail = input.reporterEmail ?? null;
+  if ('reporterName' in input) b.ReporterName = input.reporterName ?? null;
+  if ('dueDate' in input) b.DueDate = input.dueDate ?? null;
+  if ('rawSubject' in input) b.RawSubject = input.rawSubject ?? null;
+  if ('initialConversationId' in input) b.InitialConversationId = input.initialConversationId ?? null;
+  if ('isDeleted' in input) b.IsDeleted = input.isDeleted ?? false;
+  if ('deletedAt' in input) b.DeletedAt = input.deletedAt ?? null;
+  return b;
+}
+
+// ---------------------------------------------------------------- repo impl
+
+interface ListItemsResp<T> { value: T[] }
+
+export class SpRepository implements Repository {
+  private tx: SpTransport;
+  constructor(public cfg: SpConfig) {
+    this.tx = new SpTransport(cfg.siteUrl);
+  }
+
+  private listPath(name: string): string {
+    return `/_api/web/lists/getbytitle('${encodeURIComponent(name)}')`;
+  }
+
+  // ---- bootstrap
+
   async ensureLists(): Promise<{ created: string[] }> {
     const created: string[] = [];
     if (!(await this.listExists(this.cfg.listTickets))) {
-      await this.createList(this.cfg.listTickets, ticketFields());
+      await this.createList(this.cfg.listTickets, ticketFieldSpecs());
       created.push(this.cfg.listTickets);
     }
     if (!(await this.listExists(this.cfg.listComments))) {
-      await this.createList(this.cfg.listComments, commentFields());
+      await this.createList(this.cfg.listComments, commentFieldSpecs());
       created.push(this.cfg.listComments);
     }
     if (!(await this.listExists(this.cfg.listInbox))) {
-      await this.createList(this.cfg.listInbox, inboxFields());
+      await this.createList(this.cfg.listInbox, inboxFieldSpecs());
       created.push(this.cfg.listInbox);
     }
     return { created };
@@ -62,7 +221,7 @@ export class SpClient {
 
   private async listExists(title: string): Promise<boolean> {
     try {
-      await this.req(`/_api/web/lists/getbytitle('${encodeURIComponent(title)}')?$select=Title`);
+      await this.tx.req(`${this.listPath(title)}?$select=Title`);
       return true;
     } catch (e) {
       if (e instanceof SpError && e.status === 404) return false;
@@ -71,64 +230,205 @@ export class SpClient {
   }
 
   private async createList(title: string, fields: FieldSpec[]): Promise<void> {
-    await this.req('/_api/web/lists', {
+    // /_api/web/lists POST requires verbose payload with typed __metadata.
+    await this.tx.req('/_api/web/lists', {
       method: 'POST',
-      body: JSON.stringify({ Title: title, BaseTemplate: 100, AllowContentTypes: false, ContentTypesEnabled: false }),
+      odata: 'verbose',
+      body: JSON.stringify({
+        __metadata: { type: 'SP.List' },
+        Title: title,
+        BaseTemplate: 100,
+        AllowContentTypes: true,
+        ContentTypesEnabled: false,
+      }),
     });
     for (const f of fields) {
-      await this.req(`/_api/web/lists/getbytitle('${encodeURIComponent(title)}')/fields`, {
+      await this.tx.req(`${this.listPath(title)}/fields`, {
         method: 'POST',
+        odata: 'verbose',
         body: JSON.stringify(toFieldSchema(f)),
       });
     }
   }
 
-  // ---- domain queries (stub for MVP wiring) ----
-  // Implementations are intentionally minimal — verified against mock DB during dev.
-  // Real SP queries will be filled in once site/list URLs are confirmed.
+  // ---- tickets
 
-  async listTickets(_opts: { includeDeleted?: boolean } = {}): Promise<Ticket[]> { return []; }
-  async getTicket(_id: number): Promise<Ticket | null> { return null; }
-  async createTicket(_t: Partial<Ticket>): Promise<Ticket> { throw new Error('not implemented'); }
-  async updateTicket(_id: number, _patch: Partial<Ticket>): Promise<void> { /* PATCH */ }
-  async softDeleteTicket(_id: number): Promise<void> { /* IsDeleted=true */ }
-  async restoreTicket(_id: number): Promise<void> { /* IsDeleted=false */ }
-  async hardDeleteTicket(_id: number): Promise<void> { /* DELETE */ }
+  async listTickets(opts: { includeDeleted?: boolean } = {}): Promise<Ticket[]> {
+    const filter = opts.includeDeleted ? '' : `&$filter=IsDeleted eq 0`;
+    const url = `${this.listPath(this.cfg.listTickets)}/items?$top=500&$orderby=Modified desc${filter}`;
+    const res = await this.tx.req<ListItemsResp<SpListItem>>(url);
+    return (res.value ?? []).map(asTicket);
+  }
 
-  async listComments(_ticketId: number): Promise<Comment[]> { return []; }
-  async addComment(_c: Partial<Comment>): Promise<Comment> { throw new Error('not implemented'); }
+  async listDeletedTickets(): Promise<Ticket[]> {
+    const url = `${this.listPath(this.cfg.listTickets)}/items?$top=500&$orderby=DeletedAt desc&$filter=IsDeleted eq 1`;
+    const res = await this.tx.req<ListItemsResp<SpListItem>>(url);
+    return (res.value ?? []).map(asTicket);
+  }
 
-  async listInbox(_opts: { unprocessedOnly?: boolean } = {}): Promise<InboxMail[]> { return []; }
-  async markInboxProcessed(_id: number, _patch: Partial<InboxMail>): Promise<void> { /* PATCH */ }
+  async getTicket(id: number): Promise<Ticket | null> {
+    try {
+      const it = await this.tx.req<SpListItem>(`${this.listPath(this.cfg.listTickets)}/items(${id})`);
+      return asTicket(it);
+    } catch (e) {
+      if (e instanceof SpError && e.status === 404) return null;
+      throw e;
+    }
+  }
 
-  async listSiteUsers(): Promise<SiteUser[]> { return []; }
-}
+  async createTicket(input: CreateTicketInput): Promise<Ticket> {
+    const body = ticketBody(input);
+    if (!body.Status) body.Status = '新規';
+    if (!body.Priority) body.Priority = 'Medium';
+    body.IsDeleted = false;
+    const created = await this.tx.req<SpListItem>(`${this.listPath(this.cfg.listTickets)}/items`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+    return asTicket(created);
+  }
 
-export class SpError extends Error {
-  constructor(public status: number, public body: string) {
-    super(`SP ${status}: ${body.slice(0, 200)}`);
+  async updateTicket(id: number, patch: Partial<Ticket>): Promise<Ticket | null> {
+    await this.tx.update(this.listPath(this.cfg.listTickets), id, ticketBody(patch));
+    return this.getTicket(id);
+  }
+
+  async softDeleteTicket(id: number): Promise<void> {
+    await this.tx.update(this.listPath(this.cfg.listTickets), id, {
+      IsDeleted: true,
+      DeletedAt: new Date().toISOString(),
+    });
+  }
+
+  async restoreTicket(id: number): Promise<void> {
+    await this.tx.update(this.listPath(this.cfg.listTickets), id, {
+      IsDeleted: false,
+      DeletedAt: null,
+    });
+  }
+
+  async hardDeleteTicket(id: number): Promise<void> {
+    // delete related Comments first (avoid orphans)
+    const comments = await this.listComments(id);
+    for (const c of comments) {
+      await this.tx.remove(this.listPath(this.cfg.listComments), c.id);
+    }
+    await this.tx.remove(this.listPath(this.cfg.listTickets), id);
+  }
+
+  async emptyTrash(): Promise<void> {
+    const deleted = await this.listDeletedTickets();
+    for (const t of deleted) {
+      await this.hardDeleteTicket(t.id);
+    }
+  }
+
+  // ---- comments
+
+  async listComments(ticketId: number): Promise<Comment[]> {
+    const url = `${this.listPath(this.cfg.listComments)}/items?$top=500&$orderby=SentAt asc&$filter=TicketId eq ${ticketId}`;
+    const res = await this.tx.req<ListItemsResp<SpListItem>>(url);
+    return (res.value ?? []).map(asComment);
+  }
+
+  async addComment(input: AddCommentInput): Promise<Comment> {
+    const body: Record<string, unknown> = {
+      Title: `c-${input.ticketId}-${Date.now()}`, // SP requires Title; not displayed
+      TicketId: input.ticketId,
+      Type: input.type,
+      FromEmail: input.fromEmail ?? null,
+      FromName: input.fromName ?? null,
+      Content: input.content,
+      IsHtml: input.isHtml,
+      SentAt: input.sentAt ?? new Date().toISOString(),
+      SourceEmailId: input.sourceEmailId ?? null,
+    };
+    const created = await this.tx.req<SpListItem>(`${this.listPath(this.cfg.listComments)}/items`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+    return asComment(created);
+  }
+
+  // ---- inbox
+
+  async listInbox(opts: { unprocessedOnly?: boolean } = {}): Promise<InboxMail[]> {
+    const filter = opts.unprocessedOnly ? '&$filter=IsProcessed eq 0' : '';
+    const url = `${this.listPath(this.cfg.listInbox)}/items?$top=500&$orderby=ReceivedAt desc${filter}`;
+    const res = await this.tx.req<ListItemsResp<SpListItem>>(url);
+    return (res.value ?? []).map(asInbox);
+  }
+
+  async markInboxProcessed(id: number, patch: { ticketId: number; result: InboxState }): Promise<void> {
+    await this.tx.update(this.listPath(this.cfg.listInbox), id, {
+      IsProcessed: true,
+      TicketId: patch.ticketId,
+      ProcessedAt: new Date().toISOString(),
+      ProcessResult: patch.result,
+    });
+  }
+
+  async syncInbox(): Promise<SyncResult> {
+    const unprocessed = await this.listInbox({ unprocessedOnly: true });
+    const tickets = await this.listTickets();
+    const byId = new Map(tickets.map(t => [t.id, t]));
+    let autoLinked = 0;
+    const errors: string[] = [];
+    for (const m of unprocessed) {
+      try {
+        const tag = /\[#(\d+)\]/.exec(m.subject);
+        if (!tag) continue;
+        const tid = parseInt(tag[1]!, 10);
+        const ticket = byId.get(tid);
+        if (!ticket || ticket.isDeleted) continue;
+        await this.addComment({
+          ticketId: tid, type: 'received',
+          fromEmail: m.fromEmail, fromName: m.fromName,
+          content: m.bodyHtml || m.bodyText, isHtml: !!m.bodyHtml,
+          sentAt: m.receivedAt, sourceEmailId: m.id,
+        });
+        await this.markInboxProcessed(m.id, { ticketId: tid, result: 'auto-linked' });
+        autoLinked++;
+      } catch (e) {
+        errors.push(`#${m.id}: ${(e as Error).message}`);
+      }
+    }
+    const remaining = (await this.listInbox({ unprocessedOnly: true })).length;
+    return { autoLinked, remaining, errors };
+  }
+
+  // ---- users
+
+  async listSiteUsers(): Promise<SiteUser[]> {
+    // PrincipalType 1 = User. Filter empty Email (system accounts).
+    const url = `/_api/web/siteusers?$select=Id,Title,Email,PrincipalType&$filter=PrincipalType eq 1`;
+    const res = await this.tx.req<ListItemsResp<{ Id: number; Title: string; Email: string }>>(url);
+    return (res.value ?? [])
+      .filter(u => u.Email)
+      .map(u => ({ id: u.Id, email: u.Email, displayName: u.Title }));
   }
 }
 
-// ---- list field specs ----
+// ---------------------------------------------------------------- field specs
+
 type FieldType = 'Text' | 'Note' | 'NoteRich' | 'Number' | 'DateTime' | 'Boolean' | 'Choice';
 interface FieldSpec { name: string; type: FieldType; choices?: string[] }
 
 function toFieldSchema(f: FieldSpec): unknown {
   if (f.type === 'NoteRich') {
-    return { __metadata: { type: 'SP.FieldMultiLineText' }, FieldTypeKind: 3, Title: f.name, RichText: true };
+    return { __metadata: { type: 'SP.FieldMultiLineText' }, FieldTypeKind: 3, Title: f.name, RichText: true, NumberOfLines: 6 };
   }
   if (f.type === 'Note') {
-    return { __metadata: { type: 'SP.FieldMultiLineText' }, FieldTypeKind: 3, Title: f.name, RichText: false };
+    return { __metadata: { type: 'SP.FieldMultiLineText' }, FieldTypeKind: 3, Title: f.name, RichText: false, NumberOfLines: 6 };
   }
   if (f.type === 'Choice') {
     return { __metadata: { type: 'SP.FieldChoice' }, FieldTypeKind: 6, Title: f.name, Choices: { results: f.choices ?? [] } };
   }
-  const kindMap: Record<FieldType, number> = { Text: 2, Note: 3, NoteRich: 3, Number: 9, DateTime: 4, Boolean: 8, Choice: 6 };
-  return { FieldTypeKind: kindMap[f.type], Title: f.name };
+  const kind: Record<FieldType, number> = { Text: 2, Note: 3, NoteRich: 3, Number: 9, DateTime: 4, Boolean: 8, Choice: 6 };
+  return { FieldTypeKind: kind[f.type], Title: f.name };
 }
 
-function ticketFields(): FieldSpec[] {
+function ticketFieldSpecs(): FieldSpec[] {
   return [
     { name: 'Description', type: 'Note' },
     { name: 'Status', type: 'Choice', choices: ['新規', '対応中', '確認待ち', '完了'] },
@@ -145,7 +445,7 @@ function ticketFields(): FieldSpec[] {
   ];
 }
 
-function commentFields(): FieldSpec[] {
+function commentFieldSpecs(): FieldSpec[] {
   return [
     { name: 'TicketId', type: 'Number' },
     { name: 'Type', type: 'Choice', choices: ['received', 'note'] },
@@ -158,7 +458,7 @@ function commentFields(): FieldSpec[] {
   ];
 }
 
-function inboxFields(): FieldSpec[] {
+function inboxFieldSpecs(): FieldSpec[] {
   return [
     { name: 'Subject', type: 'Text' },
     { name: 'BodyHtml', type: 'NoteRich' },
@@ -176,7 +476,7 @@ function inboxFields(): FieldSpec[] {
   ];
 }
 
-// ---- helpers used across UI ----
+// ---------------------------------------------------------------- helpers reused by views
 export function ticketStatusList(): TicketStatus[] {
   return ['新規', '対応中', '確認待ち', '完了'];
 }

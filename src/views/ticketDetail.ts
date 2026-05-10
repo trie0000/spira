@@ -1,28 +1,28 @@
 import { el, fmtDate } from '../utils/dom';
 import { icon } from '../icons';
-import {
-  getTicketMock,
-  listCommentsMock,
-  listSiteUsersMock,
-  updateTicketMock,
-  addCommentMock,
-  softDeleteTicketMock,
-} from '../api/mock';
 import { ticketStatusList, priorityList } from '../api/sp';
-import { setState } from '../state';
+import { getRepo } from '../api/repo';
+import { setState, getState } from '../state';
 import { sanitizeMailHtml } from '../utils/sanitize';
 import { renderStatusBadge, renderPriorityDot } from './ticketList';
 import { toast } from '../components/toast';
 import { confirmModal } from '../components/modal';
 import type { Ticket, Comment } from '../types';
 
-export function renderTicketDetail(ticketId: number): HTMLElement {
-  const t = getTicketMock(ticketId);
+export async function renderTicketDetail(ticketId: number): Promise<HTMLElement> {
+  const repo = getRepo();
+  const [t, comments] = await Promise.all([
+    repo.getTicket(ticketId),
+    repo.listComments(ticketId),
+  ]);
   if (!t) {
     return el('div', { class: 'spira-content' }, [
       el('div', { class: 'spira-empty' }, [
         el('div', { class: 'spira-empty-title' }, ['チケットが見つかりません']),
-        el('button', { class: 'spira-btn spira-btn--secondary', onclick: () => setState({ selectedTicketId: null }) }, ['一覧に戻る']),
+        el('button', {
+          class: 'spira-btn spira-btn--secondary',
+          onclick: () => setState({ selectedTicketId: null }),
+        }, ['一覧に戻る']),
       ]),
     ]);
   }
@@ -31,7 +31,7 @@ export function renderTicketDetail(ticketId: number): HTMLElement {
     renderToolbar(t),
     el('div', { class: 'spira-content' }, [
       el('div', { class: 'spira-detail' }, [
-        renderMainPane(t),
+        renderMainPane(t, comments),
         renderRail(t),
       ]),
     ]),
@@ -61,7 +61,7 @@ function renderToolbar(t: Ticket): HTMLElement {
   const owaBtn = el('a', {
     class: 'spira-btn spira-btn--ghost spira-btn--sm',
     href: '#', target: '_blank', rel: 'noopener',
-    title: '元メールを Outlook で開く（MVP では未連携）',
+    title: '元メールを Outlook で開く',
   }, [el('span', { html: icon('external'), style: 'display:inline-flex;width:14px;height:14px' }), 'OWA で開く']);
 
   const deleteBtn = el('button', {
@@ -72,10 +72,14 @@ function renderToolbar(t: Ticket): HTMLElement {
         message: `#${String(t.id).padStart(3, '0')} 「${t.title}」 をゴミ箱に移動します。`,
         primaryLabel: '削除',
         primaryVariant: 'danger',
-        onConfirm: () => {
-          softDeleteTicketMock(t.id);
-          toast(getRoot(), 'チケットをゴミ箱に移動しました', 'ok');
-          setState({ selectedTicketId: null });
+        onConfirm: async () => {
+          try {
+            await getRepo().softDeleteTicket(t.id);
+            toast(getRoot(), 'チケットをゴミ箱に移動しました', 'ok');
+            setState({ selectedTicketId: null, trashCount: getState().trashCount + 1 });
+          } catch (e) {
+            toast(getRoot(), `削除に失敗: ${(e as Error).message}`, 'error');
+          }
         },
       });
     },
@@ -90,10 +94,10 @@ function renderToolbar(t: Ticket): HTMLElement {
   ]);
 }
 
-function renderMainPane(t: Ticket): HTMLElement {
+function renderMainPane(t: Ticket, comments: Comment[]): HTMLElement {
   return el('div', { class: 'spira-detail-main' }, [
     renderHeader(t),
-    renderThread(t),
+    renderThread(comments),
     renderNoteInput(t),
   ]);
 }
@@ -104,11 +108,16 @@ function renderHeader(t: Ticket): HTMLElement {
     value: t.title,
     'aria-label': 'タイトル',
   }) as HTMLInputElement;
-  titleInput.addEventListener('change', () => {
+  titleInput.addEventListener('change', async () => {
     const v = titleInput.value.trim();
     if (!v) { titleInput.value = t.title; return; }
-    updateTicketMock(t.id, { title: v });
-    toast(getRoot(), 'タイトルを更新しました', 'ok');
+    try {
+      await getRepo().updateTicket(t.id, { title: v });
+      toast(getRoot(), 'タイトルを更新しました', 'ok');
+    } catch (e) {
+      titleInput.value = t.title;
+      toast(getRoot(), `更新失敗: ${(e as Error).message}`, 'error');
+    }
   });
 
   return el('div', { class: 'spira-detail-hd' }, [
@@ -122,8 +131,7 @@ function renderHeader(t: Ticket): HTMLElement {
   ]);
 }
 
-function renderThread(t: Ticket): HTMLElement {
-  const comments = listCommentsMock(t.id);
+function renderThread(comments: Comment[]): HTMLElement {
   const list = el('div', { class: 'spira-th-list', 'aria-label': 'スレッド' });
   if (comments.length === 0) {
     list.appendChild(el('div', { class: 'spira-empty' }, ['まだやり取りがありません']));
@@ -137,9 +145,7 @@ function renderCommentCard(c: Comment): HTMLElement {
   const isReceived = c.type === 'received';
   const head = el('div', { class: 'spira-th-card-head' }, [
     el('span', { html: icon(isReceived ? 'mail' : 'note') }),
-    el('span', { class: 'spira-th-card-from' }, [
-      c.fromName ?? c.fromEmail ?? '(unknown)',
-    ]),
+    el('span', { class: 'spira-th-card-from' }, [c.fromName ?? c.fromEmail ?? '(unknown)']),
     isReceived && c.fromEmail ? ` <${c.fromEmail}>` : '',
     el('span', { style: 'margin-left:auto;color:var(--ink-3);font-size:var(--fs-sm)' }, [fmtDate(c.sentAt)]),
   ]);
@@ -164,20 +170,27 @@ function renderNoteInput(t: Ticket): HTMLElement {
     onclick: () => save(),
   }, ['メモを保存']);
 
-  function save() {
+  async function save() {
     const v = ta.value.trim();
     if (!v) return;
-    addCommentMock({
-      ticketId: t.id,
-      type: 'note',
-      fromEmail: 'me@example.com',
-      fromName: '自分',
-      content: v,
-      isHtml: false,
-    });
-    ta.value = '';
-    toast(getRoot(), 'メモを保存しました', 'ok');
-    setState({ /* trigger rerender */ });
+    try {
+      saveBtn.setAttribute('disabled', '');
+      await getRepo().addComment({
+        ticketId: t.id,
+        type: 'note',
+        fromEmail: 'me@example.com',
+        fromName: '自分',
+        content: v,
+        isHtml: false,
+      });
+      ta.value = '';
+      toast(getRoot(), 'メモを保存しました', 'ok');
+      setState({}); // re-render to show new comment
+    } catch (e) {
+      toast(getRoot(), `保存失敗: ${(e as Error).message}`, 'error');
+    } finally {
+      saveBtn.removeAttribute('disabled');
+    }
   }
 
   ta.addEventListener('keydown', (e) => {
@@ -191,70 +204,61 @@ function renderNoteInput(t: Ticket): HTMLElement {
 }
 
 function renderRail(t: Ticket): HTMLElement {
-  const users = listSiteUsersMock();
+  const users = getState().users;
 
-  const statusSel = el('select', { class: 'spira-select' }, [
-    ...ticketStatusList().map(v => el('option', { value: v, selected: t.status === v }, [v])),
-  ]) as HTMLSelectElement;
-  statusSel.addEventListener('change', () => {
-    updateTicketMock(t.id, { status: statusSel.value as Ticket['status'] });
-    toast(getRoot(), 'ステータスを更新しました', 'ok');
-    setState({});
-  });
+  const statusSel = el('select', { class: 'spira-select' },
+    ticketStatusList().map(v => el('option', { value: v, selected: t.status === v }, [v]))
+  ) as HTMLSelectElement;
+  statusSel.addEventListener('change', () => updateField({ status: statusSel.value as Ticket['status'] }, 'ステータス'));
 
-  const prioSel = el('select', { class: 'spira-select' }, [
-    ...priorityList().map(v => el('option', { value: v, selected: t.priority === v }, [v])),
-  ]) as HTMLSelectElement;
-  prioSel.addEventListener('change', () => {
-    updateTicketMock(t.id, { priority: prioSel.value as Ticket['priority'] });
-    toast(getRoot(), '重要度を更新しました', 'ok');
-    setState({});
-  });
+  const prioSel = el('select', { class: 'spira-select' },
+    priorityList().map(v => el('option', { value: v, selected: t.priority === v }, [v]))
+  ) as HTMLSelectElement;
+  prioSel.addEventListener('change', () => updateField({ priority: prioSel.value as Ticket['priority'] }, '重要度'));
 
   const assigneeSel = el('select', { class: 'spira-select' }, [
     el('option', { value: '' }, ['未割当']),
     ...users.map(u => el('option', { value: u.email, selected: t.assigneeEmail === u.email }, [u.displayName])),
   ]) as HTMLSelectElement;
-  assigneeSel.addEventListener('change', () => {
-    updateTicketMock(t.id, { assigneeEmail: assigneeSel.value || undefined });
-    toast(getRoot(), '担当者を更新しました', 'ok');
-    setState({});
-  });
+  assigneeSel.addEventListener('change', () => updateField({
+    assigneeEmail: assigneeSel.value || undefined,
+    assigneeName: users.find(u => u.email === assigneeSel.value)?.displayName,
+  }, '担当者'));
 
   const dueInput = el('input', {
     type: 'date',
     class: 'spira-input',
     value: t.dueDate ? t.dueDate.slice(0, 10) : '',
   }) as HTMLInputElement;
-  dueInput.addEventListener('change', () => {
-    updateTicketMock(t.id, { dueDate: dueInput.value ? new Date(dueInput.value).toISOString() : undefined });
-    toast(getRoot(), '期限を更新しました', 'ok');
-    setState({});
-  });
+  dueInput.addEventListener('change', () => updateField({
+    dueDate: dueInput.value ? new Date(dueInput.value).toISOString() : undefined,
+  }, '期限'));
+
+  async function updateField(patch: Partial<Ticket>, label: string) {
+    try {
+      await getRepo().updateTicket(t.id, patch);
+      toast(getRoot(), `${label}を更新しました`, 'ok');
+      setState({});
+    } catch (e) {
+      toast(getRoot(), `${label}の更新に失敗: ${(e as Error).message}`, 'error');
+    }
+  }
 
   return el('aside', { class: 'spira-detail-rail', 'aria-label': 'プロパティ' }, [
-    el('div', { class: 'spira-prop-row' }, [
-      el('span', { class: 'spira-prop-label' }, ['Status']),
-      statusSel,
-    ]),
-    el('div', { class: 'spira-prop-row' }, [
-      el('span', { class: 'spira-prop-label' }, ['Priority']),
-      prioSel,
-    ]),
-    el('div', { class: 'spira-prop-row' }, [
-      el('span', { class: 'spira-prop-label' }, ['担当者']),
-      assigneeSel,
-    ]),
-    el('div', { class: 'spira-prop-row' }, [
-      el('span', { class: 'spira-prop-label' }, ['期限']),
-      dueInput,
-    ]),
-    el('div', { class: 'spira-prop-row' }, [
-      el('span', { class: 'spira-prop-label' }, ['現在']),
-      el('span', { class: 'spira-prop-value', style: 'display:flex;gap:var(--s-2);align-items:center' }, [
-        renderStatusBadge(t.status), renderPriorityDot(t.priority),
-      ]),
-    ]),
+    propRow('Status', statusSel),
+    propRow('Priority', prioSel),
+    propRow('担当者', assigneeSel),
+    propRow('期限', dueInput),
+    propRow('現在', el('span', { class: 'spira-prop-value', style: 'display:flex;gap:var(--s-2);align-items:center' }, [
+      renderStatusBadge(t.status), renderPriorityDot(t.priority),
+    ])),
+  ]);
+}
+
+function propRow(label: string, value: HTMLElement): HTMLElement {
+  return el('div', { class: 'spira-prop-row' }, [
+    el('span', { class: 'spira-prop-label' }, [label]),
+    value,
   ]);
 }
 

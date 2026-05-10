@@ -1,5 +1,4 @@
-// Spira build script — esbuild + dev server
-// Output: dist/spira.js (single bundle, IIFE) + dist/spira.css
+// Spira build script — esbuild + dev server + bookmarklet generator
 import * as esbuild from 'esbuild';
 import http from 'node:http';
 import fs from 'node:fs';
@@ -7,6 +6,8 @@ import path from 'node:path';
 
 const watch = process.argv.includes('--watch');
 const serve = process.argv.includes('--serve');
+const makeBookmarklet = process.argv.includes('--bookmarklet');
+const prod = process.argv.includes('--prod') || makeBookmarklet;
 
 const buildOptions = {
   entryPoints: ['src/main.ts'],
@@ -15,10 +16,11 @@ const buildOptions = {
   globalName: 'Spira',
   outfile: 'dist/spira.js',
   target: 'es2020',
-  sourcemap: true,
+  minify: prod,
+  sourcemap: !prod,
   loader: { '.css': 'text' },
-  define: { 'process.env.NODE_ENV': '"development"' },
-  logLevel: 'info'
+  define: { 'process.env.NODE_ENV': prod ? '"production"' : '"development"' },
+  logLevel: 'info',
 };
 
 if (watch || serve) {
@@ -50,4 +52,153 @@ if (watch || serve) {
 } else {
   await esbuild.build(buildOptions);
   console.log('[esbuild] build complete');
+
+  // Single-file HTML output: upload to SharePoint document library and open directly.
+  // CSS is already inlined into the JS bundle (esbuild loader: '.css': 'text' + main.ts injects <style>).
+  const js = fs.readFileSync('dist/spira.js', 'utf8');
+  const html = `<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Spira</title>
+<style>html,body{margin:0;padding:0;background:#fafaf7}</style>
+</head>
+<body>
+<script>${js}
+</script>
+</body>
+</html>`;
+  fs.writeFileSync('dist/index.html', html);
+  const sizeKb = (s) => (fs.statSync(s).size / 1024).toFixed(1);
+  console.log(`[html] dist/index.html: ${sizeKb('dist/index.html')} KB`);
+
+  // install.html: drag-to-bookmark installer with the entire minified bundle inlined.
+  // Wrap the IIFE in `void(function(){ ... }())` so re-clicking the bookmark doesn't
+  // pollute globals or cause "var redeclaration" issues — main.ts handles re-mount idempotency.
+  const inlined = `void function(){${js}}()`;
+  const bookmarkletHref = 'javascript:' + encodeURIComponent(inlined);
+  const installHtml = renderInstallHtml(bookmarkletHref);
+  fs.writeFileSync('dist/install.html', installHtml);
+  console.log(`[install] dist/install.html: ${sizeKb('dist/install.html')} KB (bookmarklet inlined)`);
+
+  if (makeBookmarklet) {
+    const url = process.env.SPIRA_BUNDLE_URL || '__SPIRA_BUNDLE_URL__';
+    // loader: removes any prior <script id="spira-script"> then injects the bundle.
+    // cache-bust with timestamp so reloads always pull the latest hosted bundle.
+    const loader =
+      `(function(){var d=document,o=d.getElementById('spira-script');if(o)o.remove();` +
+      `var s=d.createElement('script');s.id='spira-script';` +
+      `s.src=${JSON.stringify(url)}+'?v='+Date.now();` +
+      `d.body.appendChild(s);})();`;
+
+    fs.writeFileSync('dist/spira.loader.js', loader);
+    fs.writeFileSync('dist/bookmarklet.txt', 'javascript:' + encodeURIComponent(loader));
+
+    const sizeKb = (s) => (fs.statSync(s).size / 1024).toFixed(1);
+    console.log(`[bookmarklet] dist/spira.js (minified): ${sizeKb('dist/spira.js')} KB`);
+    console.log(`[bookmarklet] dist/spira.loader.js:    ${sizeKb('dist/spira.loader.js')} KB`);
+    console.log(`[bookmarklet] dist/bookmarklet.txt:    ${sizeKb('dist/bookmarklet.txt')} KB`);
+    console.log('');
+    console.log('  ▶ ホスト先 URL を SPIRA_BUNDLE_URL 環境変数で指定してください。');
+    console.log('    例: SPIRA_BUNDLE_URL="https://contoso.sharepoint.com/sites/spira/SiteAssets/spira.js" node build.js --bookmarklet');
+    if (url === '__SPIRA_BUNDLE_URL__') {
+      console.log('  ⚠ 現在は __SPIRA_BUNDLE_URL__ プレースホルダのままです。dist/bookmarklet.txt を実 URL に置換して使ってください。');
+    } else {
+      console.log(`  ✔ Bundle URL: ${url}`);
+    }
+  }
+}
+
+function renderInstallHtml(bookmarkletHref) {
+  return `<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Spira インストール</title>
+<style>
+  :root {
+    --ink: #2a2a26; --ink-3: #7a766c; --ink-4: #a8a39a;
+    --paper: #fafaf7; --paper-2: #f3f1ea; --paper-3: #e8e4d8;
+    --line: rgba(42,42,38,0.12);
+    --accent: #7a8a78; --accent-strong: #5e6f5c;
+    --code-fg: #8b3a30; --code-bg: rgba(122,118,108,0.16);
+    --font: "Meiryo","メイリオ","Hiragino Sans","Yu Gothic UI",-apple-system,"Segoe UI",system-ui,sans-serif;
+    --font-mono: ui-monospace,"Cascadia Mono","Consolas",monospace;
+  }
+  * { box-sizing: border-box; }
+  body { font-family: var(--font); max-width: 580px; margin: 60px auto; padding: 0 24px; color: var(--ink); line-height: 1.75; background: var(--paper); }
+  h1 { font-size: 28px; font-weight: 700; margin: 0 0 8px; letter-spacing: -0.01em; display: flex; align-items: center; gap: 12px; }
+  h1::before { content: ""; width: 14px; height: 14px; border-radius: 50%; background: var(--accent); display: inline-block; }
+  .sub { color: var(--ink-3); font-size: 14px; margin: 0 0 40px; }
+
+  .step { display: flex; gap: 16px; margin-bottom: 28px; align-items: flex-start; }
+  .step-num { width: 28px; height: 28px; background: var(--accent); color: #fff; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; flex-shrink: 0; margin-top: 2px; }
+  .step-body h3 { font-size: 16px; font-weight: 600; margin: 0 0 4px; color: var(--ink); }
+  .step-body p { font-size: 14px; color: var(--ink-3); margin: 0; }
+
+  .bm-wrap { background: var(--paper-2); border: 2px dashed var(--paper-3); border-radius: 8px; padding: 28px; text-align: center; margin: 20px 0 32px; }
+  .bm-wrap p { font-size: 13px; color: var(--ink-3); margin: 0 0 16px; }
+  #bm-link {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: var(--accent); color: #fff; text-decoration: none;
+    padding: 12px 24px; border-radius: 6px; font-size: 16px; font-weight: 600;
+    box-shadow: 0 2px 8px rgba(122,138,120,.25); cursor: grab;
+    user-select: none;
+  }
+  #bm-link:hover { background: var(--accent-strong); }
+  #bm-link::before { content: "●"; color: #fff; font-size: 10px; opacity: .85; }
+
+  hr { border: none; border-top: 1px solid var(--paper-3); margin: 32px 0; }
+  .alt { font-size: 13px; color: var(--ink-3); }
+  code { background: var(--code-bg); color: var(--code-fg); padding: 2px 6px; border-radius: 3px; font-size: 12px; font-family: var(--font-mono); }
+  .note { background: rgba(196,127,28,0.10); border-left: 3px solid #c47f1c; padding: 12px 16px; border-radius: 4px; font-size: 13px; color: var(--ink); margin-top: 24px; }
+</style>
+</head>
+<body>
+
+<h1>Spira インストール</h1>
+<p class="sub">SharePoint 上で動くメール起票型チケット管理 — bookmarklet 形式</p>
+
+<div class="step">
+  <div class="step-num">1</div>
+  <div class="step-body">
+    <h3>ブックマークバーを表示する</h3>
+    <p>Chrome / Edge: <code>Ctrl+Shift+B</code>（Mac: <code>Cmd+Shift+B</code>）</p>
+  </div>
+</div>
+
+<div class="step">
+  <div class="step-num">2</div>
+  <div class="step-body">
+    <h3>下のボタンをブックマークバーにドラッグ</h3>
+    <p>右クリック → 「リンクをブックマーク」 でも OK です。</p>
+  </div>
+</div>
+
+<div class="bm-wrap">
+  <p>↓ このボタンをブックマークバーにドラッグ ↓</p>
+  <a id="bm-link" href="${bookmarkletHref}" onclick="alert('ドラッグしてブックマークバーに登録してください。クリックでは起動しません（このページは SharePoint ではないため）。'); return false;">Spira</a>
+</div>
+
+<div class="step">
+  <div class="step-num">3</div>
+  <div class="step-body">
+    <h3>SharePoint サイトを開いて、ブックマークをクリック</h3>
+    <p>同一テナントの SP サイト上でブックマークを実行すると、Spira が起動します。<br>
+       初回起動時は SharePoint リスト（Tickets / Comments / InboxMails）が自動作成されます。</p>
+  </div>
+</div>
+
+<hr>
+
+<p class="alt"><strong>更新方法</strong>: 新しいバージョンが出たら、このページを再度開いて再度ドラッグしてください（古いブックマークは上書き or 削除）。</p>
+
+<div class="note">
+  ⚠ <strong>SharePoint 上で実行する必要があります</strong>。Graph API・外部 SaaS・カスタムスクリプト無効環境でも動作するよう、SP REST API（同一オリジン認証）のみを使用しています。
+</div>
+
+</body>
+</html>`;
 }
