@@ -32,12 +32,6 @@ export function buildOwaSearchQuery(args: BuildOwaReplyArgs): string {
   return parts.join(' ');
 }
 
-function quoteIfNeeded(s: string): string {
-  // KQL で複数語の値を扱うときは引用符で囲む。引用符自体はエスケープ。
-  if (/[\s"]/.test(s)) return `"${s.replace(/"/g, '\\"')}"`;
-  return s;
-}
-
 /** Best-effort URL with embedded query for envs where it does work. Kept for completeness. */
 export function buildOwaReplyUrl(args: BuildOwaReplyArgs): string {
   const q = buildOwaSearchQuery(args);
