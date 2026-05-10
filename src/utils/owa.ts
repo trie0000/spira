@@ -16,15 +16,17 @@ export interface BuildOwaReplyArgs {
   comment: Comment;
 }
 
-/** Build a KQL search string usable in OWA's search bar. */
+/** Build a KQL search string usable in OWA's search bar.
+ *  Note: 件名タグ [#XXX] は最初の問い合わせメールには含まれないので検索条件から除外。
+ *  from + received (日単位) の組合わせは前提として一意なので、これだけで該当メールに到達できる。
+ */
 export function buildOwaSearchQuery(args: BuildOwaReplyArgs): string {
   const { ticket, comment } = args;
-  const tag = `[#${String(ticket.id).padStart(3, '0')}]`;
+  void ticket;
   const day = (comment.sentAt ?? new Date().toISOString()).slice(0, 10); // YYYY-MM-DD
 
   const parts: string[] = [];
   if (comment.fromEmail) parts.push(`from:${comment.fromEmail}`);
-  parts.push(`subject:${tag}`);
   parts.push(`received:${day}`);
   return parts.join(' ');
 }
