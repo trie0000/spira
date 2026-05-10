@@ -64,22 +64,87 @@ function renderList(mails: InboxMail[]): HTMLElement {
   ]);
 }
 
+// Persist expanded state across re-renders so clicks within view don't collapse.
+const expandedIds = new Set<number>();
+
 function renderRow(m: InboxMail): HTMLElement {
-  return el('div', { class: 'spira-inbox-row' }, [
-    el('div', { class: 'spira-inbox-subject' }, [m.subject]),
+  const isOpen = expandedIds.has(m.id);
+
+  const subjectCell = el('div', {
+    class: 'spira-inbox-subject',
+    style: 'cursor:pointer;user-select:none',
+    title: 'クリックで本文を展開',
+  }, [
+    el('span', { style: 'display:inline-block;width:14px;color:var(--ink-3);font-size:var(--fs-xs);transition:transform .1s;transform:rotate(' + (isOpen ? '90' : '0') + 'deg)' }, ['▶']),
+    ' ',
+    m.subject,
+  ]);
+
+  const head = el('div', { class: 'spira-inbox-row' }, [
+    subjectCell,
     el('div', { class: 'spira-inbox-from' }, [`${m.fromName ?? ''} <${m.fromEmail}>`]),
     el('div', { class: 'spira-inbox-date' }, [fmtDate(m.receivedAt)]),
     el('div', { class: 'spira-inbox-actions' }, [
       el('button', {
         class: 'spira-btn spira-btn--primary spira-btn--sm',
-        onclick: () => openNewTicketModal(m),
+        onclick: (e: Event) => { e.stopPropagation(); openNewTicketModal(m); },
       }, ['＋ 起票']),
       el('button', {
         class: 'spira-btn spira-btn--secondary spira-btn--sm',
-        onclick: () => openLinkModal(m),
+        onclick: (e: Event) => { e.stopPropagation(); openLinkModal(m); },
       }, ['⌬ 紐付け']),
     ]),
   ]);
+
+  // Toggle expand on subject click (not on action buttons).
+  subjectCell.addEventListener('click', () => {
+    if (expandedIds.has(m.id)) expandedIds.delete(m.id);
+    else expandedIds.add(m.id);
+    setState({}); // re-render
+  });
+
+  if (!isOpen) return head;
+
+  return el('div', {}, [head, renderExpanded(m)]);
+}
+
+function renderExpanded(m: InboxMail): HTMLElement {
+  // Header meta (細かいメタ情報)
+  const metaRow = (label: string, value: string | HTMLElement) =>
+    el('div', { style: 'display:grid;grid-template-columns:120px 1fr;gap:var(--s-3);font-size:var(--fs-sm);padding:var(--s-1) 0' }, [
+      el('span', { style: 'color:var(--ink-3)' }, [label]),
+      typeof value === 'string' ? el('span', {}, [value]) : value,
+    ]);
+
+  const owaLink = m.owaLink && m.owaLink !== '#'
+    ? el('a', { href: m.owaLink, target: '_blank', rel: 'noopener', style: 'color:var(--accent-strong);text-decoration:underline;word-break:break-all' }, ['Outlook で開く'])
+    : el('span', { style: 'color:var(--ink-4)' }, ['(なし)']);
+
+  const meta = el('div', {
+    style: 'background:var(--paper);border:1px solid var(--paper-3);border-radius:var(--r-2);padding:var(--s-4) var(--s-5);margin-bottom:var(--s-3)',
+  }, [
+    metaRow('差出人', `${m.fromName ?? ''} <${m.fromEmail}>`),
+    metaRow('受信日時', fmtDate(m.receivedAt)),
+    metaRow('件名', m.subject),
+    metaRow('ConversationId', m.conversationId ?? '(なし)'),
+    metaRow('添付ファイル', m.hasAttachments ? 'あり（OWA で確認）' : 'なし'),
+    metaRow('OWA リンク', owaLink),
+  ]);
+
+  // Body (HTML sanitized or plain text)
+  const body = el('div', { class: 'spira-th-card-body', style: 'background:var(--paper);border:1px solid var(--paper-3);border-radius:var(--r-2);padding:var(--s-5);max-height:480px;overflow:auto' });
+  if (m.bodyHtml) body.innerHTML = sanitizeMailHtml(m.bodyHtml);
+  else if (m.bodyText) {
+    body.style.whiteSpace = 'pre-wrap';
+    body.textContent = m.bodyText;
+  } else {
+    body.textContent = '(本文なし)';
+    body.style.color = 'var(--ink-4)';
+  }
+
+  return el('div', {
+    style: 'background:var(--paper-2);border-bottom:1px solid var(--paper-3);padding:var(--s-5) var(--s-7)',
+  }, [meta, body]);
 }
 
 function getRoot(): HTMLElement {
