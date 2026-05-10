@@ -80,7 +80,7 @@
 
   /* horizontal gutter — single source of truth for "where content starts inside main"
      so toolbar / subbar / tabs / table / detail header all line up with breathing room */
-  --gutter: 32px;
+  --gutter: 16px;
 
   /* z */
   --z-overlay: 2147483600;
@@ -1027,8 +1027,8 @@
 }
 #spira-root .spira-note-form > * { line-height: normal; }
 #spira-root .spira-note-form .spira-note-input {
-  padding-right: 56px !important;   /* room for button + breathing space */
-  padding-bottom: 48px !important;  /* room for button + breathing space */
+  padding-right: 48px !important;   /* room for button + breathing space */
+  padding-bottom: 40px !important;  /* room for button + breathing space */
   background: var(--paper) !important;
   border: 1px solid var(--paper-3) !important;
   border-radius: var(--r-3) !important;
@@ -1039,8 +1039,8 @@
 }
 #spira-root .spira-note-submit {
   position: absolute !important;
-  right: 16px !important;
-  bottom: 16px !important;
+  right: 8px !important;
+  bottom: 8px !important;
   width: 30px !important;
   height: 30px !important;
   display: inline-flex !important;
