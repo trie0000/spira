@@ -78,6 +78,10 @@
   --side-w:    200px;
   --toolbar-h: 38px;
 
+  /* horizontal gutter — single source of truth for "where content starts inside main"
+     so toolbar / subbar / tabs / table / detail header all line up with breathing room */
+  --gutter: 32px;
+
   /* z */
   --z-overlay: 2147483600;
   --z-modal:   2147483700;
@@ -273,13 +277,26 @@
   display: flex !important;
   align-items: center !important;
   gap: var(--s-3) !important;
-  padding-left: var(--s-9) !important;
-  padding-right: var(--s-9) !important;
+  padding-left: var(--gutter) !important;
+  padding-right: var(--gutter) !important;
   padding-top: 0 !important;
   padding-bottom: 0 !important;
   border-bottom: 1px solid var(--line) !important;
   flex-shrink: 0 !important;
   background: var(--paper) !important;
+}
+
+/* Single rule that enforces the horizontal gutter on every main-area container.
+ * This is the contract — anything that lives directly under .spira-main and shows
+ * text/buttons must use this gutter, NOT inline padding. */
+#spira-root .spira-toolbar,
+#spira-root .spira-subbar,
+#spira-root .spira-tab-strip,
+#spira-root .spira-table-wrap,
+#spira-root .spira-detail-hd-wrap,
+#spira-root .spira-error-banner {
+  padding-left: var(--gutter) !important;
+  padding-right: var(--gutter) !important;
 }
 .spira-toolbar-spacer { flex: 1; }
 
@@ -715,10 +732,16 @@
 
 /* Padded table wrapper — keeps sticky header working, gives the table breathing room */
 #spira-root .spira-table-wrap {
-  padding-left: var(--s-9) !important;
-  padding-right: var(--s-9) !important;
   padding-bottom: var(--s-9) !important;
   padding-top: 0 !important;
+}
+
+/* Detail header — title / properties row */
+#spira-root .spira-detail-hd-wrap {
+  padding-top: var(--s-5) !important;
+  padding-bottom: var(--s-3) !important;
+  border-bottom: 1px solid var(--line) !important;
+  background: var(--paper) !important;
 }
 
 /* Wider in-cell padding so columns have breathing room */
@@ -827,7 +850,6 @@
   display: flex;
   align-items: stretch;
   gap: 2px;
-  padding: 0 var(--s-3);
   background: var(--paper-2);
   border-bottom: 1px solid var(--line);
   overflow-x: auto;

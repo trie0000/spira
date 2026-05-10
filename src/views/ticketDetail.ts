@@ -224,7 +224,7 @@ function renderTicketHeader(t: Ticket): HTMLElement {
     dueDate: dueInput.value ? new Date(dueInput.value).toISOString() : undefined,
   }, '期限'));
 
-  return el('div', { style: 'padding:var(--s-5) var(--s-7) var(--s-3);border-bottom:1px solid var(--line);background:var(--paper)' }, [
+  return el('div', { class: 'spira-detail-hd-wrap' }, [
     el('div', { class: 'spira-detail-hd-meta', style: 'margin-bottom:var(--s-1)' }, [
       `起票: ${fmtDate(t.createdAt)}`, ' · ', `更新: ${fmtDate(t.updatedAt)}`,
       t.reporterName ? ` · 起票元: ${t.reporterName}` : '',
