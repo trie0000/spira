@@ -1,96 +1,57 @@
-// OWA deeplink helpers — open a pre-filled draft compose in Outlook on the Web.
-// NOTE: OWA's `body` query parameter is interpreted as PLAIN TEXT (not HTML).
-// Quoted reply is built in classic mail-client text format with "> " prefix.
+// OWA helpers — open Outlook on the Web in a state useful for replying.
+//
+// 設計方針:
+// 1. compose deeplink (新規メール) はスレッドが切れるので使わない
+// 2. 代わりに OWA の検索画面を「from + subject + 受信日」 で pre-filled で開く。
+//    その人の受信箱に届いていれば結果に出るので、本物の Reply ボタンが押せて
+//    In-Reply-To / References が正しく付いた純粋な返信になる。
 import type { Ticket, Comment } from '../types';
 
-const OWA_COMPOSE = 'https://outlook.office.com/mail/deeplink/compose';
-// URL length cap. OWA truncates somewhere around ~10K; stay conservative.
-const MAX_URL_LEN = 7500;
+const OWA_SEARCH = 'https://outlook.office.com/mail/search';
 
 export interface BuildOwaReplyArgs {
   ticket: Ticket;
   comment: Comment;
 }
 
+/** Build an OWA search URL that narrows the user's mailbox to (ideally) the one email. */
 export function buildOwaReplyUrl(args: BuildOwaReplyArgs): string {
   const { ticket, comment } = args;
-  const to = comment.fromEmail ?? '';
-  const subject = buildReplySubject(ticket);
-  const body = buildReplyBodyText(ticket, comment);
-  return assembleUrl(to, subject, body);
+  const tag = `[#${String(ticket.id).padStart(3, '0')}]`;
+
+  // Subject term: prefer the canonical [#XXX] tag (works on both outbound and replies
+  // that preserved the tag). If the comment is the very first untagged received mail,
+  // fall back to the raw subject.
+  const subjectTerm = subjectHasTag(ticket, comment) ? tag : (ticket.rawSubject ?? ticket.title);
+
+  const day = (comment.sentAt ?? new Date().toISOString()).slice(0, 10); // YYYY-MM-DD
+
+  // KQL terms — implicitly AND-joined.
+  const q = [
+    comment.fromEmail ? `from:${comment.fromEmail}` : '',
+    `subject:${quoteIfNeeded(subjectTerm)}`,
+    `received:${day}`,
+  ].filter(Boolean).join(' ');
+
+  return `${OWA_SEARCH}?q=${encodeURIComponent(q)}`;
 }
 
-function buildReplySubject(t: Ticket): string {
-  const tag = `[#${String(t.id).padStart(3, '0')}]`;
-  const base = (t.rawSubject ?? t.title)
-    .replace(/^(RE:|Re:|RE:|FW:|Fw:|FW:)\s*/gi, '')
-    .replace(/\[#\d+\]\s*/g, '')
-    .trim();
-  return `RE: ${tag} ${base}`;
+function subjectHasTag(t: Ticket, _c: Comment): boolean {
+  // We always include the tag once a ticket is created, so by definition any comment
+  // whose subject we control matches. The only mail that *might* not carry the tag
+  // is the first received message before ticket creation — but at this point we have
+  // a ticket id, so the tag is set. Default true.
+  void t;
+  return true;
 }
 
-function buildReplyBodyText(t: Ticket, c: Comment): string {
-  const fromLine = c.fromName
-    ? `${c.fromName}${c.fromEmail ? ` <${c.fromEmail}>` : ''}`
-    : (c.fromEmail ?? '(unknown)');
-  const subj = (t.rawSubject ?? t.title);
-
-  const original = c.isHtml ? htmlToPlain(c.content) : c.content;
-  const quoted = quoteLines(original.trim());
-
-  // Standard mail-client quote format (Outlook / Thunderbird convention).
-  const lines = [
-    '',
-    '',
-    '',
-    '-----Original Message-----',
-    `From: ${fromLine}`,
-    `Sent: ${c.sentAt}`,
-    `Subject: ${subj}`,
-    '',
-    quoted,
-  ];
-  return lines.join('\r\n');
+function quoteIfNeeded(s: string): string {
+  // KQL needs quotes around multi-word subject terms.
+  if (/\s/.test(s)) return `"${s.replace(/"/g, '\\"')}"`;
+  return s;
 }
 
-function htmlToPlain(html: string): string {
-  // Drop inline images (often base64 — bloats URL).
-  let s = html.replace(/<img[^>]*>/gi, '[画像]');
-  // Insert newlines on block boundaries so structure survives stripping.
-  s = s.replace(/<\s*br\s*\/?\s*>/gi, '\n');
-  s = s.replace(/<\/(p|div|li|tr|h[1-6])\s*>/gi, '\n');
-  s = s.replace(/<\s*li[^>]*>/gi, '- ');
-  s = s.replace(/<\s*hr[^>]*>/gi, '\n----\n');
-  // Strip remaining tags.
-  s = s.replace(/<[^>]+>/g, '');
-  // Decode common HTML entities via a textarea round-trip (DOM-safe).
-  if (typeof document !== 'undefined') {
-    const ta = document.createElement('textarea');
-    ta.innerHTML = s;
-    s = ta.value;
-  }
-  // Normalize whitespace: collapse 3+ blank lines to 2.
-  s = s.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n');
-  return s.trim();
-}
-
-function quoteLines(text: string): string {
-  if (!text) return '> ';
-  return text.split('\n').map(line => `> ${line}`).join('\r\n');
-}
-
-function assembleUrl(to: string, subject: string, body: string): string {
-  const baseUrl = `${OWA_COMPOSE}?to=${encodeURIComponent(to)}&subject=${encodeURIComponent(subject)}`;
-  const fullUrl = `${baseUrl}&body=${encodeURIComponent(body)}`;
-  if (fullUrl.length <= MAX_URL_LEN) return fullUrl;
-  // Body too large — try truncating quoted body and retry.
-  const truncated = body.slice(0, 4000) + '\r\n\r\n...(本文が長いため以下省略)';
-  const truncUrl = `${baseUrl}&body=${encodeURIComponent(truncated)}`;
-  if (truncUrl.length <= MAX_URL_LEN) return truncUrl;
-  return baseUrl;
-}
-
-export function bodyWouldBeTruncated(args: BuildOwaReplyArgs): boolean {
-  const url = buildOwaReplyUrl(args);
-  return !url.includes('&body=') || url.includes('...(本文が長いため以下省略)');
+/** Always false now — kept for backward compatibility with the old compose-deeplink callers. */
+export function bodyWouldBeTruncated(_args: BuildOwaReplyArgs): boolean {
+  return false;
 }

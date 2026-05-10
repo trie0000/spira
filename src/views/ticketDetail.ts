@@ -4,7 +4,7 @@ import { ticketStatusList, priorityList } from '../api/sp';
 import { getRepo } from '../api/repo';
 import { setState, getState } from '../state';
 import { sanitizeMailHtml } from '../utils/sanitize';
-import { buildOwaReplyUrl, bodyWouldBeTruncated } from '../utils/owa';
+import { buildOwaReplyUrl } from '../utils/owa';
 import { isInternalMember, colorForAuthor } from '../utils/members';
 import { renderStatusBadge, renderPriorityLabel } from './ticketList';
 import { toast } from '../components/toast';
@@ -119,15 +119,12 @@ async function renderTabStrip(activeT: Ticket, latestReceived: Comment | undefin
   const replyBtn = el('button', {
     class: 'spira-btn spira-btn--ghost spira-btn--sm',
     title: latestReceived
-      ? 'OWA で返信ドラフトを開く（最新の受信メールを引用）'
+      ? 'OWA で元メールを検索して開く (差出人 + 件名 + 受信日)。\n結果から該当メールを開いて「返信」を押せばスレッドが維持されます。'
       : '受信メールがないため返信を作成できません',
     disabled: !latestReceived,
     onclick: () => {
       if (!latestReceived) return;
       const url = buildOwaReplyUrl({ ticket: activeT, comment: latestReceived });
-      if (bodyWouldBeTruncated({ ticket: activeT, comment: latestReceived })) {
-        toast(getRoot(), '本文が長いため引用は省略されました', 'warn');
-      }
       window.open(url, '_blank', 'noopener');
     },
   }, [
