@@ -589,6 +589,8 @@ function renderNewNoteForm(t: Ticket): HTMLElement {
     placeholder: '内部メモを追加  (Cmd/Ctrl + Enter で保存)',
     rows: '3',
   }) as HTMLTextAreaElement;
+  // Inline style — strongest priority, defeats any host CSS that would re-enable resize.
+  ta.style.resize = 'none';
   autoSizeTextarea(ta);
 
   const saveBtn = el('button', {
