@@ -1,6 +1,7 @@
 // In-memory mock repository — used in dev (off-SP host) or with ?mock=1.
 import type { Ticket, Comment, InboxMail, SiteUser, InboxState } from '../types';
 import type { Repository, CreateTicketInput, AddCommentInput, SyncResult } from './repo';
+import { sampleInboxInputs, toMockInbox } from './sampleInbox';
 
 interface DataStore {
   tickets: Ticket[];
@@ -268,6 +269,15 @@ export class MockRepository implements Repository {
 
   async listSiteUsers(): Promise<SiteUser[]> {
     return store.users.slice();
+  }
+
+  async addSampleInbox(): Promise<{ count: number }> {
+    const inputs = sampleInboxInputs();
+    for (const inp of inputs) {
+      const id = store.nextInboxId++;
+      store.inbox.push(toMockInbox(inp, id));
+    }
+    return { count: inputs.length };
   }
 
   // dev helper: simulate a tagged reply landing in the inbox

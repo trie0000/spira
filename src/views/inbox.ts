@@ -32,10 +32,30 @@ function renderToolbar(): HTMLElement {
 
 function renderList(mails: InboxMail[]): HTMLElement {
   if (mails.length === 0) {
+    const sampleBtn = el('button', {
+      class: 'spira-btn spira-btn--secondary spira-btn--sm',
+      onclick: async () => {
+        sampleBtn.setAttribute('disabled', '');
+        try {
+          const r = await getRepo().addSampleInbox();
+          toast(getRoot(), `サンプルメール ${r.count} 件を追加しました`, 'ok');
+          // re-fetch & re-paint
+          const fresh = await getRepo().listInbox({ unprocessedOnly: true });
+          setState({ inboxCount: fresh.length });
+        } catch (e) {
+          toast(getRoot(), `追加失敗: ${(e as Error).message}`, 'error');
+        } finally {
+          sampleBtn.removeAttribute('disabled');
+        }
+      },
+    }, ['サンプルメールを追加']);
+
     return el('div', { class: 'spira-content' }, [
       el('div', { class: 'spira-empty' }, [
         el('div', { class: 'spira-empty-title' }, ['未処理メールはありません']),
-        el('div', {}, ['新しいメールが届いたら自動で取り込まれます']),
+        el('div', {}, ['Power Automate を設定すると新着メールが自動で取り込まれます。']),
+        el('div', { style: 'margin-top:var(--s-3);font-size:var(--fs-sm)' }, ['PA 設定前のテスト用にサンプルメールを追加できます。']),
+        sampleBtn,
       ]),
     ]);
   }

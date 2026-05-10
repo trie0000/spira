@@ -2,6 +2,7 @@
 // All endpoints are relative to siteUrl.
 import type { Ticket, Comment, InboxMail, SiteUser, InboxState, TicketStatus, Priority, CommentType } from '../types';
 import type { Repository, CreateTicketInput, AddCommentInput, SyncResult } from './repo';
+import { sampleInboxInputs } from './sampleInbox';
 
 export interface SpConfig {
   siteUrl: string;        // absolute, e.g. https://contoso.sharepoint.com/sites/spira
@@ -425,6 +426,32 @@ export class SpRepository implements Repository {
     }
     const remaining = (await this.listInbox({ unprocessedOnly: true })).length;
     return { autoLinked, remaining, errors };
+  }
+
+  // ---- sample data
+
+  async addSampleInbox(): Promise<{ count: number }> {
+    const inputs = sampleInboxInputs();
+    for (const inp of inputs) {
+      const body: Record<string, unknown> = {
+        Title: `sample-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        Subject: inp.subject,
+        BodyHtml: inp.bodyHtml,
+        BodyText: inp.bodyText,
+        FromEmail: inp.fromEmail,
+        FromName: inp.fromName,
+        HasAttachments: inp.hasAttachments,
+        ConversationId: inp.conversationId,
+        ReceivedAt: inp.receivedAt,
+        OwaLink: null,
+        IsProcessed: false,
+      };
+      await this.tx.req(`${this.listPath(this.cfg.listInbox)}/items`, {
+        method: 'POST',
+        body: JSON.stringify(body),
+      });
+    }
+    return { count: inputs.length };
   }
 
   // ---- users

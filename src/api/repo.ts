@@ -60,6 +60,10 @@ export interface Repository {
 
   // dev helper (mock only)
   injectFakeReply?(ticketId: number): void;
+
+  // Sample data seed — useful before PA is set up.
+  // Adds 5 sample InboxMails to the underlying list.
+  addSampleInbox(): Promise<{ count: number }>;
 }
 
 // ----- factory -----
