@@ -6,7 +6,7 @@ import { setState, getState } from '../state';
 import { sanitizeMailHtml } from '../utils/sanitize';
 import { buildOwaReplyUrl, bodyWouldBeTruncated } from '../utils/owa';
 import { isInternalMember, colorForAuthor } from '../utils/members';
-import { renderStatusBadge, renderPriorityDot } from './ticketList';
+import { renderStatusBadge, renderPriorityLabel } from './ticketList';
 import { toast } from '../components/toast';
 import { confirmModal } from '../components/modal';
 import type { Ticket, Comment } from '../types';
@@ -173,15 +173,29 @@ function renderTicketHeader(t: Ticket): HTMLElement {
     }
   });
 
-  const statusSel = el('select', { class: 'spira-select', style: 'width:auto;min-width:120px' },
-    ticketStatusList().map(v => el('option', { value: v, selected: t.status === v }, [v]))
-  ) as HTMLSelectElement;
-  statusSel.addEventListener('change', () => updateField(t, { status: statusSel.value as Ticket['status'] }, 'ステータス'));
+  const statusBtn = renderStatusBadge(t.status);
+  statusBtn.classList.add('spira-prop-edit');
+  statusBtn.setAttribute('role', 'button');
+  statusBtn.setAttribute('tabindex', '0');
+  statusBtn.title = 'クリックでステータスを変更';
+  statusBtn.addEventListener('click', (e: Event) => {
+    e.stopPropagation();
+    openSelectMenu(statusBtn, ticketStatusList(), t.status, async (next) => {
+      await updateField(t, { status: next }, 'ステータス');
+    });
+  });
 
-  const prioSel = el('select', { class: 'spira-select', style: 'width:auto;min-width:120px' },
-    priorityList().map(v => el('option', { value: v, selected: t.priority === v }, [v]))
-  ) as HTMLSelectElement;
-  prioSel.addEventListener('change', () => updateField(t, { priority: prioSel.value as Ticket['priority'] }, '重要度'));
+  const prioBtn = renderPriorityLabel(t.priority);
+  prioBtn.classList.add('spira-prop-edit');
+  prioBtn.setAttribute('role', 'button');
+  prioBtn.setAttribute('tabindex', '0');
+  prioBtn.title = 'クリックで優先度を変更';
+  prioBtn.addEventListener('click', (e: Event) => {
+    e.stopPropagation();
+    openSelectMenu(prioBtn, priorityList(), t.priority, async (next) => {
+      await updateField(t, { priority: next }, '優先度');
+    });
+  });
 
   const assigneeSel = el('select', { class: 'spira-select', style: 'width:auto;min-width:160px' }, [
     el('option', { value: '' }, ['未割当']),
@@ -207,20 +221,46 @@ function renderTicketHeader(t: Ticket): HTMLElement {
       t.reporterName ? ` · 起票元: ${t.reporterName}` : '',
     ]),
     el('div', { class: 'spira-detail-title-row' }, [idLabel, titleInput]),
-    el('div', { style: 'display:flex;flex-wrap:wrap;gap:var(--s-3);align-items:center;margin-top:var(--s-3)' }, [
-      label('ステータス'), statusSel,
-      label('重要度'), prioSel,
+    el('div', { style: 'display:flex;flex-wrap:wrap;gap:var(--s-4);align-items:center;margin-top:var(--s-3)' }, [
+      label('ステータス'), statusBtn,
+      label('優先度'), prioBtn,
       label('担当者'), assigneeSel,
       label('期限'), dueInput,
-      el('span', { style: 'margin-left:auto;display:inline-flex;gap:var(--s-2);align-items:center' }, [
-        renderStatusBadge(t.status), renderPriorityDot(t.priority),
-      ]),
     ]),
   ]);
 }
 
 function label(text: string): HTMLElement {
   return el('span', { class: 'spira-prop-label', style: 'font-size:var(--fs-sm)' }, [text]);
+}
+
+/** Anchor a small menu under the given element to pick from a list of values. */
+function openSelectMenu<T extends string>(
+  anchor: HTMLElement,
+  options: T[],
+  current: T,
+  onSelect: (v: T) => void,
+): void {
+  document.querySelectorAll('.spira-select-menu').forEach(n => n.remove());
+  const menu = el('div', {
+    class: 'spira-menu spira-select-menu',
+    style: 'position:fixed;z-index:2147483700;min-width:140px',
+  }, options.map(opt => el('div', {
+    class: 'spira-menu-item' + (opt === current ? ' spira-menu-item--current' : ''),
+    onclick: () => { menu.remove(); onSelect(opt); },
+  }, [opt])));
+  const rect = anchor.getBoundingClientRect();
+  menu.style.top = `${rect.bottom + 4}px`;
+  menu.style.left = `${rect.left}px`;
+  getRoot().appendChild(menu);
+  setTimeout(() => {
+    const closer = (e: Event) => {
+      if (menu.contains(e.target as Node)) return;
+      menu.remove();
+      document.removeEventListener('click', closer);
+    };
+    document.addEventListener('click', closer);
+  }, 0);
 }
 
 async function updateField(t: Ticket, patch: Partial<Ticket>, fieldLabel: string): Promise<void> {

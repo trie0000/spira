@@ -177,7 +177,7 @@ function renderFilterChips(): HTMLElement {
     const u = s.users.find(x => x.email === f.assignee);
     chip(`担当者: ${f.assignee === '__unset__' ? '未割当' : (u?.displayName ?? f.assignee)}`, 'assignee');
   }
-  if (f.priority) chip(`重要度: ${f.priority}`, 'priority');
+  if (f.priority) chip(`優先度: ${f.priority}`, 'priority');
 
   if (chips.length === 0) return el('div', { style: 'display:none' });
 
@@ -204,7 +204,7 @@ function openFilterPopover(anchor: HTMLElement): void {
         { v: '__unset__', label: '(未割当)' },
         ...users.map(u => ({ v: u.email, label: u.displayName })),
     ] },
-    { key: 'priority', label: '重要度',     values: priorityList().map(v => ({ v, label: v })) },
+    { key: 'priority', label: '優先度',     values: priorityList().map(v => ({ v, label: v })) },
   ];
 
   const rowsWrap = el('div', { class: 'spira-fpop-body' });

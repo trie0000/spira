@@ -1122,6 +1122,23 @@
 .spira-prop-label { color: var(--ink-3); font-size: var(--fs-sm); }
 .spira-prop-value { color: var(--ink); }
 
+/* Inline editable badge/label — same look as the list cell, but clickable. */
+#spira-root .spira-prop-edit {
+  cursor: pointer;
+  user-select: none;
+  transition: filter 0.1s;
+}
+#spira-root .spira-prop-edit:hover { filter: brightness(0.95); }
+#spira-root .spira-prop-edit:focus-visible {
+  outline: 2px solid var(--accent-soft);
+  outline-offset: 2px;
+}
+#spira-root .spira-menu-item--current {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-weight: 500;
+}
+
 /* Thread */
 .spira-th-list { display: flex; flex-direction: column; gap: var(--s-5); }
 .spira-th-card {

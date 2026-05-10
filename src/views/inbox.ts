@@ -474,7 +474,7 @@ export function openNewTicketModal(m: InboxMail): void {
     el('div', { class: 'spira-field' }, [el('label', { class: 'spira-field-label' }, ['タイトル']), titleInput]),
     el('div', { style: 'display:grid;grid-template-columns:1fr 1fr;gap:var(--s-5)' }, [
       el('div', { class: 'spira-field' }, [el('label', { class: 'spira-field-label' }, ['ステータス']), statusSel]),
-      el('div', { class: 'spira-field' }, [el('label', { class: 'spira-field-label' }, ['重要度']), prioSel]),
+      el('div', { class: 'spira-field' }, [el('label', { class: 'spira-field-label' }, ['優先度']), prioSel]),
       el('div', { class: 'spira-field' }, [el('label', { class: 'spira-field-label' }, ['担当者']), assigneeSel]),
       el('div', { class: 'spira-field' }, [el('label', { class: 'spira-field-label' }, ['期限']), dueInput]),
     ]),
