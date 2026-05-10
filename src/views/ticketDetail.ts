@@ -32,9 +32,61 @@ export async function renderTicketDetail(ticketId: number): Promise<HTMLElement>
   const latestReceived = comments.filter(c => c.type === 'received').slice(-1)[0];
 
   return el('div', { class: 'spira-main-wrap', style: 'display:flex;flex-direction:column;height:100%;min-height:0' }, [
+    await renderTabStrip(t.id),
     renderToolbar(t, latestReceived),
     renderTicketHeader(t),
     renderSplitPanes(t, comments),
+  ]);
+}
+
+async function renderTabStrip(activeId: number): Promise<HTMLElement> {
+  const ids = getState().openTicketIds;
+  if (ids.length === 0) return el('div', { style: 'display:none' });
+
+  // Resolve titles in parallel.
+  const tickets = await Promise.all(ids.map(id => getRepo().getTicket(id)));
+
+  const tabs: HTMLElement[] = [];
+  ids.forEach((id, i) => {
+    const t = tickets[i];
+    if (!t) return;
+    const isActive = id === activeId;
+    const tab = el('div', {
+      class: 'spira-tab' + (isActive ? ' active' : ''),
+      onclick: () => setState({ selectedTicketId: id }),
+      title: t.title,
+    }, [
+      el('span', { style: 'font-family:var(--font-mono);font-size:var(--fs-xs);color:var(--ink-3);margin-right:6px' }, [`#${String(id).padStart(3, '0')}`]),
+      el('span', { style: 'max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap' }, [t.title]),
+      el('button', {
+        type: 'button',
+        class: 'spira-tab-close',
+        'aria-label': '閉じる',
+        onclick: (e: Event) => {
+          e.stopPropagation();
+          const remaining = getState().openTicketIds.filter(x => x !== id);
+          let nextSelected: number | null = getState().selectedTicketId;
+          if (id === nextSelected) {
+            nextSelected = remaining.length > 0 ? remaining[remaining.length - 1] ?? null : null;
+          }
+          setState({ openTicketIds: remaining, selectedTicketId: nextSelected });
+        },
+      }, ['×']),
+    ]);
+    tabs.push(tab);
+  });
+
+  const closeAllBtn = ids.length > 1 ? el('button', {
+    type: 'button',
+    class: 'spira-tab-close-all',
+    title: 'すべて閉じる',
+    onclick: () => setState({ openTicketIds: [], selectedTicketId: null }),
+  }, ['すべて閉じる']) : null;
+
+  return el('div', { class: 'spira-tab-strip' }, [
+    ...tabs,
+    el('div', { style: 'flex:1' }),
+    ...(closeAllBtn ? [closeAllBtn] : []),
   ]);
 }
 
@@ -97,7 +149,13 @@ function renderToolbar(t: Ticket, latestReceived: Comment | undefined): HTMLElem
           try {
             await getRepo().softDeleteTicket(t.id);
             toast(getRoot(), 'チケットをゴミ箱に移動しました', 'ok');
-            setState({ selectedTicketId: null, trashCount: getState().trashCount + 1 });
+            const remaining = getState().openTicketIds.filter(x => x !== t.id);
+            const next = remaining.length > 0 ? remaining[remaining.length - 1] ?? null : null;
+            setState({
+              selectedTicketId: next,
+              openTicketIds: remaining,
+              trashCount: getState().trashCount + 1,
+            });
           } catch (e) {
             toast(getRoot(), `削除に失敗: ${(e as Error).message}`, 'error');
           }
@@ -263,41 +321,69 @@ function paneTitle(title: string, sub: string): HTMLElement {
 const expandedReceived = new Set<number>();
 const expandedNotes = new Set<number>();
 
-/** Attach a "詳細を表示 / 折りたたむ" toggle to a card body if it would exceed the collapsed height. */
+/** Attach a "詳細を表示 / 折りたたむ" toggle to a card body if needed.
+ *  Uses inline styles so SP host CSS can never override the collapse height.
+ *  Toggling happens in place — no setState round-trip. */
 function attachCollapseToggle(
   card: HTMLElement,
   body: HTMLElement,
   id: number,
   expandedSet: Set<number>,
 ): void {
-  const isExpanded = expandedSet.has(id);
+  const COLLAPSED_HEIGHT = '6em';
 
-  // Measure rendered height after layout to decide whether truncation is meaningful.
-  // Use rAF since `body` is not yet attached to the document.
-  requestAnimationFrame(() => {
+  const apply = () => {
+    if (expandedSet.has(id)) {
+      body.style.maxHeight = '';
+      body.style.overflow = '';
+    } else {
+      body.style.maxHeight = COLLAPSED_HEIGHT;
+      body.style.overflow = 'hidden';
+    }
+  };
+
+  const toggle = el('button', {
+    type: 'button',
+    class: 'spira-th-toggle',
+    onclick: (e: Event) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (expandedSet.has(id)) expandedSet.delete(id);
+      else expandedSet.add(id);
+      apply();
+      toggle.innerHTML = '';
+      toggle.appendChild(toggleLabel(expandedSet.has(id)));
+    },
+  }, [toggleLabel(expandedSet.has(id))]);
+  card.appendChild(toggle);
+
+  // Apply collapse before mounting so the user never sees a flash of full height.
+  apply();
+
+  // After mount, hide the toggle if the body fits within the collapsed height.
+  setTimeout(() => {
     if (!card.isConnected) return;
-    const collapsedPx = parseFloat(getComputedStyle(body).fontSize) * 6 + 4;
-    const fullHeight = body.scrollHeight;
-    const needsCollapse = fullHeight > collapsedPx + 16;
-    if (!needsCollapse) {
-      body.removeAttribute('data-collapsed');
+    const wasExpanded = expandedSet.has(id);
+    body.style.maxHeight = '';
+    body.style.overflow = '';
+    const collapsedPx = parseFloat(getComputedStyle(body).fontSize) * 6;
+    const realHeight = body.scrollHeight;
+    if (realHeight <= collapsedPx + 8) {
+      toggle.remove();
       return;
     }
-    body.setAttribute('data-collapsed', isExpanded ? 'false' : 'true');
-    if (card.querySelector(':scope > .spira-th-toggle')) return;
-    const toggle = el('button', {
-      type: 'button',
-      class: 'spira-th-toggle',
-      onclick: (e: Event) => {
-        e.preventDefault();
-        e.stopPropagation();
-        if (expandedSet.has(id)) expandedSet.delete(id);
-        else expandedSet.add(id);
-        setState({});
-      },
-    }, [isExpanded ? '折りたたむ' : '詳細を表示']);
-    card.appendChild(toggle);
-  });
+    if (!wasExpanded) {
+      body.style.maxHeight = COLLAPSED_HEIGHT;
+      body.style.overflow = 'hidden';
+    }
+  }, 0);
+}
+
+function toggleLabel(isExpanded: boolean): HTMLElement {
+  return el('span', {}, [
+    el('span', { style: 'display:inline-block;width:10px;color:inherit;font-size:10px;margin-right:4px' }, [isExpanded ? '▲' : '▼']),
+    isExpanded ? '折りたたむ' : '詳細を表示',
+  ]);
 }
 
 /** Auto-grow a textarea with content, capped at maxRatio of viewport, with bottom padding. */
@@ -381,7 +467,7 @@ function renderReceivedCard(_t: Ticket, c: Comment): HTMLElement {
     el('span', { class: 'spira-th-card-from' }, [c.fromName ?? c.fromEmail ?? '(unknown)']),
     c.fromEmail ? el('span', { style: 'color:var(--ink-3)' }, [` <${c.fromEmail}>`]) : '',
     internal
-      ? el('span', { class: 'spira-badge spira-badge--muted', style: 'margin-left:var(--s-2);font-size:var(--fs-xs)' }, ['社内'])
+      ? el('span', { class: 'spira-badge spira-badge--muted', style: 'margin-left:var(--s-2);font-size:var(--fs-xs)' }, ['内部'])
       : el('span', { class: 'spira-badge spira-badge--warn', style: 'margin-left:var(--s-2);font-size:var(--fs-xs)' }, ['外部']),
     el('span', { style: 'margin-left:auto;color:var(--ink-3);font-size:var(--fs-sm)' }, [fmtDate(c.sentAt)]),
   ]);

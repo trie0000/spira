@@ -4,13 +4,14 @@ import type { ViewName, SiteUser } from './types';
 interface State {
   view: ViewName;
   selectedTicketId: number | null;
+  openTicketIds: number[]; // tabs opened in detail view
   filter: {
     status: string;
     assignee: string;
     priority: string;
     query: string;
   };
-  sortBy: 'updated' | 'priority' | 'due';
+  sortBy: 'id' | 'title' | 'status' | 'assignee' | 'priority' | 'due' | 'updated';
   sortDir: 'asc' | 'desc';
   // cached counts shown in sidebar
   inboxCount: number;
@@ -27,6 +28,7 @@ type Listener = () => void;
 const state: State = {
   view: 'tickets',
   selectedTicketId: null,
+  openTicketIds: [],
   filter: { status: '', assignee: '', priority: '', query: '' },
   sortBy: 'updated',
   sortDir: 'desc',

@@ -220,7 +220,13 @@ export function openNewTicketModal(m: InboxMail): void {
         }
         toast(getRoot(), `#${String(t.id).padStart(3, '0')} を起票しました`, 'ok');
         const inboxCount = m.id > 0 ? Math.max(0, getState().inboxCount - 1) : getState().inboxCount;
-        setState({ view: 'tickets', selectedTicketId: t.id, inboxCount });
+        const open = getState().openTicketIds;
+        setState({
+          view: 'tickets',
+          selectedTicketId: t.id,
+          openTicketIds: open.includes(t.id) ? open : [...open, t.id],
+          inboxCount,
+        });
       } catch (e) {
         toast(getRoot(), `起票に失敗: ${(e as Error).message}`, 'error');
         throw e; // keep modal open
@@ -303,9 +309,11 @@ export function openLinkModal(m: InboxMail): void {
         });
         await repo.markInboxProcessed(m.id, { ticketId: selectedId, result: 'manual-linked' });
         toast(getRoot(), `#${String(selectedId).padStart(3, '0')} に紐付けました`, 'ok');
+        const open = getState().openTicketIds;
         setState({
           view: 'tickets',
           selectedTicketId: selectedId,
+          openTicketIds: open.includes(selectedId) ? open : [...open, selectedId],
           inboxCount: Math.max(0, getState().inboxCount - 1),
         });
       } catch (e) {

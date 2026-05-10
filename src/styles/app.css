@@ -476,17 +476,17 @@
 .spira-badge--danger { background: var(--danger-soft); border-color: var(--danger); color: var(--danger); }
 .spira-badge--muted  { background: var(--paper-2); border-color: var(--paper-3); color: var(--ink-3); }
 
-/* Priority dot */
-.spira-prio-dot {
+/* Priority label — colored text instead of a dot */
+.spira-prio {
   display: inline-block;
-  width: 12px; height: 12px;
-  border-radius: 50%;
-  vertical-align: middle;
-  flex-shrink: 0;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
 }
-.spira-prio-dot--high   { background: var(--danger); }
-.spira-prio-dot--medium { background: var(--warn); }
-.spira-prio-dot--low    { background: var(--ink-4); }
+.spira-prio--high   { color: var(--danger); }
+.spira-prio--medium { color: var(--warn); }
+.spira-prio--low    { color: var(--ink-3); }
 
 /* Avatar */
 .spira-avatar {
@@ -654,6 +654,8 @@
   top: 0;
   z-index: 1;
 }
+.spira-tk-table th.spira-th-sort:hover { background: var(--paper-2); color: var(--ink); }
+.spira-tk-table th.spira-th-sort.active { color: var(--accent-strong); font-weight: 600; }
 .spira-tk-table td {
   padding: var(--s-4);
   border-bottom: 1px solid var(--paper-3);
@@ -669,6 +671,155 @@
 .spira-tk-id { font-family: var(--font-mono); color: var(--ink-3); font-size: var(--fs-sm); }
 .spira-tk-title { color: var(--ink); max-width: 360px; overflow: hidden; text-overflow: ellipsis; }
 .spira-tk-due--overdue { color: var(--danger); font-weight: 500; }
+
+/* Filter chip strip (n365 style) */
+#spira-root .spira-filter-chipstrip {
+  display: flex; flex-wrap: wrap; gap: var(--s-2);
+  padding: var(--s-2) var(--s-7);
+  background: var(--paper-2);
+  border-bottom: 1px solid var(--line);
+}
+#spira-root .spira-filter-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 10px;
+  background: var(--paper);
+  color: var(--ink);
+  border: 1px solid var(--paper-3);
+  border-radius: 99px;
+  font-size: var(--fs-xs);
+  cursor: pointer;
+}
+#spira-root .spira-filter-chip:hover { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-strong); }
+#spira-root .spira-filter-chip-clear {
+  background: transparent;
+  border: none;
+  font-family: inherit;
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
+  padding: 0 var(--s-2);
+  cursor: pointer;
+}
+#spira-root .spira-filter-chip-clear:hover { color: var(--danger); }
+
+/* Filter popover (n365 style) */
+#spira-root .spira-filter-pop {
+  background: var(--paper);
+  border: 1px solid var(--paper-3);
+  border-radius: var(--r-3);
+  box-shadow: var(--shadow-flyout);
+  display: flex; flex-direction: column;
+  min-width: 380px;
+  max-height: 60vh;
+}
+#spira-root .spira-fpop-hd {
+  display: flex; align-items: center; gap: var(--s-2);
+  padding: var(--s-4) var(--s-5);
+  border-bottom: 1px solid var(--paper-3);
+  font-size: var(--fs-sm); font-weight: 600;
+}
+#spira-root .spira-fpop-hd > span:first-child { flex: 1; }
+#spira-root .spira-fpop-close {
+  background: transparent; border: none; cursor: pointer;
+  font-size: 18px; color: var(--ink-3); line-height: 1; padding: 0 4px;
+}
+#spira-root .spira-fpop-close:hover { color: var(--ink); }
+#spira-root .spira-fpop-body {
+  padding: var(--s-3) var(--s-4); overflow-y: auto; flex: 1;
+}
+#spira-root .spira-fpop-empty {
+  padding: var(--s-5);
+  color: var(--ink-3);
+  font-size: var(--fs-sm);
+  text-align: center;
+}
+#spira-root .spira-fpop-row {
+  display: flex; align-items: center; gap: var(--s-2);
+  margin-bottom: var(--s-2);
+}
+#spira-root .spira-fpop-field { flex: 0 0 90px; font-size: var(--fs-sm); color: var(--ink-3); }
+#spira-root .spira-fpop-op { flex: 0 0 24px; text-align: center; font-size: var(--fs-sm); color: var(--ink-3); }
+#spira-root .spira-fpop-val { flex: 1; }
+#spira-root .spira-fpop-rm {
+  background: transparent; border: none; cursor: pointer;
+  width: 22px; height: 22px;
+  color: var(--ink-3); font-size: 14px;
+  border-radius: var(--r-1);
+}
+#spira-root .spira-fpop-rm:hover { background: var(--danger-soft); color: var(--danger); }
+#spira-root .spira-fpop-add {
+  padding: var(--s-2) var(--s-4);
+  border-top: 1px solid var(--paper-3);
+}
+#spira-root .spira-fpop-ft {
+  display: flex; align-items: center; gap: var(--s-2);
+  padding: var(--s-3) var(--s-5);
+  border-top: 1px solid var(--paper-3);
+}
+
+/* Tab strip (open tickets) */
+#spira-root .spira-tab-strip {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  padding: 0 var(--s-3);
+  background: var(--paper-2);
+  border-bottom: 1px solid var(--line);
+  overflow-x: auto;
+  flex-shrink: 0;
+}
+#spira-root .spira-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px var(--s-3);
+  background: transparent;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-top-left-radius: var(--r-2);
+  border-top-right-radius: var(--r-2);
+  font-size: var(--fs-sm);
+  color: var(--ink-3);
+  cursor: pointer;
+  flex-shrink: 0;
+  margin-top: 4px;
+  border-color: var(--line);
+}
+#spira-root .spira-tab:hover { color: var(--ink); background: var(--paper); }
+#spira-root .spira-tab.active {
+  background: var(--paper);
+  color: var(--ink);
+  border-color: var(--line);
+  border-bottom: 1px solid var(--paper);
+  margin-bottom: -1px;
+  font-weight: 500;
+}
+#spira-root .spira-tab-close {
+  background: transparent;
+  border: none;
+  width: 18px; height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  color: var(--ink-3);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0;
+  margin-left: 4px;
+}
+#spira-root .spira-tab-close:hover { background: rgba(184, 83, 74, 0.18); color: var(--danger); }
+#spira-root .spira-tab-close-all {
+  background: transparent;
+  border: none;
+  font-family: inherit;
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
+  padding: 0 var(--s-3);
+  cursor: pointer;
+  align-self: center;
+}
+#spira-root .spira-tab-close-all:hover { color: var(--danger); }
 
 /* Ticket detail (right-rail) */
 .spira-detail {
@@ -787,20 +938,27 @@
 #spira-root .spira-th-card--note .spira-th-card-body[data-collapsed="true"]::after {
   background: linear-gradient(rgba(250,250,247,0), var(--paper));
 }
-.spira-th-toggle {
+/* Collapse toggle — small pill below the card body */
+#spira-root .spira-th-toggle {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  margin-top: var(--s-2);
-  background: transparent;
-  border: none;
-  padding: 0;
-  font-size: var(--fs-sm);
-  color: var(--accent-strong);
+  gap: 6px;
+  margin-top: var(--s-3);
+  padding: 4px 12px;
+  background: var(--paper);
+  border: 1px solid var(--paper-3);
+  border-radius: 999px;
+  font-family: inherit;
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
   cursor: pointer;
-  text-decoration: underline;
+  transition: background 0.1s, color 0.1s, border-color 0.1s;
 }
-.spira-th-toggle:hover { color: var(--ink); }
+#spira-root .spira-th-toggle:hover {
+  background: var(--paper-2);
+  color: var(--ink);
+  border-color: var(--ink-4);
+}
 
 /* Pane title: solid background so cards don't bleed through when scrolling */
 .spira-pane-title {
