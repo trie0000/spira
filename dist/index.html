@@ -4876,7 +4876,8 @@ var Spira = (() => {
       if (m) {
         const icon2 = m[1];
         const name = m[2];
-        return `<a class="ne-file" href="${h}" target="_blank" rel="noopener noreferrer" download="${name.replace(/"/g, "&quot;")}" contenteditable="false" data-ne-file="1"><span class="ne-file-ic">${icon2}</span><span class="ne-file-name">${name}</span></a>`;
+        const safe = name.replace(/"/g, "&quot;");
+        return `<a class="ne-file" href="${h}" target="_blank" rel="noopener noreferrer" title="\u30C0\u30D6\u30EB\u30AF\u30EA\u30C3\u30AF\u3067\u958B\u304F: ${safe}" contenteditable="false" data-ne-file="1"><span class="ne-file-ic">${icon2}</span><span class="ne-file-name">${name}</span></a>`;
       }
       return `<a href="${h}">${t}</a>`;
     });
@@ -5349,7 +5350,7 @@ var Spira = (() => {
       a.href = url;
       a.target = "_blank";
       a.rel = "noopener noreferrer";
-      a.setAttribute("download", filename);
+      a.title = `\u30C0\u30D6\u30EB\u30AF\u30EA\u30C3\u30AF\u3067\u958B\u304F: ${filename}`;
       a.setAttribute("contenteditable", "false");
       a.setAttribute("data-ne-file", "1");
       a.innerHTML = `<span class="ne-file-ic">${fileIconFor(filename)}</span><span class="ne-file-name"></span>`;
@@ -6137,6 +6138,15 @@ var Spira = (() => {
           markDirty();
         }
       }
+      const fileChip = target.closest("a.ne-file");
+      if (fileChip) e.preventDefault();
+    });
+    ed.addEventListener("dblclick", (e) => {
+      const target = e.target?.closest("a.ne-file");
+      if (!target) return;
+      e.preventDefault();
+      const href = target.getAttribute("href") ?? "";
+      if (href) window.open(href, "_blank", "noopener,noreferrer");
     });
     let appendedTrailingP = null;
     function isBlockEmpty(b) {
@@ -7995,15 +8005,15 @@ var Spira = (() => {
       title: "\u30AF\u30EA\u30C3\u30AF\u3067\u30B3\u30D4\u30FC",
       onclick: async () => {
         try {
-          await navigator.clipboard.writeText("0.0.1-60ca1b0+ (2026-05-14T23:29:09Z)");
+          await navigator.clipboard.writeText("0.0.1-6842d3b+ (2026-05-14T23:33:40Z)");
           buildLabel.textContent = "\u2713 \u30B3\u30D4\u30FC\u3057\u307E\u3057\u305F";
           setTimeout(() => {
-            buildLabel.textContent = `build: ${"0.0.1-60ca1b0+ (2026-05-14T23:29:09Z)"}`;
+            buildLabel.textContent = `build: ${"0.0.1-6842d3b+ (2026-05-14T23:33:40Z)"}`;
           }, 1200);
         } catch {
         }
       }
-    }, [`build: ${"0.0.1-60ca1b0+ (2026-05-14T23:29:09Z)"}`]);
+    }, [`build: ${"0.0.1-6842d3b+ (2026-05-14T23:33:40Z)"}`]);
     const menu = el("div", {
       class: "spira-menu spira-settings-menu",
       style: "position:fixed;z-index:var(--z-modal);min-width:280px"
@@ -8531,7 +8541,7 @@ var Spira = (() => {
       setState({ errorBanner: `\u521D\u671F\u5316\u306B\u5931\u6557\u3057\u307E\u3057\u305F: ${msg}` });
       toast(root2, `\u521D\u671F\u5316\u30A8\u30E9\u30FC: ${msg}`, "error");
     }
-    console.log(`[spira] build: ${"0.0.1-60ca1b0+ (2026-05-14T23:29:09Z)"}`);
+    console.log(`[spira] build: ${"0.0.1-6842d3b+ (2026-05-14T23:33:40Z)"}`);
     console.log(`[spira] repo mode: ${getRepoMode()}`);
   }
   async function doSync(root2, silent = false) {
