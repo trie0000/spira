@@ -261,7 +261,12 @@ export class SpRepository implements Repository {
   async uploadAttachment(ticketId: number, file: File): Promise<{ url: string; filename: string }> {
     const subFolder = `ticket-${String(ticketId).padStart(5, '0')}`;
     const folderServerRel = await this.ensureAttachmentFolder(subFolder);
-    const finalName = await this.resolveNonCollidingName(folderServerRel, file.name);
+    // NFC-normalize the filename before sending it to SharePoint. macOS
+    // hands us filenames in NFD (e.g. `ねずこ` has its dakuten encoded as
+    // a separate combining mark) but SP stores everything in NFC. Without
+    // this the URL we embed later can fail to match the stored file.
+    const safeName = file.name.normalize('NFC');
+    const finalName = await this.resolveNonCollidingName(folderServerRel, safeName);
     const buffer = await file.arrayBuffer();
     const uploadUrl =
       `${this.cfg.siteUrl}/_api/web/GetFolderByServerRelativeUrl('${encodeURIComponent(folderServerRel)}')` +
@@ -287,22 +292,31 @@ export class SpRepository implements Repository {
   }
 
   /** Ensure `<site>/SpiraAttachments/<subFolder>/` exists. Returns the
-   *  server-relative URL (e.g. `/sites/spira/SpiraAttachments/ticket-00042`). */
+   *  server-relative URL (e.g. `/sites/spira/SpiraAttachments/ticket-00042`).
+   *
+   *  IMPORTANT: SharePoint's `GetFolderByServerRelativeUrl` does NOT return
+   *  HTTP 404 for missing folders — it returns 200 OK with `Exists: false`
+   *  in the payload. So we have to inspect the body, not just the status.
+   *  Earlier versions of this method relied on a 404 that never came,
+   *  which silently skipped folder creation and surfaced as a
+   *  `DirectoryNotFoundException` on the subsequent `Files/add` call. */
   private async ensureAttachmentFolder(subFolder: string): Promise<string> {
     const siteServerRel = new URL(this.cfg.siteUrl).pathname.replace(/\/$/, '');
     const libRel = `${siteServerRel}/${ATTACHMENT_LIBRARY}`;
     const fullRel = `${libRel}/${subFolder}`;
-    // GetFolderByServerRelativeUrl returns 404 if missing — catch & create.
+    let exists = false;
     try {
-      await this.tx.req(
+      const info = await this.tx.req<{ Exists?: boolean }>(
         `/_api/web/GetFolderByServerRelativeUrl('${encodeURIComponent(fullRel)}')?$select=Exists`,
       );
-      return fullRel;
+      exists = info?.Exists === true;
     } catch (e) {
+      // Some SP variants do return 404; treat that as "missing" too.
       if (!(e instanceof SpError) || e.status !== 404) throw e;
+      exists = false;
     }
-    // 404 path → create sub-folder via Folders/add.
-    await this.tx.req(`/_api/web/folders`, {
+    if (exists) return fullRel;
+    await this.tx.req('/_api/web/folders', {
       method: 'POST',
       odata: 'verbose',
       body: JSON.stringify({
@@ -329,11 +343,13 @@ export class SpRepository implements Repository {
   }
 
   private async fileExists(folderServerRel: string, name: string): Promise<boolean> {
+    // Same gotcha as the folder probe: SP returns 200 with `Exists: false`
+    // for missing files, not 404. Inspect the body.
     const url =
       `/_api/web/GetFileByServerRelativeUrl('${encodeURIComponent(folderServerRel + '/' + name)}')?$select=Exists`;
     try {
-      await this.tx.req(url);
-      return true;
+      const info = await this.tx.req<{ Exists?: boolean }>(url);
+      return info?.Exists === true;
     } catch (e) {
       if (e instanceof SpError && e.status === 404) return false;
       throw e;
