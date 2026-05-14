@@ -904,7 +904,8 @@ var Spira = (() => {
         async uploadAttachment(ticketId, file) {
           const subFolder = `ticket-${String(ticketId).padStart(5, "0")}`;
           const folderServerRel = await this.ensureAttachmentFolder(subFolder);
-          const finalName = await this.resolveNonCollidingName(folderServerRel, file.name);
+          const safeName = file.name.normalize("NFC");
+          const finalName = await this.resolveNonCollidingName(folderServerRel, safeName);
           const buffer = await file.arrayBuffer();
           const uploadUrl = `${this.cfg.siteUrl}/_api/web/GetFolderByServerRelativeUrl('${encodeURIComponent(folderServerRel)}')/Files/add(url='${encodeURIComponent(finalName)}',overwrite=false)`;
           const digest = await this.tx.formDigest();
@@ -925,20 +926,30 @@ var Spira = (() => {
           };
         }
         /** Ensure `<site>/SpiraAttachments/<subFolder>/` exists. Returns the
-         *  server-relative URL (e.g. `/sites/spira/SpiraAttachments/ticket-00042`). */
+         *  server-relative URL (e.g. `/sites/spira/SpiraAttachments/ticket-00042`).
+         *
+         *  IMPORTANT: SharePoint's `GetFolderByServerRelativeUrl` does NOT return
+         *  HTTP 404 for missing folders — it returns 200 OK with `Exists: false`
+         *  in the payload. So we have to inspect the body, not just the status.
+         *  Earlier versions of this method relied on a 404 that never came,
+         *  which silently skipped folder creation and surfaced as a
+         *  `DirectoryNotFoundException` on the subsequent `Files/add` call. */
         async ensureAttachmentFolder(subFolder) {
           const siteServerRel = new URL(this.cfg.siteUrl).pathname.replace(/\/$/, "");
           const libRel = `${siteServerRel}/${ATTACHMENT_LIBRARY}`;
           const fullRel = `${libRel}/${subFolder}`;
+          let exists = false;
           try {
-            await this.tx.req(
+            const info = await this.tx.req(
               `/_api/web/GetFolderByServerRelativeUrl('${encodeURIComponent(fullRel)}')?$select=Exists`
             );
-            return fullRel;
+            exists = info?.Exists === true;
           } catch (e) {
             if (!(e instanceof SpError) || e.status !== 404) throw e;
+            exists = false;
           }
-          await this.tx.req(`/_api/web/folders`, {
+          if (exists) return fullRel;
+          await this.tx.req("/_api/web/folders", {
             method: "POST",
             odata: "verbose",
             body: JSON.stringify({
@@ -964,8 +975,8 @@ var Spira = (() => {
         async fileExists(folderServerRel, name) {
           const url = `/_api/web/GetFileByServerRelativeUrl('${encodeURIComponent(folderServerRel + "/" + name)}')?$select=Exists`;
           try {
-            await this.tx.req(url);
-            return true;
+            const info = await this.tx.req(url);
+            return info?.Exists === true;
           } catch (e) {
             if (e instanceof SpError && e.status === 404) return false;
             throw e;
@@ -7977,15 +7988,15 @@ var Spira = (() => {
       title: "\u30AF\u30EA\u30C3\u30AF\u3067\u30B3\u30D4\u30FC",
       onclick: async () => {
         try {
-          await navigator.clipboard.writeText("0.0.1-262e2b2+ (2026-05-14T23:21:17Z)");
+          await navigator.clipboard.writeText("0.0.1-9a930d1+ (2026-05-14T23:24:05Z)");
           buildLabel.textContent = "\u2713 \u30B3\u30D4\u30FC\u3057\u307E\u3057\u305F";
           setTimeout(() => {
-            buildLabel.textContent = `build: ${"0.0.1-262e2b2+ (2026-05-14T23:21:17Z)"}`;
+            buildLabel.textContent = `build: ${"0.0.1-9a930d1+ (2026-05-14T23:24:05Z)"}`;
           }, 1200);
         } catch {
         }
       }
-    }, [`build: ${"0.0.1-262e2b2+ (2026-05-14T23:21:17Z)"}`]);
+    }, [`build: ${"0.0.1-9a930d1+ (2026-05-14T23:24:05Z)"}`]);
     const menu = el("div", {
       class: "spira-menu spira-settings-menu",
       style: "position:fixed;z-index:var(--z-modal);min-width:280px"
@@ -8513,7 +8524,7 @@ var Spira = (() => {
       setState({ errorBanner: `\u521D\u671F\u5316\u306B\u5931\u6557\u3057\u307E\u3057\u305F: ${msg}` });
       toast(root2, `\u521D\u671F\u5316\u30A8\u30E9\u30FC: ${msg}`, "error");
     }
-    console.log(`[spira] build: ${"0.0.1-262e2b2+ (2026-05-14T23:21:17Z)"}`);
+    console.log(`[spira] build: ${"0.0.1-9a930d1+ (2026-05-14T23:24:05Z)"}`);
     console.log(`[spira] repo mode: ${getRepoMode()}`);
   }
   async function doSync(root2, silent = false) {
