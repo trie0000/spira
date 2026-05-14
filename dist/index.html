@@ -561,6 +561,18 @@ var Spira = (() => {
         async listSiteUsers() {
           return store.users.slice();
         }
+        /** Mock: encode the file as a base64 data URL and return it. The
+         *  filename is preserved as-is (no collision logic — each upload
+         *  produces an independent data URL even when names match). */
+        async uploadAttachment(_ticketId, file) {
+          const url = await new Promise((resolve, reject) => {
+            const r = new FileReader();
+            r.onload = () => resolve(String(r.result));
+            r.onerror = () => reject(r.error);
+            r.readAsDataURL(file);
+          });
+          return { url, filename: file.name };
+        }
         async addSampleInbox() {
           const inputs = sampleInboxInputs();
           for (const inp of inputs) {
@@ -761,7 +773,7 @@ var Spira = (() => {
   function isDuplicateFieldError(body) {
     return /already exists/i.test(body) || /duplicate/i.test(body) || /既に存在/.test(body) || /重複/.test(body) || /同じ名前/.test(body);
   }
-  var DEFAULT_LISTS, SpError, SpTransport, SpRepository;
+  var DEFAULT_LISTS, ATTACHMENT_LIBRARY, SpError, SpTransport, SpRepository;
   var init_sp = __esm({
     "src/api/sp.ts"() {
       "use strict";
@@ -772,6 +784,7 @@ var Spira = (() => {
         listComments: "Comments",
         listInbox: "InboxMails"
       };
+      ATTACHMENT_LIBRARY = "SpiraAttachments";
       SpError = class extends Error {
         constructor(status, body, url) {
           super(`SP ${status} ${url ?? ""}: ${body.slice(0, 200)}`);
@@ -866,7 +879,97 @@ var Spira = (() => {
           await ensure(this.cfg.listTickets, ticketFieldSpecs());
           await ensure(this.cfg.listComments, commentFieldSpecs());
           await ensure(this.cfg.listInbox, inboxFieldSpecs());
+          if (!await this.listExists(ATTACHMENT_LIBRARY)) {
+            await this.tx.req("/_api/web/lists", {
+              method: "POST",
+              odata: "verbose",
+              body: JSON.stringify({
+                __metadata: { type: "SP.List" },
+                Title: ATTACHMENT_LIBRARY,
+                BaseTemplate: 101,
+                // Document Library
+                AllowContentTypes: false
+              })
+            });
+            created.push(ATTACHMENT_LIBRARY);
+          }
           return { created, addedFields };
+        }
+        // ---- attachments -----------------------------------------------------
+        /** Upload a file under SpiraAttachments/ticket-{N}/, auto-creating the
+         *  per-ticket sub-folder on first use, and renaming the file with a
+         *  ` (1)`, ` (2)` … suffix if the same filename already exists in that
+         *  folder. Returns the absolute URL plus the (possibly-renamed) filename
+         *  so the caller can put `[📎 <filename>](<url>)` in the memo. */
+        async uploadAttachment(ticketId, file) {
+          const subFolder = `ticket-${String(ticketId).padStart(5, "0")}`;
+          const folderServerRel = await this.ensureAttachmentFolder(subFolder);
+          const finalName = await this.resolveNonCollidingName(folderServerRel, file.name);
+          const buffer = await file.arrayBuffer();
+          const uploadUrl = `${this.cfg.siteUrl}/_api/web/GetFolderByServerRelativeUrl('${encodeURIComponent(folderServerRel)}')/Files/add(url='${encodeURIComponent(finalName)}',overwrite=false)`;
+          const digest = await this.tx.formDigest();
+          const res = await fetch(uploadUrl, {
+            method: "POST",
+            headers: {
+              "Accept": "application/json;odata=nometadata",
+              "X-RequestDigest": digest
+            },
+            credentials: "include",
+            body: buffer
+          });
+          if (!res.ok) throw new SpError(res.status, await res.text(), uploadUrl);
+          const tenantOrigin = new URL(this.cfg.siteUrl).origin;
+          return {
+            url: `${tenantOrigin}${folderServerRel}/${encodeURI(finalName)}`,
+            filename: finalName
+          };
+        }
+        /** Ensure `<site>/SpiraAttachments/<subFolder>/` exists. Returns the
+         *  server-relative URL (e.g. `/sites/spira/SpiraAttachments/ticket-00042`). */
+        async ensureAttachmentFolder(subFolder) {
+          const siteServerRel = new URL(this.cfg.siteUrl).pathname.replace(/\/$/, "");
+          const libRel = `${siteServerRel}/${ATTACHMENT_LIBRARY}`;
+          const fullRel = `${libRel}/${subFolder}`;
+          try {
+            await this.tx.req(
+              `/_api/web/GetFolderByServerRelativeUrl('${encodeURIComponent(fullRel)}')?$select=Exists`
+            );
+            return fullRel;
+          } catch (e) {
+            if (!(e instanceof SpError) || e.status !== 404) throw e;
+          }
+          await this.tx.req(`/_api/web/folders`, {
+            method: "POST",
+            odata: "verbose",
+            body: JSON.stringify({
+              __metadata: { type: "SP.Folder" },
+              ServerRelativeUrl: fullRel
+            })
+          });
+          return fullRel;
+        }
+        /** Probe for an unused filename in `folderServerRel`. Mirrors OS file
+         *  managers: `report.xlsx` → `report (1).xlsx` → `report (2).xlsx` … */
+        async resolveNonCollidingName(folderServerRel, original) {
+          const dot = original.lastIndexOf(".");
+          const base = dot > 0 ? original.slice(0, dot) : original;
+          const ext = dot > 0 ? original.slice(dot) : "";
+          for (let i = 0; i < 100; i++) {
+            const candidate = i === 0 ? original : `${base} (${i})${ext}`;
+            const exists = await this.fileExists(folderServerRel, candidate);
+            if (!exists) return candidate;
+          }
+          throw new Error(`Too many duplicate filenames for ${original}`);
+        }
+        async fileExists(folderServerRel, name) {
+          const url = `/_api/web/GetFileByServerRelativeUrl('${encodeURIComponent(folderServerRel + "/" + name)}')?$select=Exists`;
+          try {
+            await this.tx.req(url);
+            return true;
+          } catch (e) {
+            if (e instanceof SpError && e.status === 404) return false;
+            throw e;
+          }
         }
         // ---- destructive: clear all items (NOT drop the lists themselves)
         //
@@ -2558,7 +2661,7 @@ var Spira = (() => {
 `;
 
   // src/lib/note-editor/editor.css
-  var editor_default = "/* ============================================================\n   note-editor \u2014 drop-in styles\n   ============================================================\n   - All selectors are scoped to `.ne-editor` (the editor root) or\n     `.ne-prose` (for read-only rendering of markdown output).\n   - Floating widgets (.ne-slash, .ne-ftb, .ne-drag-handle) attach\n     to document.body, so they're styled at the top level.\n   - Theme via CSS variables with sensible fallbacks. Override them\n     by setting --ne-* on .ne-editor (or any ancestor) in your app.\n   ============================================================ */\n\n.ne-editor,\n.ne-prose,\n.ne-slash,\n.ne-ftb,\n.ne-drag-handle {\n  --ne-bg:           var(--ne-override-bg,           #ffffff);\n  --ne-text:         var(--ne-override-text,         #1f1f1f);\n  --ne-muted:        var(--ne-override-muted,        #6b6b6b);\n  --ne-faint:        var(--ne-override-faint,        #a8a39a);\n  --ne-surface:      var(--ne-override-surface,      #f5f5f3);\n  --ne-border:       var(--ne-override-border,       rgba(0, 0, 0, 0.10));\n  --ne-border-strong:var(--ne-override-border-strong,rgba(0, 0, 0, 0.18));\n  --ne-accent:       var(--ne-override-accent,       #4a7c59);\n  --ne-accent-soft:  var(--ne-override-accent-soft,  rgba(74, 124, 89, 0.16));\n  --ne-radius:       var(--ne-override-radius,       4px);\n  --ne-radius-lg:    var(--ne-override-radius-lg,    6px);\n  --ne-font-size:    var(--ne-override-font-size,    13px);\n  --ne-line-height:  var(--ne-override-line-height,  1.65);\n  --ne-mono:         var(--ne-override-mono,         ui-monospace, \"SFMono-Regular\", Menlo, Consolas, monospace);\n  --ne-shadow:       var(--ne-override-shadow,       0 8px 24px rgba(0, 0, 0, 0.12));\n  /* Inline `<code>` text colour. Code blocks (<pre><code>) inherit the\n     normal text colour so syntax-highlighted snippets aren't tinted. */\n  --ne-inline-code:  var(--ne-override-inline-code,  #c7254e);\n  /* Floating widgets sit at near-max z so they punch through host overlays\n     (e.g. SharePoint UI, fixed-positioned modals). Override with\n     --ne-override-z-floating if your host needs a different stacking. */\n  --ne-z-floating:   var(--ne-override-z-floating,   2147483647);\n}\n\n/* \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 Editor root + content \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 */\n\n.ne-editor {\n  position: relative;\n  min-height: 80px;\n}\n\n.ne-content {\n  position: relative;\n  min-height: 80px;\n  padding: 8px 12px;\n  background: var(--ne-bg);\n  color: var(--ne-text);\n  border: 1px solid var(--ne-border);\n  border-radius: var(--ne-radius);\n  font-size: var(--ne-font-size);\n  line-height: var(--ne-line-height);\n  outline: none;\n  white-space: pre-wrap;\n  word-break: break-word;\n  cursor: text;\n  /* Reserve a small left gutter so the floating drag handle has room to sit\n     just outside the editor border without clipping. */\n  margin-left: 24px;\n}\n.ne-content:focus { border-color: var(--ne-accent); }\n\n/* Placeholder \u2014 shown only while the editor is empty.\n   `<br>` (used by browsers in empty contenteditable paragraphs) is a void\n   element and ignores ::before, so the editor toggles `.ne-empty` itself\n   via JS to drive this rule. */\n.ne-content.ne-empty::before {\n  content: attr(data-placeholder);\n  position: absolute;\n  top: 8px;\n  left: 12px;\n  color: var(--ne-faint);\n  pointer-events: none;\n  white-space: nowrap;\n  overflow: hidden;\n  max-width: calc(100% - 24px);\n  text-overflow: ellipsis;\n}\n\n/* \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 Prose (live + read-only) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 */\n\n.ne-prose > * { margin: 0; }\n.ne-prose > * + * { margin-top: 8px; }\n.ne-prose h1 { font-size: 1.6em;  font-weight: 600; line-height: 1.3; }\n.ne-prose h2 { font-size: 1.35em; font-weight: 600; line-height: 1.3; }\n.ne-prose h3 { font-size: 1.15em; font-weight: 600; line-height: 1.3; }\n.ne-prose blockquote {\n  padding: 0 12px;\n  border-left: 3px solid var(--ne-accent);\n  color: var(--ne-muted);\n}\n.ne-prose pre {\n  padding: 8px 12px;\n  background: var(--ne-surface);\n  border: 1px solid var(--ne-border);\n  border-radius: var(--ne-radius);\n  font-family: var(--ne-mono);\n  font-size: 12px;\n  white-space: pre;\n  overflow-x: auto;\n}\n.ne-prose code {\n  padding: 1px 4px;\n  background: var(--ne-surface);\n  border: 1px solid var(--ne-border);\n  border-radius: 3px;\n  font-family: var(--ne-mono);\n  font-size: 0.92em;\n  color: var(--ne-inline-code);\n}\n/* Code block content stays at normal text colour \u2014 only inline `<code>`\n   gets the accent. */\n.ne-prose pre code {\n  padding: 0;\n  background: transparent;\n  border: 0;\n  color: inherit;\n}\n.ne-prose hr {\n  border: 0;\n  border-top: 1px solid var(--ne-border-strong);\n  margin: 10px 0;\n}\n.ne-prose ul,\n.ne-prose ol { padding-left: 1.5em; }\n\n.ne-prose img.ne-img,\n.ne-prose img {\n  max-width: 100%;\n  height: auto;\n  border-radius: var(--ne-radius);\n  display: block;\n  margin: 8px 0;\n}\n\n/* Todo */\n.ne-prose .ne-todo {\n  display: flex;\n  align-items: flex-start;\n  gap: 8px;\n  padding: 2px 0;\n}\n.ne-prose .ne-todo-cb {\n  margin-top: 4px;\n  flex-shrink: 0;\n  cursor: pointer;\n}\n.ne-prose .ne-todo-txt { flex: 1; min-width: 0; }\n.ne-prose .ne-todo-txt.done {\n  text-decoration: line-through;\n  color: var(--ne-muted);\n}\n\n/* Callout */\n.ne-prose .ne-callout {\n  display: flex;\n  gap: 8px;\n  padding: 8px 12px;\n  background: var(--ne-accent-soft);\n  border-left: 3px solid var(--ne-accent);\n  border-radius: var(--ne-radius);\n}\n.ne-prose .ne-callout-ic {\n  flex-shrink: 0;\n  font-size: 1.1em;\n  line-height: 1.5;\n}\n.ne-prose .ne-callout-body { flex: 1; min-width: 0; }\n.ne-prose .ne-callout-body > * { margin: 0; }\n.ne-prose .ne-callout-body > * + * { margin-top: 6px; }\n\n/* Tables */\n.ne-prose .ne-table-wrap {\n  overflow-x: auto;\n  margin: 8px 0;\n}\n.ne-prose .ne-table {\n  border-collapse: collapse;\n  width: max-content;\n  min-width: 240px;\n}\n.ne-prose .ne-table td,\n.ne-prose .ne-table th {\n  border: 1px solid var(--ne-border);\n  padding: 4px 8px;\n  min-width: 60px;\n  vertical-align: top;\n  outline: none;\n}\n.ne-content .ne-table td:focus { background: var(--ne-accent-soft); }\n.ne-prose .ne-table th { background: var(--ne-surface); font-weight: 600; }\n\n/* \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 Floating widgets \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 */\n\n/* Drag handle (viewport-fixed so it floats above any host stacking context) */\n.ne-drag-handle {\n  position: fixed;\n  width: 18px;\n  align-items: center;\n  justify-content: center;\n  color: var(--ne-faint);\n  cursor: grab;\n  border-radius: var(--ne-radius);\n  background: transparent;\n  z-index: var(--ne-z-floating);\n  user-select: none;\n}\n.ne-drag-handle:hover {\n  background: var(--ne-surface);\n  color: var(--ne-muted);\n}\n.ne-drag-handle:active { cursor: grabbing; }\n\n.ne-block-dragging { opacity: 0.4; }\n\n.ne-drop-line {\n  height: 2px;\n  background: var(--ne-accent);\n  margin: 1px 0;\n  border-radius: 1px;\n  pointer-events: none;\n}\n\n/* Slash menu */\n.ne-slash {\n  position: fixed;\n  z-index: var(--ne-z-floating);\n  display: none;\n  width: 280px;\n  max-height: 360px;\n  overflow-y: auto;\n  background: var(--ne-bg);\n  color: var(--ne-text);\n  border: 1px solid var(--ne-border-strong);\n  border-radius: var(--ne-radius-lg);\n  box-shadow: var(--ne-shadow);\n  padding: 4px;\n  font-size: var(--ne-font-size);\n  line-height: 1.4;\n}\n.ne-slash.on { display: block; }\n.ne-slash-section {\n  padding: 6px 8px 2px;\n  font-size: 10px;\n  font-weight: 600;\n  text-transform: uppercase;\n  letter-spacing: 0.05em;\n  color: var(--ne-faint);\n}\n.ne-slash-item {\n  display: flex;\n  align-items: center;\n  gap: 8px;\n  padding: 6px 8px;\n  border-radius: var(--ne-radius);\n  cursor: pointer;\n}\n.ne-slash-item:hover,\n.ne-slash-item.sel { background: var(--ne-accent-soft); }\n\n.ne-slash-icon {\n  width: 24px;\n  height: 24px;\n  flex-shrink: 0;\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  font-size: 12px;\n  font-weight: 600;\n  color: var(--ne-text);\n  background: var(--ne-surface);\n  border: 1px solid var(--ne-border);\n  border-radius: var(--ne-radius);\n}\n.ne-slash-body { flex: 1; min-width: 0; }\n.ne-slash-name { font-size: var(--ne-font-size); color: var(--ne-text); line-height: 1.2; }\n.ne-slash-desc { font-size: 11px; color: var(--ne-muted); margin-top: 1px; }\n.ne-slash-kbd {\n  flex-shrink: 0;\n  font-family: var(--ne-mono);\n  font-size: 10px;\n  color: var(--ne-muted);\n  background: var(--ne-surface);\n  border: 1px solid var(--ne-border);\n  border-radius: 2px;\n  padding: 1px 5px;\n}\n\n/* Floating selection toolbar */\n.ne-ftb {\n  position: fixed;\n  z-index: var(--ne-z-floating);\n  display: none;\n  transform: translateX(-50%);\n  padding: 2px;\n  background: var(--ne-bg);\n  border: 1px solid var(--ne-border-strong);\n  border-radius: var(--ne-radius);\n  box-shadow: var(--ne-shadow);\n  gap: 1px;\n}\n.ne-ftb.on { display: flex; }\n.ne-ftb-b {\n  appearance: none;\n  background: transparent;\n  border: 0;\n  padding: 4px 8px;\n  cursor: pointer;\n  font-size: var(--ne-font-size);\n  color: var(--ne-text);\n  border-radius: 2px;\n  line-height: 1;\n}\n.ne-ftb-b:hover { background: var(--ne-surface); }\n";
+  var editor_default = '/* ============================================================\n   note-editor \u2014 drop-in styles\n   ============================================================\n   - All selectors are scoped to `.ne-editor` (the editor root) or\n     `.ne-prose` (for read-only rendering of markdown output).\n   - Floating widgets (.ne-slash, .ne-ftb, .ne-drag-handle) attach\n     to document.body, so they\'re styled at the top level.\n   - Theme via CSS variables with sensible fallbacks. Override them\n     by setting --ne-* on .ne-editor (or any ancestor) in your app.\n   ============================================================ */\n\n.ne-editor,\n.ne-prose,\n.ne-slash,\n.ne-ftb,\n.ne-drag-handle {\n  --ne-bg:           var(--ne-override-bg,           #ffffff);\n  --ne-text:         var(--ne-override-text,         #1f1f1f);\n  --ne-muted:        var(--ne-override-muted,        #6b6b6b);\n  --ne-faint:        var(--ne-override-faint,        #a8a39a);\n  --ne-surface:      var(--ne-override-surface,      #f5f5f3);\n  --ne-border:       var(--ne-override-border,       rgba(0, 0, 0, 0.10));\n  --ne-border-strong:var(--ne-override-border-strong,rgba(0, 0, 0, 0.18));\n  --ne-accent:       var(--ne-override-accent,       #4a7c59);\n  --ne-accent-soft:  var(--ne-override-accent-soft,  rgba(74, 124, 89, 0.16));\n  --ne-radius:       var(--ne-override-radius,       4px);\n  --ne-radius-lg:    var(--ne-override-radius-lg,    6px);\n  --ne-font-size:    var(--ne-override-font-size,    13px);\n  --ne-line-height:  var(--ne-override-line-height,  1.65);\n  --ne-mono:         var(--ne-override-mono,         ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace);\n  --ne-shadow:       var(--ne-override-shadow,       0 8px 24px rgba(0, 0, 0, 0.12));\n  /* Inline `<code>` text colour. Code blocks (<pre><code>) inherit the\n     normal text colour so syntax-highlighted snippets aren\'t tinted. */\n  --ne-inline-code:  var(--ne-override-inline-code,  #c7254e);\n  /* Floating widgets sit at near-max z so they punch through host overlays\n     (e.g. SharePoint UI, fixed-positioned modals). Override with\n     --ne-override-z-floating if your host needs a different stacking. */\n  --ne-z-floating:   var(--ne-override-z-floating,   2147483647);\n}\n\n/* \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 Editor root + content \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 */\n\n.ne-editor {\n  position: relative;\n  min-height: 80px;\n}\n\n.ne-content {\n  position: relative;\n  min-height: 80px;\n  padding: 8px 12px;\n  background: var(--ne-bg);\n  color: var(--ne-text);\n  border: 1px solid var(--ne-border);\n  border-radius: var(--ne-radius);\n  font-size: var(--ne-font-size);\n  line-height: var(--ne-line-height);\n  outline: none;\n  white-space: pre-wrap;\n  word-break: break-word;\n  cursor: text;\n  /* Reserve a small left gutter so the floating drag handle has room to sit\n     just outside the editor border without clipping. */\n  margin-left: 24px;\n}\n.ne-content:focus { border-color: var(--ne-accent); }\n\n/* Placeholder \u2014 shown only while the editor is empty.\n   `<br>` (used by browsers in empty contenteditable paragraphs) is a void\n   element and ignores ::before, so the editor toggles `.ne-empty` itself\n   via JS to drive this rule. */\n.ne-content.ne-empty::before {\n  content: attr(data-placeholder);\n  position: absolute;\n  top: 8px;\n  left: 12px;\n  color: var(--ne-faint);\n  pointer-events: none;\n  white-space: nowrap;\n  overflow: hidden;\n  max-width: calc(100% - 24px);\n  text-overflow: ellipsis;\n}\n\n/* \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 Prose (live + read-only) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 */\n\n.ne-prose > * { margin: 0; }\n.ne-prose > * + * { margin-top: 8px; }\n.ne-prose h1 { font-size: 1.6em;  font-weight: 600; line-height: 1.3; }\n.ne-prose h2 { font-size: 1.35em; font-weight: 600; line-height: 1.3; }\n.ne-prose h3 { font-size: 1.15em; font-weight: 600; line-height: 1.3; }\n.ne-prose blockquote {\n  padding: 0 12px;\n  border-left: 3px solid var(--ne-accent);\n  color: var(--ne-muted);\n}\n.ne-prose pre {\n  padding: 8px 12px;\n  background: var(--ne-surface);\n  border: 1px solid var(--ne-border);\n  border-radius: var(--ne-radius);\n  font-family: var(--ne-mono);\n  font-size: 12px;\n  white-space: pre;\n  overflow-x: auto;\n}\n.ne-prose code {\n  padding: 1px 4px;\n  background: var(--ne-surface);\n  border: 1px solid var(--ne-border);\n  border-radius: 3px;\n  font-family: var(--ne-mono);\n  font-size: 0.92em;\n  color: var(--ne-inline-code);\n}\n/* Code block content stays at normal text colour \u2014 only inline `<code>`\n   gets the accent. */\n.ne-prose pre code {\n  padding: 0;\n  background: transparent;\n  border: 0;\n  color: inherit;\n}\n.ne-prose hr {\n  border: 0;\n  border-top: 1px solid var(--ne-border-strong);\n  margin: 10px 0;\n}\n.ne-prose ul,\n.ne-prose ol { padding-left: 1.5em; }\n\n.ne-prose img.ne-img,\n.ne-prose img {\n  max-width: 100%;\n  height: auto;\n  border-radius: var(--ne-radius);\n  display: block;\n  margin: 8px 0;\n}\n\n/* File attachment chip (Excel/PDF/Word/etc. linked into the memo). The\n   underlying anchor stays a real <a target="_blank">, so click handling\n   is the browser\'s responsibility \u2014 no JS hook needed. */\n.ne-prose .ne-file {\n  display: inline-flex;\n  align-items: center;\n  gap: 8px;\n  margin: 4px 2px;\n  padding: 6px 10px;\n  background: var(--ne-surface);\n  border: 1px solid var(--ne-border);\n  border-radius: var(--ne-radius);\n  color: var(--ne-text);\n  text-decoration: none;\n  font-size: var(--ne-font-size);\n  line-height: 1.3;\n  max-width: 100%;\n  cursor: pointer;\n  user-select: none;\n}\n.ne-prose .ne-file:hover {\n  background: var(--ne-accent-soft);\n  border-color: var(--ne-accent);\n}\n.ne-prose .ne-file-ic {\n  flex-shrink: 0;\n  font-size: 1.15em;\n  line-height: 1;\n}\n.ne-prose .ne-file-name {\n  overflow: hidden;\n  text-overflow: ellipsis;\n  white-space: nowrap;\n  min-width: 0;\n  flex: 0 1 auto;\n  max-width: 32em;\n}\n.ne-prose .ne-file-status {\n  flex-shrink: 0;\n  font-size: 11px;\n  color: var(--ne-muted);\n  margin-left: 4px;\n}\n/* Uploading state: dimmed + non-clickable while the host upload is in\n   flight. Removed when the placeholder is swapped for the real chip. */\n.ne-prose .ne-file--uploading {\n  opacity: 0.6;\n  cursor: progress;\n  pointer-events: none;\n}\n\n/* Todo */\n.ne-prose .ne-todo {\n  display: flex;\n  align-items: flex-start;\n  gap: 8px;\n  padding: 2px 0;\n}\n.ne-prose .ne-todo-cb {\n  margin-top: 4px;\n  flex-shrink: 0;\n  cursor: pointer;\n}\n.ne-prose .ne-todo-txt { flex: 1; min-width: 0; }\n.ne-prose .ne-todo-txt.done {\n  text-decoration: line-through;\n  color: var(--ne-muted);\n}\n\n/* Callout */\n.ne-prose .ne-callout {\n  display: flex;\n  gap: 8px;\n  padding: 8px 12px;\n  background: var(--ne-accent-soft);\n  border-left: 3px solid var(--ne-accent);\n  border-radius: var(--ne-radius);\n}\n.ne-prose .ne-callout-ic {\n  flex-shrink: 0;\n  font-size: 1.1em;\n  line-height: 1.5;\n}\n.ne-prose .ne-callout-body { flex: 1; min-width: 0; }\n.ne-prose .ne-callout-body > * { margin: 0; }\n.ne-prose .ne-callout-body > * + * { margin-top: 6px; }\n\n/* Tables */\n.ne-prose .ne-table-wrap {\n  overflow-x: auto;\n  margin: 8px 0;\n}\n.ne-prose .ne-table {\n  border-collapse: collapse;\n  width: max-content;\n  min-width: 240px;\n}\n.ne-prose .ne-table td,\n.ne-prose .ne-table th {\n  border: 1px solid var(--ne-border);\n  padding: 4px 8px;\n  min-width: 60px;\n  vertical-align: top;\n  outline: none;\n}\n.ne-content .ne-table td:focus { background: var(--ne-accent-soft); }\n.ne-prose .ne-table th { background: var(--ne-surface); font-weight: 600; }\n\n/* \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 Floating widgets \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 */\n\n/* Drag handle (viewport-fixed so it floats above any host stacking context) */\n.ne-drag-handle {\n  position: fixed;\n  width: 18px;\n  align-items: center;\n  justify-content: center;\n  color: var(--ne-faint);\n  cursor: grab;\n  border-radius: var(--ne-radius);\n  background: transparent;\n  z-index: var(--ne-z-floating);\n  user-select: none;\n}\n.ne-drag-handle:hover {\n  background: var(--ne-surface);\n  color: var(--ne-muted);\n}\n.ne-drag-handle:active { cursor: grabbing; }\n\n.ne-block-dragging { opacity: 0.4; }\n\n.ne-drop-line {\n  height: 2px;\n  background: var(--ne-accent);\n  margin: 1px 0;\n  border-radius: 1px;\n  pointer-events: none;\n}\n\n/* Slash menu */\n.ne-slash {\n  position: fixed;\n  z-index: var(--ne-z-floating);\n  display: none;\n  width: 280px;\n  max-height: 360px;\n  overflow-y: auto;\n  background: var(--ne-bg);\n  color: var(--ne-text);\n  border: 1px solid var(--ne-border-strong);\n  border-radius: var(--ne-radius-lg);\n  box-shadow: var(--ne-shadow);\n  padding: 4px;\n  font-size: var(--ne-font-size);\n  line-height: 1.4;\n}\n.ne-slash.on { display: block; }\n.ne-slash-section {\n  padding: 6px 8px 2px;\n  font-size: 10px;\n  font-weight: 600;\n  text-transform: uppercase;\n  letter-spacing: 0.05em;\n  color: var(--ne-faint);\n}\n.ne-slash-item {\n  display: flex;\n  align-items: center;\n  gap: 8px;\n  padding: 6px 8px;\n  border-radius: var(--ne-radius);\n  cursor: pointer;\n}\n.ne-slash-item:hover,\n.ne-slash-item.sel { background: var(--ne-accent-soft); }\n\n.ne-slash-icon {\n  width: 24px;\n  height: 24px;\n  flex-shrink: 0;\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  font-size: 12px;\n  font-weight: 600;\n  color: var(--ne-text);\n  background: var(--ne-surface);\n  border: 1px solid var(--ne-border);\n  border-radius: var(--ne-radius);\n}\n.ne-slash-body { flex: 1; min-width: 0; }\n.ne-slash-name { font-size: var(--ne-font-size); color: var(--ne-text); line-height: 1.2; }\n.ne-slash-desc { font-size: 11px; color: var(--ne-muted); margin-top: 1px; }\n.ne-slash-kbd {\n  flex-shrink: 0;\n  font-family: var(--ne-mono);\n  font-size: 10px;\n  color: var(--ne-muted);\n  background: var(--ne-surface);\n  border: 1px solid var(--ne-border);\n  border-radius: 2px;\n  padding: 1px 5px;\n}\n\n/* Floating selection toolbar */\n.ne-ftb {\n  position: fixed;\n  z-index: var(--ne-z-floating);\n  display: none;\n  transform: translateX(-50%);\n  padding: 2px;\n  background: var(--ne-bg);\n  border: 1px solid var(--ne-border-strong);\n  border-radius: var(--ne-radius);\n  box-shadow: var(--ne-shadow);\n  gap: 1px;\n}\n.ne-ftb.on { display: flex; }\n.ne-ftb-b {\n  appearance: none;\n  background: transparent;\n  border: 0;\n  padding: 4px 8px;\n  cursor: pointer;\n  font-size: var(--ne-font-size);\n  color: var(--ne-text);\n  border-radius: 2px;\n  line-height: 1;\n}\n.ne-ftb-b:hover { background: var(--ne-surface); }\n';
 
   // src/api/repo.ts
   var _repo = null;
@@ -4652,6 +4755,11 @@ var Spira = (() => {
         return inner ? `\`${inner.replace(/`/g, "\\`")}\`` : "";
       case "A": {
         const href = el2.getAttribute("href") ?? "";
+        if (el2.classList.contains("ne-file")) {
+          const ic = el2.querySelector(".ne-file-ic")?.textContent ?? "\u{1F4CE}";
+          const nm = el2.querySelector(".ne-file-name")?.textContent ?? (el2.getAttribute("download") ?? "file");
+          return `[${ic} ${nm}](${href})`;
+        }
         return `[${inner}](${href})`;
       }
       case "BR":
@@ -4745,7 +4853,15 @@ var Spira = (() => {
     out = out.replace(/\*([^*]+)\*/g, (_, c) => `<em>${c}</em>`);
     out = out.replace(/~~([^~]+)~~/g, (_, c) => `<s>${c}</s>`);
     out = out.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_, alt, src) => `<img src="${src}" alt="${alt}" class="ne-img"/>`);
-    out = out.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, t, h) => `<a href="${h}">${t}</a>`);
+    out = out.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, t, h) => {
+      const m = /^(📎|📊|📕|📝|📈|📦)\s+(.+)$/.exec(t);
+      if (m) {
+        const icon2 = m[1];
+        const name = m[2];
+        return `<a class="ne-file" href="${h}" target="_blank" rel="noopener noreferrer" download="${name.replace(/"/g, "&quot;")}" contenteditable="false" data-ne-file="1"><span class="ne-file-ic">${icon2}</span><span class="ne-file-name">${name}</span></a>`;
+      }
+      return `<a href="${h}">${t}</a>`;
+    });
     out = out.replace(/  \n/g, "<br>");
     return out;
   }
@@ -4878,6 +4994,7 @@ var Spira = (() => {
     { cat: "\u30EA\u30B9\u30C8", cmd: "ol", icon: "1.", name: "\u756A\u53F7\u4ED8\u304D", desc: "\u756A\u53F7\u4ED8\u304D\u7B87\u6761\u66F8\u304D", md: "1." },
     { cat: "\u30EA\u30B9\u30C8", cmd: "todo", icon: "\u2610", name: "ToDo\u30EA\u30B9\u30C8", desc: "\u30C1\u30A7\u30C3\u30AF\u30DC\u30C3\u30AF\u30B9\u4ED8\u304D", md: "[]" },
     { cat: "\u30E1\u30C7\u30A3\u30A2", cmd: "hr", icon: "\u2014", name: "\u533A\u5207\u308A\u7DDA", desc: "\u30BB\u30AF\u30B7\u30E7\u30F3\u533A\u5207\u308A", md: "---" },
+    { cat: "\u30E1\u30C7\u30A3\u30A2", cmd: "file", icon: "\u{1F4CE}", name: "\u30D5\u30A1\u30A4\u30EB\u6DFB\u4ED8", desc: "Excel / PDF / Word \u7B49\u3092\u30A2\u30C3\u30D7\u30ED\u30FC\u30C9" },
     { cat: "\u30B3\u30FC\u30C9", cmd: "pre", icon: "</>", name: "\u30B3\u30FC\u30C9\u30D6\u30ED\u30C3\u30AF", desc: "\u30B7\u30F3\u30BF\u30C3\u30AF\u30B9\u30CF\u30A4\u30E9\u30A4\u30C8", md: "```" },
     { cat: "\u30C7\u30FC\u30BF", cmd: "table", icon: "\u229E", name: "\u8868", desc: "\u7C21\u6613\u8868 (3\xD72)\u30FB\u30BB\u30EB\u7DE8\u96C6\u53EF" }
   ];
@@ -5192,10 +5309,85 @@ var Spira = (() => {
         insertCalloutBlock();
       } else if (cmd === "table") {
         insertTableBlock(3, 2);
+      } else if (cmd === "file") {
+        openFilePickerAndUpload();
       } else {
         execCmd(cmd);
       }
       markDirty();
+    }
+    function fileIconFor(filename) {
+      const ext = filename.toLowerCase().match(/\.([^.]+)$/)?.[1] || "";
+      if (["xlsx", "xls", "csv", "tsv"].includes(ext)) return "\u{1F4CA}";
+      if (["docx", "doc", "rtf"].includes(ext)) return "\u{1F4DD}";
+      if (["pdf"].includes(ext)) return "\u{1F4D5}";
+      if (["pptx", "ppt"].includes(ext)) return "\u{1F4C8}";
+      if (["zip", "7z", "tar", "gz"].includes(ext)) return "\u{1F4E6}";
+      return "\u{1F4CE}";
+    }
+    function buildFileChip(url, filename) {
+      const a = document.createElement("a");
+      a.className = "ne-file";
+      a.href = url;
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+      a.setAttribute("download", filename);
+      a.setAttribute("contenteditable", "false");
+      a.setAttribute("data-ne-file", "1");
+      a.innerHTML = `<span class="ne-file-ic">${fileIconFor(filename)}</span><span class="ne-file-name"></span>`;
+      a.querySelector(".ne-file-name").textContent = filename;
+      return a;
+    }
+    function insertFilePlaceholderAtCursor(filename) {
+      const ph = document.createElement("span");
+      ph.className = "ne-file ne-file--uploading";
+      ph.setAttribute("contenteditable", "false");
+      ph.setAttribute("data-ne-file-placeholder", "1");
+      ph.innerHTML = `<span class="ne-file-ic">${fileIconFor(filename)}</span><span class="ne-file-name"></span><span class="ne-file-status">\u30A2\u30C3\u30D7\u30ED\u30FC\u30C9\u4E2D\u2026</span>`;
+      ph.querySelector(".ne-file-name").textContent = filename;
+      const sel = window.getSelection();
+      if (sel && sel.rangeCount && ed.contains(sel.anchorNode)) {
+        const r = sel.getRangeAt(0);
+        r.insertNode(ph);
+        const tail = document.createTextNode(" ");
+        ph.parentNode.insertBefore(tail, ph.nextSibling);
+        const newR = document.createRange();
+        newR.setStartAfter(tail);
+        newR.collapse(true);
+        sel.removeAllRanges();
+        sel.addRange(newR);
+      } else {
+        ed.appendChild(ph);
+      }
+      return ph;
+    }
+    async function handleFileUpload(file) {
+      if (!opts.onFileUpload) return;
+      const placeholder = insertFilePlaceholderAtCursor(file.name);
+      try {
+        const r = await opts.onFileUpload(file);
+        if (r && placeholder.parentNode) {
+          placeholder.parentNode.replaceChild(buildFileChip(r.url, r.filename), placeholder);
+          markDirty();
+        } else {
+          placeholder.remove();
+        }
+      } catch {
+        placeholder.remove();
+      }
+    }
+    function openFilePickerAndUpload() {
+      if (!opts.onFileUpload) return;
+      const input = document.createElement("input");
+      input.type = "file";
+      input.style.display = "none";
+      input.addEventListener("change", async () => {
+        const file = input.files?.[0];
+        if (file) await handleFileUpload(file);
+        input.remove();
+      });
+      document.body.appendChild(input);
+      input.click();
     }
     function setBlockTag(block, tag) {
       if (!block || block === ed) return null;
@@ -5552,10 +5744,11 @@ var Spira = (() => {
       const items = e.clipboardData?.items;
       if (!items) return;
       for (const it of Array.from(items)) {
-        if (it.kind === "file" && it.type.startsWith("image/")) {
+        if (it.kind !== "file") continue;
+        const file = it.getAsFile();
+        if (!file) continue;
+        if (it.type.startsWith("image/")) {
           e.preventDefault();
-          const file = it.getAsFile();
-          if (!file) continue;
           try {
             const url = await fileToDataUrl(file);
             insertImageAtCursor(url, file.name);
@@ -5563,18 +5756,30 @@ var Spira = (() => {
           }
           return;
         }
+        if (opts.onFileUpload) {
+          e.preventDefault();
+          await handleFileUpload(file);
+          return;
+        }
       }
     });
     ed.addEventListener("drop", async (e) => {
       if (!e.dataTransfer?.files?.length) return;
-      const imgs = Array.from(e.dataTransfer.files).filter((f) => f.type.startsWith("image/"));
-      if (imgs.length === 0) return;
+      const files = Array.from(e.dataTransfer.files);
+      const imgs = files.filter((f) => f.type.startsWith("image/"));
+      const others = files.filter((f) => !f.type.startsWith("image/"));
+      if (imgs.length === 0 && (others.length === 0 || !opts.onFileUpload)) return;
       e.preventDefault();
       for (const f of imgs) {
         try {
           const url = await fileToDataUrl(f);
           insertImageAtCursor(url, f.name);
         } catch {
+        }
+      }
+      if (opts.onFileUpload) {
+        for (const f of others) {
+          await handleFileUpload(f);
         }
       }
     });
@@ -6666,7 +6871,18 @@ var Spira = (() => {
         }
         inflight = inflight.then(flushSave);
       },
-      floatingContainer: getRoot()
+      floatingContainer: getRoot(),
+      // File drops / slash-menu file picker go to SP doc library
+      // (or mock data URL). Errors surface as a toast and bubble back to
+      // the editor so it can drop the placeholder chip.
+      onFileUpload: async (file) => {
+        try {
+          return await getRepo().uploadAttachment(c.ticketId, file);
+        } catch (e) {
+          toast(getRoot(), `\u30A2\u30C3\u30D7\u30ED\u30FC\u30C9\u5931\u6557: ${file.name} \u2014 ${e.message}`, "error", 6e3);
+          return null;
+        }
+      }
     });
     const deleteBtn = el("button", {
       class: "spira-btn spira-btn--danger spira-btn--sm",
@@ -7756,15 +7972,15 @@ var Spira = (() => {
       title: "\u30AF\u30EA\u30C3\u30AF\u3067\u30B3\u30D4\u30FC",
       onclick: async () => {
         try {
-          await navigator.clipboard.writeText("0.0.1-906533c+ (2026-05-14T08:25:21Z)");
+          await navigator.clipboard.writeText("0.0.1-9b3b8f2+ (2026-05-14T12:36:58Z)");
           buildLabel.textContent = "\u2713 \u30B3\u30D4\u30FC\u3057\u307E\u3057\u305F";
           setTimeout(() => {
-            buildLabel.textContent = `build: ${"0.0.1-906533c+ (2026-05-14T08:25:21Z)"}`;
+            buildLabel.textContent = `build: ${"0.0.1-9b3b8f2+ (2026-05-14T12:36:58Z)"}`;
           }, 1200);
         } catch {
         }
       }
-    }, [`build: ${"0.0.1-906533c+ (2026-05-14T08:25:21Z)"}`]);
+    }, [`build: ${"0.0.1-9b3b8f2+ (2026-05-14T12:36:58Z)"}`]);
     const menu = el("div", {
       class: "spira-menu spira-settings-menu",
       style: "position:fixed;z-index:var(--z-modal);min-width:280px"
@@ -8292,7 +8508,7 @@ var Spira = (() => {
       setState({ errorBanner: `\u521D\u671F\u5316\u306B\u5931\u6557\u3057\u307E\u3057\u305F: ${msg}` });
       toast(root2, `\u521D\u671F\u5316\u30A8\u30E9\u30FC: ${msg}`, "error");
     }
-    console.log(`[spira] build: ${"0.0.1-906533c+ (2026-05-14T08:25:21Z)"}`);
+    console.log(`[spira] build: ${"0.0.1-9b3b8f2+ (2026-05-14T12:36:58Z)"}`);
     console.log(`[spira] repo mode: ${getRepoMode()}`);
   }
   async function doSync(root2, silent = false) {
