@@ -26,6 +26,9 @@ import type { InboxMail, TicketStatus, Priority, Ticket } from '../types';
  *  a server-side $filter on the Comments list. */
 async function findDuplicateTicketForMail(m: InboxMail): Promise<Ticket | null> {
   if (!m.fromEmail && !m.internetMessageId) return null; // nothing reliable to match on
+  // Compare on sent time (sender's "send" timestamp). Fall back to
+  // receivedAt for rows that predate the SentAt column.
+  const mailTime = m.sentAt ?? m.receivedAt;
   const repo = getRepo();
   const tickets = await repo.listTickets();
   for (const t of tickets) {
@@ -38,8 +41,8 @@ async function findDuplicateTicketForMail(m: InboxMail): Promise<Ticket | null> 
           c.internetMessageId === m.internetMessageId) {
         return t;
       }
-      if (m.fromEmail && m.receivedAt &&
-          c.fromEmail === m.fromEmail && c.sentAt === m.receivedAt) {
+      if (m.fromEmail && mailTime &&
+          c.fromEmail === m.fromEmail && c.sentAt === mailTime) {
         return t;
       }
     }
@@ -606,9 +609,11 @@ export function openNewTicketModal(m: InboxMail): void {
             ticketId: t.id, type: 'received',
             fromEmail: m.fromEmail, fromName: m.fromName,
             content: m.bodyHtml || m.bodyText, isHtml: !!m.bodyHtml,
-            sentAt: m.receivedAt, sourceEmailId: m.id,
+            // Sender's "send" time. The dedup pass in findDuplicateTicket
+            // also keys on this — keep the two in sync.
+            sentAt: m.sentAt ?? m.receivedAt, sourceEmailId: m.id,
             hasAttachments: m.hasAttachments,
-          internetMessageId: m.internetMessageId,
+            internetMessageId: m.internetMessageId,
           });
           await repo.markInboxProcessed(m.id, { ticketId: t.id, result: 'created' });
         }

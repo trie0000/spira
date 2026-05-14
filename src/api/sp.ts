@@ -162,6 +162,9 @@ function asInbox(it: SpListItem): InboxMail {
     fromEmail: String(it.FromEmail ?? ''),
     fromName: it.FromName ? String(it.FromName) : undefined,
     receivedAt: String(it.ReceivedAt ?? it.Created),
+    // SentAt is new in 2026-05 — old rows won't have it. Callers should
+    // fall back to receivedAt when sentAt is missing.
+    sentAt: it.SentAt ? String(it.SentAt) : undefined,
     hasAttachments: Boolean(it.HasAttachments),
     conversationId: it.ConversationId ? String(it.ConversationId) : undefined,
     owaLink: it.OwaLink ? String(it.OwaLink) : undefined,
@@ -491,7 +494,9 @@ export class SpRepository implements Repository {
           ticketId: tid, type: 'received',
           fromEmail: m.fromEmail, fromName: m.fromName,
           content: m.bodyHtml || m.bodyText, isHtml: !!m.bodyHtml,
-          sentAt: m.receivedAt, sourceEmailId: m.id,
+          // Sender's send time — falls back to receivedAt for legacy rows
+          // imported before the SentAt column existed.
+          sentAt: m.sentAt ?? m.receivedAt, sourceEmailId: m.id,
           hasAttachments: m.hasAttachments,
           internetMessageId: m.internetMessageId,
         });
@@ -520,6 +525,7 @@ export class SpRepository implements Repository {
         HasAttachments: inp.hasAttachments,
         ConversationId: inp.conversationId,
         ReceivedAt: inp.receivedAt,
+        SentAt: inp.sentAt ?? inp.receivedAt,
         OwaLink: null,
         IsProcessed: false,
       };
@@ -612,6 +618,7 @@ function inboxFieldSpecs(): FieldSpec[] {
     { name: 'HasAttachments', type: 'Boolean' },
     { name: 'ConversationId', type: 'Text' },
     { name: 'ReceivedAt', type: 'DateTime' },
+    { name: 'SentAt', type: 'DateTime' },
     { name: 'OwaLink', type: 'Text' },
     { name: 'IsProcessed', type: 'Boolean' },
     { name: 'TicketId', type: 'Number' },

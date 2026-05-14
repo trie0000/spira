@@ -45,7 +45,15 @@ export interface InboxMail {
   bodyText: string;
   fromEmail: string;
   fromName?: string;
+  /** When the recipient mailbox received the message. Stable for display
+   *  / sorting; can drift between mailboxes for the same message. */
   receivedAt: string;
+  /** When the sender pressed "send". Identical across all recipients of
+   *  the same message, so this is the field Spira uses for duplicate-
+   *  ticket detection. PA flow must populate it from the `Sent Time`
+   *  dynamic content. Optional for backward compat — legacy rows that
+   *  only had `receivedAt` keep working via fallback. */
+  sentAt?: string;
   hasAttachments: boolean;
   conversationId?: string;
   owaLink?: string;

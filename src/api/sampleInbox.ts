@@ -10,6 +10,10 @@ export interface SampleInboxInput {
   fromEmail: string;
   fromName: string;
   receivedAt: string;
+  /** Sent time (set by sender). Used for duplicate-ticket detection.
+   *  Sample data uses `receivedAt` itself — production PA flow should
+   *  bind `Sent Time` dynamic content. */
+  sentAt?: string;
   hasAttachments: boolean;
   conversationId: string;
 }
@@ -78,6 +82,7 @@ export function toMockInbox(input: SampleInboxInput, id: number): InboxMail {
     fromEmail: input.fromEmail,
     fromName: input.fromName,
     receivedAt: input.receivedAt,
+    sentAt: input.sentAt ?? input.receivedAt,
     hasAttachments: input.hasAttachments,
     conversationId: input.conversationId,
     owaLink: '#',

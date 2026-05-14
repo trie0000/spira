@@ -616,8 +616,9 @@ function openHelpModal(root: HTMLElement): void {
       row('FromName', 'From - Name', '差出人表示名。'),
       row('HasAttachments', 'Has Attachment', 'true/false。'),
       row('ConversationId', 'Conversation Id', 'スレッド ID。受信パネルで会話単位の紐付けに使用。'),
-      row('ReceivedAt', 'Received Time', '受信日時。'),
-      row('OwaLink', 'Web Link', 'OWA でメールを直接開くための URL。'),
+      row('ReceivedAt', 'Received Time', 'このメールボックスにメールが到着した時刻。表示・ソート用。'),
+      row('SentAt', 'Sent Time', '送信者が「送信」した時刻。Spira の重複起票判定 (送信者 + 送信時刻一致) の主キー。受信時刻と異なり、宛先メールボックス間でブレないため一意性の判断に使える。'),
+      row('OwaLink', "(式) concat('https://outlook.office.com/mail/inbox/id/', encodeUriComponent(triggerOutputs()?['body/Id']))", 'メッセージ ID から OWA URL を構築。動的コンテンツ「Web Link」は V3 トリガでは出ないので必ず「式」タブで入力。'),
       row('IsProcessed', 'false (固定)', 'Spira 側で取り込み完了時に true に更新。'),
       row('IsHidden', 'false (固定)', '非表示フラグ。'),
       row('InternetMessageId', 'Internet Message Id', 'メールの一意 ID。重複防止に使用。'),
@@ -647,6 +648,14 @@ function openHelpModal(root: HTMLElement): void {
     mappingTable,
     p('式の入力例 (IsProcessed / IsHidden 用):'),
     codeBlock('false'),
+    p('OwaLink 用の式 (動的コンテンツ パネルではなく「式」タブに貼り付け):'),
+    codeBlock(
+      "concat('https://outlook.office.com/mail/inbox/id/', encodeUriComponent(triggerOutputs()?['body/Id']))"
+    ),
+    p('共有メールボックス トリガー (V2) の場合や、ユーザ別 OWA を開きたい場合は以下のいずれかに置き換え可:'),
+    codeBlock(
+      "concat('https://outlook.office365.com/owa/?ItemID=', encodeUriComponent(triggerOutputs()?['body/Id']), '&exvsurl=1&viewmodel=ReadMessageItem')"
+    ),
   ]);
 
   const verify = el('div', {}, [
@@ -685,6 +694,22 @@ function openHelpModal(root: HTMLElement): void {
       el('li', {}, [
         el('strong', {}, ['同じメールが何度も取り込まれる']),
         ': InternetMessageId 列が空欄になっていないか確認。',
+      ]),
+      el('li', {}, [
+        el('strong', {}, ['重複起票がブロックされない / 別人のメールと衝突する']),
+        ': SentAt 列が空になっていないか確認。Spira の重複判定 (送信者 + 送信時刻一致) は ',
+        code('SentAt'),
+        ' を主キーとし、空の場合のみ ',
+        code('ReceivedAt'),
+        ' にフォールバック。Received Time は宛先メールボックスごとに微妙にズレるため、SentAt が無いと別人の同タイミング メールで誤検知することがあります。',
+      ]),
+      el('li', {}, [
+        el('strong', {}, ['OwaLink が空 / 開けない']),
+        ': V3 トリガでは「Web Link」動的コンテンツが出ません。OwaLink 列には ',
+        code("concat('https://outlook.office.com/mail/inbox/id/', encodeUriComponent(triggerOutputs()?['body/Id']))"),
+        ' を ',
+        el('em', {}, ['式']),
+        ' タブから入力してください (上記マッピング表の式と同じ)。',
       ]),
       el('li', {}, [
         el('strong', {}, ['返信が紐付かない']),

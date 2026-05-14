@@ -304,7 +304,7 @@ export class MockRepository implements Repository {
           ticketId: tid, type: 'received',
           fromEmail: m.fromEmail, fromName: m.fromName,
           content: m.bodyHtml, isHtml: true,
-          sentAt: m.receivedAt, sourceEmailId: m.id,
+          sentAt: m.sentAt ?? m.receivedAt, sourceEmailId: m.id,
           hasAttachments: m.hasAttachments,
           internetMessageId: m.internetMessageId,
         });
@@ -339,7 +339,7 @@ export class MockRepository implements Repository {
       bodyHtml: '<p>返信です。タグ付き件名で送ってきたので自動で紐付くはずです。</p>',
       bodyText: '返信です。',
       fromEmail: 'customer@external.example', fromName: '取引先 山田',
-      receivedAt: now(), hasAttachments: false,
+      receivedAt: now(), sentAt: now(), hasAttachments: false,
       conversationId: 'cv-001', owaLink: '#',
       isProcessed: false,
     });
