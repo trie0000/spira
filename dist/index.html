@@ -94,6 +94,7 @@ var Spira = (() => {
       fromEmail: input.fromEmail,
       fromName: input.fromName,
       receivedAt: input.receivedAt,
+      sentAt: input.sentAt ?? input.receivedAt,
       hasAttachments: input.hasAttachments,
       conversationId: input.conversationId,
       owaLink: "#",
@@ -543,7 +544,7 @@ var Spira = (() => {
                 fromName: m.fromName,
                 content: m.bodyHtml,
                 isHtml: true,
-                sentAt: m.receivedAt,
+                sentAt: m.sentAt ?? m.receivedAt,
                 sourceEmailId: m.id,
                 hasAttachments: m.hasAttachments,
                 internetMessageId: m.internetMessageId
@@ -579,6 +580,7 @@ var Spira = (() => {
             fromEmail: "customer@external.example",
             fromName: "\u53D6\u5F15\u5148 \u5C71\u7530",
             receivedAt: now(),
+            sentAt: now(),
             hasAttachments: false,
             conversationId: "cv-001",
             owaLink: "#",
@@ -651,6 +653,9 @@ var Spira = (() => {
       fromEmail: String(it.FromEmail ?? ""),
       fromName: it.FromName ? String(it.FromName) : void 0,
       receivedAt: String(it.ReceivedAt ?? it.Created),
+      // SentAt is new in 2026-05 — old rows won't have it. Callers should
+      // fall back to receivedAt when sentAt is missing.
+      sentAt: it.SentAt ? String(it.SentAt) : void 0,
       hasAttachments: Boolean(it.HasAttachments),
       conversationId: it.ConversationId ? String(it.ConversationId) : void 0,
       owaLink: it.OwaLink ? String(it.OwaLink) : void 0,
@@ -737,6 +742,7 @@ var Spira = (() => {
       { name: "HasAttachments", type: "Boolean" },
       { name: "ConversationId", type: "Text" },
       { name: "ReceivedAt", type: "DateTime" },
+      { name: "SentAt", type: "DateTime" },
       { name: "OwaLink", type: "Text" },
       { name: "IsProcessed", type: "Boolean" },
       { name: "TicketId", type: "Number" },
@@ -1096,7 +1102,9 @@ var Spira = (() => {
                 fromName: m.fromName,
                 content: m.bodyHtml || m.bodyText,
                 isHtml: !!m.bodyHtml,
-                sentAt: m.receivedAt,
+                // Sender's send time — falls back to receivedAt for legacy rows
+                // imported before the SentAt column existed.
+                sentAt: m.sentAt ?? m.receivedAt,
                 sourceEmailId: m.id,
                 hasAttachments: m.hasAttachments,
                 internetMessageId: m.internetMessageId
@@ -1124,6 +1132,7 @@ var Spira = (() => {
               HasAttachments: inp.hasAttachments,
               ConversationId: inp.conversationId,
               ReceivedAt: inp.receivedAt,
+              SentAt: inp.sentAt ?? inp.receivedAt,
               OwaLink: null,
               IsProcessed: false
             };
@@ -6711,6 +6720,7 @@ var Spira = (() => {
   init_ticketTag();
   async function findDuplicateTicketForMail(m) {
     if (!m.fromEmail && !m.internetMessageId) return null;
+    const mailTime = m.sentAt ?? m.receivedAt;
     const repo = getRepo();
     const tickets = await repo.listTickets();
     for (const t of tickets) {
@@ -6725,7 +6735,7 @@ var Spira = (() => {
         if (m.internetMessageId && c.internetMessageId && c.internetMessageId === m.internetMessageId) {
           return t;
         }
-        if (m.fromEmail && m.receivedAt && c.fromEmail === m.fromEmail && c.sentAt === m.receivedAt) {
+        if (m.fromEmail && mailTime && c.fromEmail === m.fromEmail && c.sentAt === mailTime) {
           return t;
         }
       }
@@ -7252,7 +7262,9 @@ var Spira = (() => {
               fromName: m.fromName,
               content: m.bodyHtml || m.bodyText,
               isHtml: !!m.bodyHtml,
-              sentAt: m.receivedAt,
+              // Sender's "send" time. The dedup pass in findDuplicateTicket
+              // also keys on this — keep the two in sync.
+              sentAt: m.sentAt ?? m.receivedAt,
               sourceEmailId: m.id,
               hasAttachments: m.hasAttachments,
               internetMessageId: m.internetMessageId
@@ -7729,15 +7741,15 @@ var Spira = (() => {
       title: "\u30AF\u30EA\u30C3\u30AF\u3067\u30B3\u30D4\u30FC",
       onclick: async () => {
         try {
-          await navigator.clipboard.writeText("0.0.1-27f05bc+ (2026-05-10T12:31:48Z)");
+          await navigator.clipboard.writeText("0.0.1-35d6f27+ (2026-05-14T08:17:40Z)");
           buildLabel.textContent = "\u2713 \u30B3\u30D4\u30FC\u3057\u307E\u3057\u305F";
           setTimeout(() => {
-            buildLabel.textContent = `build: ${"0.0.1-27f05bc+ (2026-05-10T12:31:48Z)"}`;
+            buildLabel.textContent = `build: ${"0.0.1-35d6f27+ (2026-05-14T08:17:40Z)"}`;
           }, 1200);
         } catch {
         }
       }
-    }, [`build: ${"0.0.1-27f05bc+ (2026-05-10T12:31:48Z)"}`]);
+    }, [`build: ${"0.0.1-35d6f27+ (2026-05-14T08:17:40Z)"}`]);
     const menu = el("div", {
       class: "spira-menu spira-settings-menu",
       style: "position:fixed;z-index:var(--z-modal);min-width:280px"
@@ -7996,8 +8008,9 @@ var Spira = (() => {
         row("FromName", "From - Name", "\u5DEE\u51FA\u4EBA\u8868\u793A\u540D\u3002"),
         row("HasAttachments", "Has Attachment", "true/false\u3002"),
         row("ConversationId", "Conversation Id", "\u30B9\u30EC\u30C3\u30C9 ID\u3002\u53D7\u4FE1\u30D1\u30CD\u30EB\u3067\u4F1A\u8A71\u5358\u4F4D\u306E\u7D10\u4ED8\u3051\u306B\u4F7F\u7528\u3002"),
-        row("ReceivedAt", "Received Time", "\u53D7\u4FE1\u65E5\u6642\u3002"),
-        row("OwaLink", "Web Link", "OWA \u3067\u30E1\u30FC\u30EB\u3092\u76F4\u63A5\u958B\u304F\u305F\u3081\u306E URL\u3002"),
+        row("ReceivedAt", "Received Time", "\u3053\u306E\u30E1\u30FC\u30EB\u30DC\u30C3\u30AF\u30B9\u306B\u30E1\u30FC\u30EB\u304C\u5230\u7740\u3057\u305F\u6642\u523B\u3002\u8868\u793A\u30FB\u30BD\u30FC\u30C8\u7528\u3002"),
+        row("SentAt", "Sent Time", "\u9001\u4FE1\u8005\u304C\u300C\u9001\u4FE1\u300D\u3057\u305F\u6642\u523B\u3002Spira \u306E\u91CD\u8907\u8D77\u7968\u5224\u5B9A (\u9001\u4FE1\u8005 + \u9001\u4FE1\u6642\u523B\u4E00\u81F4) \u306E\u4E3B\u30AD\u30FC\u3002\u53D7\u4FE1\u6642\u523B\u3068\u7570\u306A\u308A\u3001\u5B9B\u5148\u30E1\u30FC\u30EB\u30DC\u30C3\u30AF\u30B9\u9593\u3067\u30D6\u30EC\u306A\u3044\u305F\u3081\u4E00\u610F\u6027\u306E\u5224\u65AD\u306B\u4F7F\u3048\u308B\u3002"),
+        row("OwaLink", "(\u5F0F) concat('https://outlook.office.com/mail/inbox/id/', encodeUriComponent(triggerOutputs()?['body/Id']))", "\u30E1\u30C3\u30BB\u30FC\u30B8 ID \u304B\u3089 OWA URL \u3092\u69CB\u7BC9\u3002\u52D5\u7684\u30B3\u30F3\u30C6\u30F3\u30C4\u300CWeb Link\u300D\u306F V3 \u30C8\u30EA\u30AC\u3067\u306F\u51FA\u306A\u3044\u306E\u3067\u5FC5\u305A\u300C\u5F0F\u300D\u30BF\u30D6\u3067\u5165\u529B\u3002"),
         row("IsProcessed", "false (\u56FA\u5B9A)", "Spira \u5074\u3067\u53D6\u308A\u8FBC\u307F\u5B8C\u4E86\u6642\u306B true \u306B\u66F4\u65B0\u3002"),
         row("IsHidden", "false (\u56FA\u5B9A)", "\u975E\u8868\u793A\u30D5\u30E9\u30B0\u3002"),
         row("InternetMessageId", "Internet Message Id", "\u30E1\u30FC\u30EB\u306E\u4E00\u610F ID\u3002\u91CD\u8907\u9632\u6B62\u306B\u4F7F\u7528\u3002")
@@ -8025,7 +8038,15 @@ var Spira = (() => {
       ]),
       mappingTable,
       p("\u5F0F\u306E\u5165\u529B\u4F8B (IsProcessed / IsHidden \u7528):"),
-      codeBlock("false")
+      codeBlock("false"),
+      p("OwaLink \u7528\u306E\u5F0F (\u52D5\u7684\u30B3\u30F3\u30C6\u30F3\u30C4 \u30D1\u30CD\u30EB\u3067\u306F\u306A\u304F\u300C\u5F0F\u300D\u30BF\u30D6\u306B\u8CBC\u308A\u4ED8\u3051):"),
+      codeBlock(
+        "concat('https://outlook.office.com/mail/inbox/id/', encodeUriComponent(triggerOutputs()?['body/Id']))"
+      ),
+      p("\u5171\u6709\u30E1\u30FC\u30EB\u30DC\u30C3\u30AF\u30B9 \u30C8\u30EA\u30AC\u30FC (V2) \u306E\u5834\u5408\u3084\u3001\u30E6\u30FC\u30B6\u5225 OWA \u3092\u958B\u304D\u305F\u3044\u5834\u5408\u306F\u4EE5\u4E0B\u306E\u3044\u305A\u308C\u304B\u306B\u7F6E\u304D\u63DB\u3048\u53EF:"),
+      codeBlock(
+        "concat('https://outlook.office365.com/owa/?ItemID=', encodeUriComponent(triggerOutputs()?['body/Id']), '&exvsurl=1&viewmodel=ReadMessageItem')"
+      )
     ]);
     const verify = el("div", {}, [
       h("4. \u52D5\u4F5C\u78BA\u8A8D"),
@@ -8062,6 +8083,22 @@ var Spira = (() => {
         el("li", {}, [
           el("strong", {}, ["\u540C\u3058\u30E1\u30FC\u30EB\u304C\u4F55\u5EA6\u3082\u53D6\u308A\u8FBC\u307E\u308C\u308B"]),
           ": InternetMessageId \u5217\u304C\u7A7A\u6B04\u306B\u306A\u3063\u3066\u3044\u306A\u3044\u304B\u78BA\u8A8D\u3002"
+        ]),
+        el("li", {}, [
+          el("strong", {}, ["\u91CD\u8907\u8D77\u7968\u304C\u30D6\u30ED\u30C3\u30AF\u3055\u308C\u306A\u3044 / \u5225\u4EBA\u306E\u30E1\u30FC\u30EB\u3068\u885D\u7A81\u3059\u308B"]),
+          ": SentAt \u5217\u304C\u7A7A\u306B\u306A\u3063\u3066\u3044\u306A\u3044\u304B\u78BA\u8A8D\u3002Spira \u306E\u91CD\u8907\u5224\u5B9A (\u9001\u4FE1\u8005 + \u9001\u4FE1\u6642\u523B\u4E00\u81F4) \u306F ",
+          code("SentAt"),
+          " \u3092\u4E3B\u30AD\u30FC\u3068\u3057\u3001\u7A7A\u306E\u5834\u5408\u306E\u307F ",
+          code("ReceivedAt"),
+          " \u306B\u30D5\u30A9\u30FC\u30EB\u30D0\u30C3\u30AF\u3002Received Time \u306F\u5B9B\u5148\u30E1\u30FC\u30EB\u30DC\u30C3\u30AF\u30B9\u3054\u3068\u306B\u5FAE\u5999\u306B\u30BA\u30EC\u308B\u305F\u3081\u3001SentAt \u304C\u7121\u3044\u3068\u5225\u4EBA\u306E\u540C\u30BF\u30A4\u30DF\u30F3\u30B0 \u30E1\u30FC\u30EB\u3067\u8AA4\u691C\u77E5\u3059\u308B\u3053\u3068\u304C\u3042\u308A\u307E\u3059\u3002"
+        ]),
+        el("li", {}, [
+          el("strong", {}, ["OwaLink \u304C\u7A7A / \u958B\u3051\u306A\u3044"]),
+          ": V3 \u30C8\u30EA\u30AC\u3067\u306F\u300CWeb Link\u300D\u52D5\u7684\u30B3\u30F3\u30C6\u30F3\u30C4\u304C\u51FA\u307E\u305B\u3093\u3002OwaLink \u5217\u306B\u306F ",
+          code("concat('https://outlook.office.com/mail/inbox/id/', encodeUriComponent(triggerOutputs()?['body/Id']))"),
+          " \u3092 ",
+          el("em", {}, ["\u5F0F"]),
+          " \u30BF\u30D6\u304B\u3089\u5165\u529B\u3057\u3066\u304F\u3060\u3055\u3044 (\u4E0A\u8A18\u30DE\u30C3\u30D4\u30F3\u30B0\u8868\u306E\u5F0F\u3068\u540C\u3058)\u3002"
         ]),
         el("li", {}, [
           el("strong", {}, ["\u8FD4\u4FE1\u304C\u7D10\u4ED8\u304B\u306A\u3044"]),
@@ -8218,7 +8255,7 @@ var Spira = (() => {
       setState({ errorBanner: `\u521D\u671F\u5316\u306B\u5931\u6557\u3057\u307E\u3057\u305F: ${msg}` });
       toast(root2, `\u521D\u671F\u5316\u30A8\u30E9\u30FC: ${msg}`, "error");
     }
-    console.log(`[spira] build: ${"0.0.1-27f05bc+ (2026-05-10T12:31:48Z)"}`);
+    console.log(`[spira] build: ${"0.0.1-35d6f27+ (2026-05-14T08:17:40Z)"}`);
     console.log(`[spira] repo mode: ${getRepoMode()}`);
   }
   async function doSync(root2, silent = false) {
