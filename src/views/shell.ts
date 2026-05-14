@@ -617,7 +617,7 @@ function openHelpModal(root: HTMLElement): void {
       row('HasAttachments', 'Has Attachment', 'true/false。'),
       row('ConversationId', 'Conversation Id', 'スレッド ID。受信パネルで会話単位の紐付けに使用。'),
       row('ReceivedAt', 'Received Time', 'このメールボックスにメールが到着した時刻。表示・ソート用。'),
-      row('SentAt', 'Sent Time', '送信者が「送信」した時刻。Spira の重複起票判定 (送信者 + 送信時刻一致) の主キー。受信時刻と異なり、宛先メールボックス間でブレないため一意性の判断に使える。'),
+      row('SentAt', "(式) triggerOutputs()?['body/sentDateTime']", '送信者が「送信」した時刻。Spira の重複起票判定 (送信者 + 送信時刻一致) の主キー。動的コンテンツ パネルに「Sent Time」が出ないテナントが多いので、「式」タブから取得すること (詳細は表下のサンプル参照)。'),
       row('OwaLink', "(式) concat('https://outlook.office.com/mail/inbox/id/', encodeUriComponent(triggerOutputs()?['body/Id']))", 'メッセージ ID から OWA URL を構築。動的コンテンツ「Web Link」は V3 トリガでは出ないので必ず「式」タブで入力。'),
       row('IsProcessed', 'false (固定)', 'Spira 側で取り込み完了時に true に更新。'),
       row('IsHidden', 'false (固定)', '非表示フラグ。'),
@@ -648,6 +648,16 @@ function openHelpModal(root: HTMLElement): void {
     mappingTable,
     p('式の入力例 (IsProcessed / IsHidden 用):'),
     codeBlock('false'),
+    p('SentAt 用の式 (動的コンテンツに「Sent Time」が出ない場合は「式」タブから入力):'),
+    codeBlock("triggerOutputs()?['body/sentDateTime']"),
+    p('上の式が空を返す場合、トリガーのバージョン違いで body の field 名が異なる可能性があります。次のどれかを順に試してください:'),
+    codeBlock(
+      "triggerOutputs()?['body/sentDateTime']\n" +
+      "triggerOutputs()?['body/DateTimeSent']\n" +
+      "triggerOutputs()?['body/dateTimeSent']"
+    ),
+    p('それでも null の場合は、SentDateTime を持たないトリガー (古い V2 等) を使っている可能性があります。トリガー直後に「メールの取得 (V2) — Get email (V2)」アクションを追加し、Message Id を渡して取得した body から `sentDateTime` を使うのが確実です。アクションの出力を使う場合は式を:'),
+    codeBlock("body('メールの取得_V2')?['sentDateTime']"),
     p('OwaLink 用の式 (動的コンテンツ パネルではなく「式」タブに貼り付け):'),
     codeBlock(
       "concat('https://outlook.office.com/mail/inbox/id/', encodeUriComponent(triggerOutputs()?['body/Id']))"
@@ -702,6 +712,20 @@ function openHelpModal(root: HTMLElement): void {
         ' を主キーとし、空の場合のみ ',
         code('ReceivedAt'),
         ' にフォールバック。Received Time は宛先メールボックスごとに微妙にズレるため、SentAt が無いと別人の同タイミング メールで誤検知することがあります。',
+      ]),
+      el('li', {}, [
+        el('strong', {}, ['動的コンテンツに「Sent Time」が表示されない']),
+        ': V3 トリガでは Sent Time が「動的コンテンツ」パネルに出ないことがほとんど。SentAt 列には ',
+        code("triggerOutputs()?['body/sentDateTime']"),
+        ' を ',
+        el('em', {}, ['式']),
+        ' タブから入力してください。式の結果が null の場合は ',
+        code('DateTimeSent'),
+        ' / ',
+        code('dateTimeSent'),
+        ' を順に試すか、トリガ直後に「メールの取得 (V2)」アクションを追加して取得した body の ',
+        code('sentDateTime'),
+        ' を使ってください。',
       ]),
       el('li', {}, [
         el('strong', {}, ['OwaLink が空 / 開けない']),
