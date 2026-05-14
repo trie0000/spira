@@ -71,6 +71,12 @@ export interface Repository {
   unhideInboxItems(ids: number[]): Promise<void>;
   syncInbox(): Promise<SyncResult>;
 
+  // attachments — internal-memo file attachments. The file body is stored
+  // in SharePoint's `SpiraAttachments` document library under
+  // `ticket-{id}/...`; the note body itself only holds the returned URL +
+  // filename as a markdown link `[📎 filename](url)`.
+  uploadAttachment(ticketId: number, file: File): Promise<{ url: string; filename: string }>;
+
   // users (AD picker)
   listSiteUsers(): Promise<SiteUser[]>;
 

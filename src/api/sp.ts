@@ -18,6 +18,10 @@ const DEFAULT_LISTS = {
   listInbox:    'InboxMails',
 };
 
+/** Document library used for internal-memo attachments. Auto-created by
+ *  ensureLists. Files are placed under `ticket-<5-digit-id>/`. */
+const ATTACHMENT_LIBRARY = 'SpiraAttachments';
+
 export function detectSpConfig(): SpConfig {
   // Prefer SP page context if available.
   const ctx = (window as unknown as { _spPageContextInfo?: { webAbsoluteUrl?: string } })._spPageContextInfo;
@@ -228,7 +232,112 @@ export class SpRepository implements Repository {
     await ensure(this.cfg.listComments, commentFieldSpecs());
     await ensure(this.cfg.listInbox, inboxFieldSpecs());
 
+    // Attachment library — a single document library shared across all
+    // tickets. Per-ticket sub-folders are created on first upload.
+    if (!(await this.listExists(ATTACHMENT_LIBRARY))) {
+      await this.tx.req('/_api/web/lists', {
+        method: 'POST',
+        odata: 'verbose',
+        body: JSON.stringify({
+          __metadata: { type: 'SP.List' },
+          Title: ATTACHMENT_LIBRARY,
+          BaseTemplate: 101, // Document Library
+          AllowContentTypes: false,
+        }),
+      });
+      created.push(ATTACHMENT_LIBRARY);
+    }
+
     return { created, addedFields };
+  }
+
+  // ---- attachments -----------------------------------------------------
+
+  /** Upload a file under SpiraAttachments/ticket-{N}/, auto-creating the
+   *  per-ticket sub-folder on first use, and renaming the file with a
+   *  ` (1)`, ` (2)` … suffix if the same filename already exists in that
+   *  folder. Returns the absolute URL plus the (possibly-renamed) filename
+   *  so the caller can put `[📎 <filename>](<url>)` in the memo. */
+  async uploadAttachment(ticketId: number, file: File): Promise<{ url: string; filename: string }> {
+    const subFolder = `ticket-${String(ticketId).padStart(5, '0')}`;
+    const folderServerRel = await this.ensureAttachmentFolder(subFolder);
+    const finalName = await this.resolveNonCollidingName(folderServerRel, file.name);
+    const buffer = await file.arrayBuffer();
+    const uploadUrl =
+      `${this.cfg.siteUrl}/_api/web/GetFolderByServerRelativeUrl('${encodeURIComponent(folderServerRel)}')` +
+      `/Files/add(url='${encodeURIComponent(finalName)}',overwrite=false)`;
+    const digest = await this.tx.formDigest();
+    const res = await fetch(uploadUrl, {
+      method: 'POST',
+      headers: {
+        'Accept': 'application/json;odata=nometadata',
+        'X-RequestDigest': digest,
+      },
+      credentials: 'include',
+      body: buffer,
+    });
+    if (!res.ok) throw new SpError(res.status, await res.text(), uploadUrl);
+    // The site-relative URL is what we want to embed in the memo (works
+    // when the bookmarklet runs from a different sub-site, etc.).
+    const tenantOrigin = new URL(this.cfg.siteUrl).origin;
+    return {
+      url: `${tenantOrigin}${folderServerRel}/${encodeURI(finalName)}`,
+      filename: finalName,
+    };
+  }
+
+  /** Ensure `<site>/SpiraAttachments/<subFolder>/` exists. Returns the
+   *  server-relative URL (e.g. `/sites/spira/SpiraAttachments/ticket-00042`). */
+  private async ensureAttachmentFolder(subFolder: string): Promise<string> {
+    const siteServerRel = new URL(this.cfg.siteUrl).pathname.replace(/\/$/, '');
+    const libRel = `${siteServerRel}/${ATTACHMENT_LIBRARY}`;
+    const fullRel = `${libRel}/${subFolder}`;
+    // GetFolderByServerRelativeUrl returns 404 if missing — catch & create.
+    try {
+      await this.tx.req(
+        `/_api/web/GetFolderByServerRelativeUrl('${encodeURIComponent(fullRel)}')?$select=Exists`,
+      );
+      return fullRel;
+    } catch (e) {
+      if (!(e instanceof SpError) || e.status !== 404) throw e;
+    }
+    // 404 path → create sub-folder via Folders/add.
+    await this.tx.req(`/_api/web/folders`, {
+      method: 'POST',
+      odata: 'verbose',
+      body: JSON.stringify({
+        __metadata: { type: 'SP.Folder' },
+        ServerRelativeUrl: fullRel,
+      }),
+    });
+    return fullRel;
+  }
+
+  /** Probe for an unused filename in `folderServerRel`. Mirrors OS file
+   *  managers: `report.xlsx` → `report (1).xlsx` → `report (2).xlsx` … */
+  private async resolveNonCollidingName(folderServerRel: string, original: string): Promise<string> {
+    const dot = original.lastIndexOf('.');
+    const base = dot > 0 ? original.slice(0, dot) : original;
+    const ext = dot > 0 ? original.slice(dot) : '';
+    for (let i = 0; i < 100; i++) {
+      const candidate = i === 0 ? original : `${base} (${i})${ext}`;
+      const exists = await this.fileExists(folderServerRel, candidate);
+      if (!exists) return candidate;
+    }
+    // Give up after 100 tries — extremely unlikely in practice.
+    throw new Error(`Too many duplicate filenames for ${original}`);
+  }
+
+  private async fileExists(folderServerRel: string, name: string): Promise<boolean> {
+    const url =
+      `/_api/web/GetFileByServerRelativeUrl('${encodeURIComponent(folderServerRel + '/' + name)}')?$select=Exists`;
+    try {
+      await this.tx.req(url);
+      return true;
+    } catch (e) {
+      if (e instanceof SpError && e.status === 404) return false;
+      throw e;
+    }
   }
 
   // ---- destructive: clear all items (NOT drop the lists themselves)

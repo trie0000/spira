@@ -39,6 +39,15 @@ export interface NoteEditorOptions {
    *  shadow DOM, or wraps the page in a fixed-position overlay with its
    *  own stacking context that traps body-level z-index. */
   floatingContainer?: HTMLElement;
+  /** Host-provided file upload hook. Invoked when the user drops, pastes
+   *  or picks a file via the slash menu. The host uploads the file to
+   *  wherever it likes (SharePoint, S3, etc.) and returns `{url, filename}`
+   *  pointing at the stored copy; the editor then inserts a clickable
+   *  chip linking to that URL. If `onFileUpload` is omitted, dropped
+   *  non-image files are ignored. Images continue to be inlined as
+   *  base64 unless an upload hook is provided and `imageUploadMode` is
+   *  set to `'always-upload'` (TODO — for now images always inline). */
+  onFileUpload?: (file: File) => Promise<{ url: string; filename: string } | null>;
 }
 
 export interface NoteEditor {
@@ -78,6 +87,7 @@ const SLASH_ITEMS: SlashItem[] = [
   { cat: 'リスト', cmd: 'ol', icon: '1.', name: '番号付き', desc: '番号付き箇条書き', md: '1.' },
   { cat: 'リスト', cmd: 'todo', icon: '☐', name: 'ToDoリスト', desc: 'チェックボックス付き', md: '[]' },
   { cat: 'メディア', cmd: 'hr', icon: '—', name: '区切り線', desc: 'セクション区切り', md: '---' },
+  { cat: 'メディア', cmd: 'file', icon: '📎', name: 'ファイル添付', desc: 'Excel / PDF / Word 等をアップロード' },
   { cat: 'コード', cmd: 'pre', icon: '</>', name: 'コードブロック', desc: 'シンタックスハイライト', md: '```' },
   { cat: 'データ', cmd: 'table', icon: '⊞', name: '表', desc: '簡易表 (3×2)・セル編集可' },
 ];
@@ -434,10 +444,107 @@ export function createNoteEditor(opts: NoteEditorOptions = {}): NoteEditor {
       insertCalloutBlock();
     } else if (cmd === 'table') {
       insertTableBlock(3, 2);
+    } else if (cmd === 'file') {
+      openFilePickerAndUpload();
     } else {
       execCmd(cmd);
     }
     markDirty();
+  }
+
+  // ── File attachment ──────────────────────────────────────────────────
+
+  /** Map extension to a friendly emoji icon. Used both when the editor
+   *  inserts a chip locally and when markdown.ts rehydrates one on load. */
+  function fileIconFor(filename: string): string {
+    const ext = (filename.toLowerCase().match(/\.([^.]+)$/)?.[1]) || '';
+    if (['xlsx', 'xls', 'csv', 'tsv'].includes(ext)) return '📊';
+    if (['docx', 'doc', 'rtf'].includes(ext))        return '📝';
+    if (['pdf'].includes(ext))                        return '📕';
+    if (['pptx', 'ppt'].includes(ext))                return '📈';
+    if (['zip', '7z', 'tar', 'gz'].includes(ext))     return '📦';
+    return '📎';
+  }
+
+  /** Build a finished file-chip <a> (no DOM insertion). Shared by upload
+   *  completion and markdown rehydration on `setMarkdown`. */
+  function buildFileChip(url: string, filename: string): HTMLAnchorElement {
+    const a = document.createElement('a');
+    a.className = 'ne-file';
+    a.href = url;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    a.setAttribute('download', filename);
+    a.setAttribute('contenteditable', 'false');
+    a.setAttribute('data-ne-file', '1');
+    a.innerHTML =
+      `<span class="ne-file-ic">${fileIconFor(filename)}</span>` +
+      `<span class="ne-file-name"></span>`;
+    (a.querySelector('.ne-file-name') as HTMLElement).textContent = filename;
+    return a;
+  }
+
+  /** Insert a placeholder chip with a spinner, return it so we can swap
+   *  it for the real chip when upload finishes (or remove it on failure). */
+  function insertFilePlaceholderAtCursor(filename: string): HTMLElement {
+    const ph = document.createElement('span');
+    ph.className = 'ne-file ne-file--uploading';
+    ph.setAttribute('contenteditable', 'false');
+    ph.setAttribute('data-ne-file-placeholder', '1');
+    ph.innerHTML =
+      `<span class="ne-file-ic">${fileIconFor(filename)}</span>` +
+      `<span class="ne-file-name"></span>` +
+      `<span class="ne-file-status">アップロード中…</span>`;
+    (ph.querySelector('.ne-file-name') as HTMLElement).textContent = filename;
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount && ed.contains(sel.anchorNode)) {
+      const r = sel.getRangeAt(0);
+      r.insertNode(ph);
+      const tail = document.createTextNode(' ');
+      ph.parentNode!.insertBefore(tail, ph.nextSibling);
+      const newR = document.createRange();
+      newR.setStartAfter(tail);
+      newR.collapse(true);
+      sel.removeAllRanges();
+      sel.addRange(newR);
+    } else {
+      ed.appendChild(ph);
+    }
+    return ph;
+  }
+
+  /** Drive the upload flow: optimistic placeholder → host upload → swap
+   *  in the real chip (or rip out the placeholder on failure). */
+  async function handleFileUpload(file: File): Promise<void> {
+    if (!opts.onFileUpload) return;
+    const placeholder = insertFilePlaceholderAtCursor(file.name);
+    try {
+      const r = await opts.onFileUpload(file);
+      if (r && placeholder.parentNode) {
+        placeholder.parentNode.replaceChild(buildFileChip(r.url, r.filename), placeholder);
+        markDirty();
+      } else {
+        placeholder.remove();
+      }
+    } catch {
+      placeholder.remove();
+    }
+  }
+
+  /** Open a native file picker then route the chosen file through the
+   *  same upload pipeline as drop/paste. */
+  function openFilePickerAndUpload(): void {
+    if (!opts.onFileUpload) return;
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.style.display = 'none';
+    input.addEventListener('change', async () => {
+      const file = input.files?.[0];
+      if (file) await handleFileUpload(file);
+      input.remove();
+    });
+    document.body.appendChild(input);
+    input.click();
   }
 
   /** Replace `block`'s tag with `tag`, preserving children and caret. Manual
@@ -770,14 +877,21 @@ export function createNoteEditor(opts: NoteEditorOptions = {}): NoteEditor {
     const items = e.clipboardData?.items;
     if (!items) return;
     for (const it of Array.from(items)) {
-      if (it.kind === 'file' && it.type.startsWith('image/')) {
+      if (it.kind !== 'file') continue;
+      const file = it.getAsFile();
+      if (!file) continue;
+      if (it.type.startsWith('image/')) {
         e.preventDefault();
-        const file = it.getAsFile();
-        if (!file) continue;
         try {
           const url = await fileToDataUrl(file);
           insertImageAtCursor(url, file.name);
         } catch { /* swallow */ }
+        return;
+      }
+      // Non-image file → route through host upload hook if provided.
+      if (opts.onFileUpload) {
+        e.preventDefault();
+        await handleFileUpload(file);
         return;
       }
     }
@@ -785,14 +899,24 @@ export function createNoteEditor(opts: NoteEditorOptions = {}): NoteEditor {
 
   ed.addEventListener('drop', async (e) => {
     if (!e.dataTransfer?.files?.length) return;
-    const imgs = Array.from(e.dataTransfer.files).filter((f) => f.type.startsWith('image/'));
-    if (imgs.length === 0) return;
+    const files = Array.from(e.dataTransfer.files);
+    const imgs = files.filter((f) => f.type.startsWith('image/'));
+    const others = files.filter((f) => !f.type.startsWith('image/'));
+    if (imgs.length === 0 && (others.length === 0 || !opts.onFileUpload)) return;
     e.preventDefault();
+    // Images inline as base64 (same as before).
     for (const f of imgs) {
       try {
         const url = await fileToDataUrl(f);
         insertImageAtCursor(url, f.name);
       } catch { /* swallow */ }
+    }
+    // Non-image files go through the host's upload pipeline (sequential
+    // so each chip lands in caret order).
+    if (opts.onFileUpload) {
+      for (const f of others) {
+        await handleFileUpload(f);
+      }
     }
   });
 

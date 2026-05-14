@@ -138,6 +138,57 @@
   margin: 8px 0;
 }
 
+/* File attachment chip (Excel/PDF/Word/etc. linked into the memo). The
+   underlying anchor stays a real <a target="_blank">, so click handling
+   is the browser's responsibility — no JS hook needed. */
+.ne-prose .ne-file {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 2px;
+  padding: 6px 10px;
+  background: var(--ne-surface);
+  border: 1px solid var(--ne-border);
+  border-radius: var(--ne-radius);
+  color: var(--ne-text);
+  text-decoration: none;
+  font-size: var(--ne-font-size);
+  line-height: 1.3;
+  max-width: 100%;
+  cursor: pointer;
+  user-select: none;
+}
+.ne-prose .ne-file:hover {
+  background: var(--ne-accent-soft);
+  border-color: var(--ne-accent);
+}
+.ne-prose .ne-file-ic {
+  flex-shrink: 0;
+  font-size: 1.15em;
+  line-height: 1;
+}
+.ne-prose .ne-file-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex: 0 1 auto;
+  max-width: 32em;
+}
+.ne-prose .ne-file-status {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--ne-muted);
+  margin-left: 4px;
+}
+/* Uploading state: dimmed + non-clickable while the host upload is in
+   flight. Removed when the placeholder is swapped for the real chip. */
+.ne-prose .ne-file--uploading {
+  opacity: 0.6;
+  cursor: progress;
+  pointer-events: none;
+}
+
 /* Todo */
 .ne-prose .ne-todo {
   display: flex;

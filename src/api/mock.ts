@@ -322,6 +322,19 @@ export class MockRepository implements Repository {
     return store.users.slice();
   }
 
+  /** Mock: encode the file as a base64 data URL and return it. The
+   *  filename is preserved as-is (no collision logic — each upload
+   *  produces an independent data URL even when names match). */
+  async uploadAttachment(_ticketId: number, file: File): Promise<{ url: string; filename: string }> {
+    const url: string = await new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(String(r.result));
+      r.onerror = () => reject(r.error);
+      r.readAsDataURL(file);
+    });
+    return { url, filename: file.name };
+  }
+
   async addSampleInbox(): Promise<{ count: number }> {
     const inputs = sampleInboxInputs();
     for (const inp of inputs) {

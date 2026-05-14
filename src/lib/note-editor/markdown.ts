@@ -35,6 +35,13 @@ function inlineToMd(node: Node): string {
       return inner ? `\`${inner.replace(/`/g, '\\`')}\`` : '';
     case 'A': {
       const href = el.getAttribute('href') ?? '';
+      // File-attachment chip: serialize as `[<icon> <filename>](url)` so
+      // the markdownToHtml pass can rehydrate it back into a chip on load.
+      if (el.classList.contains('ne-file')) {
+        const ic = el.querySelector('.ne-file-ic')?.textContent ?? '📎';
+        const nm = el.querySelector('.ne-file-name')?.textContent ?? (el.getAttribute('download') ?? 'file');
+        return `[${ic} ${nm}](${href})`;
+      }
       return `[${inner}](${href})`;
     }
     case 'BR':
@@ -144,7 +151,24 @@ function inlineMdToHtml(s: string): string {
   out = out.replace(/\*([^*]+)\*/g, (_, c) => `<em>${c}</em>`);
   out = out.replace(/~~([^~]+)~~/g, (_, c) => `<s>${c}</s>`);
   out = out.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_, alt, src) => `<img src="${src}" alt="${alt}" class="ne-img"/>`);
-  out = out.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, t, h) => `<a href="${h}">${t}</a>`);
+  // Link rewriting. A link whose text starts with one of our recognized
+  // file-icon emojis (📎/📊/📕/📝/📈/📦) becomes a `.ne-file` chip so
+  // the editor & read-only renderer style it consistently. Everything
+  // else stays as a plain anchor.
+  out = out.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, t, h) => {
+    const m = /^(📎|📊|📕|📝|📈|📦)\s+(.+)$/.exec(t);
+    if (m) {
+      const icon = m[1];
+      const name = m[2];
+      return (
+        `<a class="ne-file" href="${h}" target="_blank" rel="noopener noreferrer" ` +
+        `download="${name.replace(/"/g, '&quot;')}" contenteditable="false" data-ne-file="1">` +
+        `<span class="ne-file-ic">${icon}</span>` +
+        `<span class="ne-file-name">${name}</span></a>`
+      );
+    }
+    return `<a href="${h}">${t}</a>`;
+  });
   out = out.replace(/  \n/g, '<br>');
   return out;
 }

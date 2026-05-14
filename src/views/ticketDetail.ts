@@ -698,6 +698,17 @@ function renderNoteCard(c: Comment): HTMLElement {
       inflight = inflight.then(flushSave);
     },
     floatingContainer: getRoot(),
+    // File drops / slash-menu file picker go to SP doc library
+    // (or mock data URL). Errors surface as a toast and bubble back to
+    // the editor so it can drop the placeholder chip.
+    onFileUpload: async (file) => {
+      try {
+        return await getRepo().uploadAttachment(c.ticketId, file);
+      } catch (e) {
+        toast(getRoot(), `アップロード失敗: ${file.name} — ${(e as Error).message}`, 'error', 6000);
+        return null;
+      }
+    },
   });
 
   const deleteBtn = el('button', {
