@@ -555,14 +555,28 @@ export function createNoteEditor(opts: NoteEditorOptions = {}): NoteEditor {
     if (block.tagName.toLowerCase() === tag) return block;
     const newEl = document.createElement(tag);
     while (block.firstChild) newEl.appendChild(block.firstChild);
+    // Drop leftover empty text nodes (e.g. the husk left behind when the
+    // slash-trigger text was deleted by applySlashCmd). Without this an
+    // empty text node passes the `!newEl.firstChild` check, suppressing
+    // the <br> we need for caret rendering — the heading then renders
+    // with zero height and the browser snaps the caret to the editor
+    // body instead of the heading. Typing then silently goes nowhere.
+    for (let n: ChildNode | null = newEl.firstChild; n; ) {
+      const next: ChildNode | null = n.nextSibling;
+      if (n.nodeType === 3 && !(n.textContent ?? '').length) n.remove();
+      n = next;
+    }
     if (!newEl.firstChild) newEl.appendChild(document.createElement('br'));
     block.parentNode!.replaceChild(newEl, block);
-    // Park caret at the end of the new block so the user can keep typing.
+    // Park caret at the START of the new block (works for both the
+    // `<br>`-only case and the populated case — placing at the beginning
+    // is always safe and matches "the rest of the line is now a heading"
+    // mental model).
     const sel = window.getSelection();
     if (sel) {
       const r = document.createRange();
-      r.selectNodeContents(newEl);
-      r.collapse(false);
+      r.setStart(newEl, 0);
+      r.collapse(true);
       sel.removeAllRanges();
       sel.addRange(r);
     }
