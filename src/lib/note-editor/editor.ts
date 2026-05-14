@@ -467,14 +467,19 @@ export function createNoteEditor(opts: NoteEditorOptions = {}): NoteEditor {
   }
 
   /** Build a finished file-chip <a> (no DOM insertion). Shared by upload
-   *  completion and markdown rehydration on `setMarkdown`. */
+   *  completion and markdown rehydration on `setMarkdown`.
+   *
+   *  No `download` attribute — we want clicks (in read-only display) or
+   *  double-clicks (inside the editor) to open the file in the browser
+   *  (Office Online for .xlsx / .docx / .pptx, native viewer for PDF,
+   *  download for binary types — SP decides based on Content-Type). */
   function buildFileChip(url: string, filename: string): HTMLAnchorElement {
     const a = document.createElement('a');
     a.className = 'ne-file';
     a.href = url;
     a.target = '_blank';
     a.rel = 'noopener noreferrer';
-    a.setAttribute('download', filename);
+    a.title = `ダブルクリックで開く: ${filename}`;
     a.setAttribute('contenteditable', 'false');
     a.setAttribute('data-ne-file', '1');
     a.innerHTML =
@@ -1286,6 +1291,24 @@ export function createNoteEditor(opts: NoteEditorOptions = {}): NoteEditor {
         markDirty();
       }
     }
+    // File chip — suppress single-click navigation inside the editor so
+    // the user doesn't accidentally leave the page while trying to
+    // position the caret next to a chip. Opening is reserved for
+    // double-click (handled below).
+    const fileChip = target.closest('a.ne-file');
+    if (fileChip) e.preventDefault();
+  });
+
+  // File chip double-click → open the file in a new tab. Without the
+  // `download` attribute SharePoint serves Office files via Office
+  // Online (Excel / Word / PowerPoint web viewer), PDF via browser
+  // preview, and falls back to download only for binary types.
+  ed.addEventListener('dblclick', (e) => {
+    const target = (e.target as Element | null)?.closest('a.ne-file') as HTMLAnchorElement | null;
+    if (!target) return;
+    e.preventDefault();
+    const href = target.getAttribute('href') ?? '';
+    if (href) window.open(href, '_blank', 'noopener,noreferrer');
   });
 
   // ── Append-on-focus: when the editor gains focus, ensure the user can

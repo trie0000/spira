@@ -160,9 +160,15 @@ function inlineMdToHtml(s: string): string {
     if (m) {
       const icon = m[1];
       const name = m[2];
+      // No `download` attribute: we want the browser / SharePoint to
+      // decide how to open the file (Office Online for .xlsx/.docx/.pptx,
+      // native PDF viewer for .pdf, etc.). The editor itself adds a
+      // double-click handler that calls window.open() — single click is
+      // suppressed there to keep caret positioning predictable.
+      const safe = name.replace(/"/g, '&quot;');
       return (
         `<a class="ne-file" href="${h}" target="_blank" rel="noopener noreferrer" ` +
-        `download="${name.replace(/"/g, '&quot;')}" contenteditable="false" data-ne-file="1">` +
+        `title="ダブルクリックで開く: ${safe}" contenteditable="false" data-ne-file="1">` +
         `<span class="ne-file-ic">${icon}</span>` +
         `<span class="ne-file-name">${name}</span></a>`
       );
