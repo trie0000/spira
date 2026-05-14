@@ -1286,14 +1286,29 @@
 .spira-root .spira-th-card-body,
 .spira-root .spira-th-card-body *,
 .spira-root .spira-toast,
-.spira-root .spira-error-banner {
+.spira-root .spira-error-banner,
+.spira-root .spira-modal-body,
+.spira-root .spira-modal-body * {
   -webkit-user-select: text;
   user-select: text;
   cursor: text;
 }
 .spira-root .spira-empty button,
 .spira-root .spira-toast button,
-.spira-root .spira-error-banner button {
+.spira-root .spira-error-banner button,
+.spira-root .spira-modal-body button,
+.spira-root .spira-modal-body a {
+  cursor: pointer;
+}
+/* Form controls inside modals must stay interactive (cursor: text on the
+   wrapping label/div above would otherwise propagate to checkboxes etc.). */
+.spira-root .spira-modal-body input,
+.spira-root .spira-modal-body textarea,
+.spira-root .spira-modal-body select {
+  cursor: auto;
+}
+.spira-root .spira-modal-body input[type="checkbox"],
+.spira-root .spira-modal-body input[type="radio"] {
   cursor: pointer;
 }
 
