@@ -141,15 +141,35 @@ function asTicket(it: SpListItem): Ticket {
   };
 }
 
+/** Decode HTML entities that SharePoint's NoteRich field injects when
+ *  storing characters outside the BMP (emojis like 📝 📎 💡) and a few
+ *  HTML-special chars. Without this, our markdown round-trip sees
+ *  `&#128221;` instead of `📝`, the file-chip regex misses, and the
+ *  entity text leaks to the rendered memo.
+ *
+ *  We only call this on memos saved as MARKDOWN. Comments stored as
+ *  HTML (legacy mail) get parsed via innerHTML downstream, which
+ *  decodes entities natively. */
+function decodeSpEntities(s: string): string {
+  // The <textarea>-innerHTML trick handles every named/numeric/hex
+  // entity HTML5 knows about without parsing tags (textareas don't
+  // create child elements from their innerHTML).
+  const t = document.createElement('textarea');
+  t.innerHTML = s;
+  return t.value;
+}
+
 function asComment(it: SpListItem): Comment {
+  const isHtml = Boolean(it.IsHtml);
+  const rawContent = String(it.Content ?? '');
   return {
     id: it.Id,
     ticketId: Number(it.TicketId ?? 0),
     type: (it.Type as CommentType) || 'note',
     fromEmail: it.FromEmail ? String(it.FromEmail) : undefined,
     fromName: it.FromName ? String(it.FromName) : undefined,
-    content: String(it.Content ?? ''),
-    isHtml: Boolean(it.IsHtml),
+    content: isHtml ? rawContent : decodeSpEntities(rawContent),
+    isHtml,
     sentAt: String(it.SentAt ?? it.Created),
     sourceEmailId: it.SourceEmailId != null ? Number(it.SourceEmailId) : undefined,
     hasAttachments: it.HasAttachments != null ? Boolean(it.HasAttachments) : undefined,
