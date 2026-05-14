@@ -5394,13 +5394,18 @@ var Spira = (() => {
       if (block.tagName.toLowerCase() === tag) return block;
       const newEl = document.createElement(tag);
       while (block.firstChild) newEl.appendChild(block.firstChild);
+      for (let n = newEl.firstChild; n; ) {
+        const next = n.nextSibling;
+        if (n.nodeType === 3 && !(n.textContent ?? "").length) n.remove();
+        n = next;
+      }
       if (!newEl.firstChild) newEl.appendChild(document.createElement("br"));
       block.parentNode.replaceChild(newEl, block);
       const sel = window.getSelection();
       if (sel) {
         const r = document.createRange();
-        r.selectNodeContents(newEl);
-        r.collapse(false);
+        r.setStart(newEl, 0);
+        r.collapse(true);
         sel.removeAllRanges();
         sel.addRange(r);
       }
@@ -7972,15 +7977,15 @@ var Spira = (() => {
       title: "\u30AF\u30EA\u30C3\u30AF\u3067\u30B3\u30D4\u30FC",
       onclick: async () => {
         try {
-          await navigator.clipboard.writeText("0.0.1-9b3b8f2+ (2026-05-14T12:36:58Z)");
+          await navigator.clipboard.writeText("0.0.1-262e2b2+ (2026-05-14T23:21:17Z)");
           buildLabel.textContent = "\u2713 \u30B3\u30D4\u30FC\u3057\u307E\u3057\u305F";
           setTimeout(() => {
-            buildLabel.textContent = `build: ${"0.0.1-9b3b8f2+ (2026-05-14T12:36:58Z)"}`;
+            buildLabel.textContent = `build: ${"0.0.1-262e2b2+ (2026-05-14T23:21:17Z)"}`;
           }, 1200);
         } catch {
         }
       }
-    }, [`build: ${"0.0.1-9b3b8f2+ (2026-05-14T12:36:58Z)"}`]);
+    }, [`build: ${"0.0.1-262e2b2+ (2026-05-14T23:21:17Z)"}`]);
     const menu = el("div", {
       class: "spira-menu spira-settings-menu",
       style: "position:fixed;z-index:var(--z-modal);min-width:280px"
@@ -8508,7 +8513,7 @@ var Spira = (() => {
       setState({ errorBanner: `\u521D\u671F\u5316\u306B\u5931\u6557\u3057\u307E\u3057\u305F: ${msg}` });
       toast(root2, `\u521D\u671F\u5316\u30A8\u30E9\u30FC: ${msg}`, "error");
     }
-    console.log(`[spira] build: ${"0.0.1-9b3b8f2+ (2026-05-14T12:36:58Z)"}`);
+    console.log(`[spira] build: ${"0.0.1-262e2b2+ (2026-05-14T23:21:17Z)"}`);
     console.log(`[spira] repo mode: ${getRepoMode()}`);
   }
   async function doSync(root2, silent = false) {
