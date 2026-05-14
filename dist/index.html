@@ -641,15 +641,22 @@ var Spira = (() => {
       updatedAt: it.Modified
     };
   }
+  function decodeSpEntities(s) {
+    const t = document.createElement("textarea");
+    t.innerHTML = s;
+    return t.value;
+  }
   function asComment(it) {
+    const isHtml = Boolean(it.IsHtml);
+    const rawContent = String(it.Content ?? "");
     return {
       id: it.Id,
       ticketId: Number(it.TicketId ?? 0),
       type: it.Type || "note",
       fromEmail: it.FromEmail ? String(it.FromEmail) : void 0,
       fromName: it.FromName ? String(it.FromName) : void 0,
-      content: String(it.Content ?? ""),
-      isHtml: Boolean(it.IsHtml),
+      content: isHtml ? rawContent : decodeSpEntities(rawContent),
+      isHtml,
       sentAt: String(it.SentAt ?? it.Created),
       sourceEmailId: it.SourceEmailId != null ? Number(it.SourceEmailId) : void 0,
       hasAttachments: it.HasAttachments != null ? Boolean(it.HasAttachments) : void 0,
@@ -7988,15 +7995,15 @@ var Spira = (() => {
       title: "\u30AF\u30EA\u30C3\u30AF\u3067\u30B3\u30D4\u30FC",
       onclick: async () => {
         try {
-          await navigator.clipboard.writeText("0.0.1-9a930d1+ (2026-05-14T23:24:05Z)");
+          await navigator.clipboard.writeText("0.0.1-60ca1b0+ (2026-05-14T23:29:09Z)");
           buildLabel.textContent = "\u2713 \u30B3\u30D4\u30FC\u3057\u307E\u3057\u305F";
           setTimeout(() => {
-            buildLabel.textContent = `build: ${"0.0.1-9a930d1+ (2026-05-14T23:24:05Z)"}`;
+            buildLabel.textContent = `build: ${"0.0.1-60ca1b0+ (2026-05-14T23:29:09Z)"}`;
           }, 1200);
         } catch {
         }
       }
-    }, [`build: ${"0.0.1-9a930d1+ (2026-05-14T23:24:05Z)"}`]);
+    }, [`build: ${"0.0.1-60ca1b0+ (2026-05-14T23:29:09Z)"}`]);
     const menu = el("div", {
       class: "spira-menu spira-settings-menu",
       style: "position:fixed;z-index:var(--z-modal);min-width:280px"
@@ -8524,7 +8531,7 @@ var Spira = (() => {
       setState({ errorBanner: `\u521D\u671F\u5316\u306B\u5931\u6557\u3057\u307E\u3057\u305F: ${msg}` });
       toast(root2, `\u521D\u671F\u5316\u30A8\u30E9\u30FC: ${msg}`, "error");
     }
-    console.log(`[spira] build: ${"0.0.1-9a930d1+ (2026-05-14T23:24:05Z)"}`);
+    console.log(`[spira] build: ${"0.0.1-60ca1b0+ (2026-05-14T23:29:09Z)"}`);
     console.log(`[spira] repo mode: ${getRepoMode()}`);
   }
   async function doSync(root2, silent = false) {
