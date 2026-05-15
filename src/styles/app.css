@@ -797,6 +797,25 @@
 .spira-tk-due--overdue { color: var(--danger); font-weight: 500; }
 .spira-tk-aged { color: var(--warn); font-weight: 500; }
 
+/* チケット詳細の上部に出る「他のメンバーが内容を更新しました」バナー。
+   30 秒間隔ポーリングで外部の変更を検知したら表示される。
+   ユーザが「更新」ボタンを押すまで残る (= 編集中の入力を勝手に消さない)。 */
+#spira-root .spira-refresh-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: var(--s-3) var(--s-5);
+  background: var(--accent-soft);
+  border-bottom: 1px solid var(--accent);
+  color: var(--accent-strong);
+  font-size: var(--fs-md);
+  flex-shrink: 0;
+}
+#spira-root .spira-refresh-banner svg {
+  width: 14px; height: 14px;
+  stroke: currentColor; fill: none; stroke-width: 1.7;
+}
+
 /* Filter chip strip (n365 style) */
 #spira-root .spira-filter-chipstrip {
   display: flex; flex-wrap: wrap; gap: var(--s-2);

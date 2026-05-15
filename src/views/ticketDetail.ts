@@ -49,11 +49,124 @@ export async function renderTicketDetail(ticketId: number): Promise<HTMLElement>
 
   const latestReceived = comments.filter(c => c.type === 'received').slice(-1)[0];
 
-  return el('div', { class: 'spira-main-wrap', style: 'display:flex;flex-direction:column;height:100%;min-height:0' }, [
+  // Refresh banner — surfaced by the polling loop below when another
+  // member has changed the underlying SP data while this view was open.
+  const refreshBanner = el('div', {
+    class: 'spira-refresh-banner',
+    style: 'display:none',
+    role: 'status',
+  }, [
+    el('span', { html: icon('refresh'), style: 'display:inline-flex;width:14px;height:14px' }),
+    el('span', { style: 'flex:1;min-width:0' }, ['他のメンバーが内容を更新しました']),
+    el('button', {
+      class: 'spira-btn spira-btn--primary spira-btn--sm',
+      onclick: () => setState({}),
+    }, ['更新']),
+  ]);
+
+  const wrap = el('div', {
+    class: 'spira-main-wrap',
+    style: 'display:flex;flex-direction:column;height:100%;min-height:0',
+  }, [
     await renderTabStrip(t, latestReceived),
     renderTicketHeader(t),
+    refreshBanner,
     renderSplitPanes(t, comments),
   ]);
+
+  // Light polling: refetch comments every 30s and flag external changes.
+  // The current user's own auto-saves are recorded in
+  // `recentlySavedByMe` so they don't trigger a phantom banner against
+  // themselves; their fingerprints silently update the baseline on the
+  // next poll. New / deleted comments by ANY author still fire the
+  // banner (since renderTicketDetail's setState path re-baselines the
+  // whole closure on add / delete via setState, those races stay
+  // bounded).
+  startPollingForExternalChanges(wrap, ticketId, comments, refreshBanner);
+
+  return wrap;
+}
+
+const POLL_INTERVAL_MS = 30_000;
+
+/** Comment IDs the current user just auto-saved. The polling loop
+ *  consults this set to avoid raising "他のメンバーが…" for the user's
+ *  own edits (which haven't been re-fetched into the baseline yet). */
+const recentlySavedByMe = new Set<number>();
+function markRecentlySavedByMe(commentId: number): void {
+  recentlySavedByMe.add(commentId);
+  setTimeout(() => recentlySavedByMe.delete(commentId), 60_000);
+}
+
+function commentFingerprint(c: Comment): string {
+  return `${(c.content ?? '').length}:${c.isHtml ? 1 : 0}:${c.sentAt ?? ''}:${c.content?.slice(-32) ?? ''}`;
+}
+
+function startPollingForExternalChanges(
+  wrap: HTMLElement,
+  ticketId: number,
+  initial: Comment[],
+  banner: HTMLElement,
+): void {
+  const baseline = new Map<number, string>();
+  for (const c of initial) baseline.set(c.id, commentFingerprint(c));
+  let bannerShown = false;
+
+  const poll = async (): Promise<void> => {
+    if (document.hidden) return;
+    if (bannerShown) return;
+    try {
+      const fresh = await getRepo().listComments(ticketId);
+      // Detect updated / new comments authored by someone else.
+      let externalChange = false;
+      for (const c of fresh) {
+        const fp = commentFingerprint(c);
+        if (recentlySavedByMe.has(c.id)) {
+          // Local self-save — re-baseline silently so subsequent polls
+          // don't trip on the same fingerprint diff.
+          baseline.set(c.id, fp);
+          continue;
+        }
+        if (!baseline.has(c.id) || baseline.get(c.id) !== fp) {
+          externalChange = true;
+          break;
+        }
+      }
+      // Detect deletions (id in baseline but missing in fresh).
+      if (!externalChange) {
+        const freshIds = new Set(fresh.map((c) => c.id));
+        for (const id of baseline.keys()) {
+          if (!freshIds.has(id) && !recentlySavedByMe.has(id)) {
+            externalChange = true; break;
+          }
+        }
+      }
+      if (externalChange) {
+        bannerShown = true;
+        banner.style.display = '';
+      }
+    } catch { /* swallow — transient network errors shouldn't break the UI */ }
+  };
+
+  const intervalId = window.setInterval(poll, POLL_INTERVAL_MS);
+
+  // Catch up immediately when the user tabs back in.
+  const onVisibility = (): void => { if (!document.hidden) void poll(); };
+  document.addEventListener('visibilitychange', onVisibility);
+
+  // Cleanup when this ticket-detail wrap is detached (setState() repaint,
+  // navigation to inbox / trash, etc.). Same edge-trigger pattern used
+  // for note-card cleanup — wait until we've seen the wrap connected at
+  // least once before reacting to disconnection.
+  let wasConnected = false;
+  const observer = new MutationObserver(() => {
+    if (wrap.isConnected) { wasConnected = true; return; }
+    if (!wasConnected) return;
+    clearInterval(intervalId);
+    document.removeEventListener('visibilitychange', onVisibility);
+    observer.disconnect();
+  });
+  observer.observe(document.body, { childList: true, subtree: true });
 }
 
 async function renderTabStrip(activeT: Ticket, latestReceived: Comment | undefined): Promise<HTMLElement> {
@@ -700,6 +813,11 @@ function renderNoteCard(c: Comment): HTMLElement {
       await getRepo().updateComment(c.id, { content: v, isHtml: false });
       c.content = v;
       c.isHtml = false;
+      // Tell the parent ticketDetail's polling loop that this change
+      // came from this client. Without this, the next 30-sec poll would
+      // see a fingerprint mismatch and show the "他のメンバーが…"
+      // banner against the user's own save.
+      markRecentlySavedByMe(c.id);
       flashSaved();
     } catch (e) {
       status.textContent = `保存失敗: ${(e as Error).message}`;
