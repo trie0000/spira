@@ -454,17 +454,22 @@ function attachCollapseToggle(
   }, [toggleLabel(expandedSet.has(id))]);
   card.appendChild(toggle);
 
-  // Same toggle on card double-click. We ignore dblclicks that originated
-  // on interactive children (buttons / links / form controls) and on the
-  // toggle button itself, and skip when the user is double-clicking to
-  // select a word in the body text — `getSelection().toString()` is the
-  // simplest signal that text was selected by the dblclick.
+  // Same toggle on card double-click. Only interactive children
+  // (buttons / links / form controls / contenteditable) are skipped.
+  //
+  // We intentionally do NOT bail out when the browser's default
+  // word-selection has fired — that was the previous behavior and it
+  // made the "double-click anywhere on the card to close it" gesture
+  // silently fail whenever the user dblclicked on body text (the
+  // browser would word-select first and our handler would early-out
+  // because the selection wasn't collapsed). Now we always toggle and
+  // explicitly clear the selection so the user doesn't see a stray
+  // word-highlight after collapse.
   card.addEventListener('dblclick', (e: MouseEvent) => {
     const target = e.target as Element | null;
     if (target && target.closest('button, a, input, textarea, select, [contenteditable="true"]')) return;
-    const sel = window.getSelection();
-    if (sel && !sel.isCollapsed && sel.toString().length > 0) return;
     e.preventDefault();
+    window.getSelection()?.removeAllRanges();
     flipExpanded();
   });
 
