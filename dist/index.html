@@ -2793,7 +2793,7 @@ var Spira = (() => {
 `;
 
   // src/lib/note-editor/editor.css
-  var editor_default = '/* ============================================================\n   note-editor \u2014 drop-in styles\n   ============================================================\n   - All selectors are scoped to `.ne-editor` (the editor root) or\n     `.ne-prose` (for read-only rendering of markdown output).\n   - Floating widgets (.ne-slash, .ne-ftb, .ne-drag-handle) attach\n     to document.body, so they\'re styled at the top level.\n   - Theme via CSS variables with sensible fallbacks. Override them\n     by setting --ne-* on .ne-editor (or any ancestor) in your app.\n   ============================================================ */\n\n.ne-editor,\n.ne-prose,\n.ne-slash,\n.ne-ftb,\n.ne-drag-handle {\n  --ne-bg:           var(--ne-override-bg,           #ffffff);\n  --ne-text:         var(--ne-override-text,         #1f1f1f);\n  --ne-muted:        var(--ne-override-muted,        #6b6b6b);\n  --ne-faint:        var(--ne-override-faint,        #a8a39a);\n  --ne-surface:      var(--ne-override-surface,      #f5f5f3);\n  --ne-border:       var(--ne-override-border,       rgba(0, 0, 0, 0.10));\n  --ne-border-strong:var(--ne-override-border-strong,rgba(0, 0, 0, 0.18));\n  --ne-accent:       var(--ne-override-accent,       #4a7c59);\n  --ne-accent-soft:  var(--ne-override-accent-soft,  rgba(74, 124, 89, 0.16));\n  --ne-radius:       var(--ne-override-radius,       4px);\n  --ne-radius-lg:    var(--ne-override-radius-lg,    6px);\n  --ne-font-size:    var(--ne-override-font-size,    13px);\n  --ne-line-height:  var(--ne-override-line-height,  1.65);\n  --ne-mono:         var(--ne-override-mono,         ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace);\n  --ne-shadow:       var(--ne-override-shadow,       0 8px 24px rgba(0, 0, 0, 0.12));\n  /* Inline `<code>` text colour. Code blocks (<pre><code>) inherit the\n     normal text colour so syntax-highlighted snippets aren\'t tinted. */\n  --ne-inline-code:  var(--ne-override-inline-code,  #c7254e);\n  /* Floating widgets sit at near-max z so they punch through host overlays\n     (e.g. SharePoint UI, fixed-positioned modals). Override with\n     --ne-override-z-floating if your host needs a different stacking. */\n  --ne-z-floating:   var(--ne-override-z-floating,   2147483647);\n}\n\n/* \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 Editor root + content \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 */\n\n.ne-editor {\n  position: relative;\n  min-height: 80px;\n}\n\n.ne-content {\n  position: relative;\n  min-height: 80px;\n  padding: 8px 12px;\n  background: var(--ne-bg);\n  color: var(--ne-text);\n  border: 1px solid var(--ne-border);\n  border-radius: var(--ne-radius);\n  font-size: var(--ne-font-size);\n  line-height: var(--ne-line-height);\n  outline: none;\n  white-space: pre-wrap;\n  word-break: break-word;\n  cursor: text;\n  /* Reserve a small left gutter so the floating drag handle has room to sit\n     just outside the editor border without clipping. */\n  margin-left: 24px;\n}\n.ne-content:focus { border-color: var(--ne-accent); }\n\n/* Placeholder \u2014 shown only while the editor is empty.\n   `<br>` (used by browsers in empty contenteditable paragraphs) is a void\n   element and ignores ::before, so the editor toggles `.ne-empty` itself\n   via JS to drive this rule. */\n.ne-content.ne-empty::before {\n  content: attr(data-placeholder);\n  position: absolute;\n  top: 8px;\n  left: 12px;\n  color: var(--ne-faint);\n  pointer-events: none;\n  white-space: nowrap;\n  overflow: hidden;\n  max-width: calc(100% - 24px);\n  text-overflow: ellipsis;\n}\n\n/* \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 Prose (live + read-only) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 */\n\n.ne-prose > * { margin: 0; }\n.ne-prose > * + * { margin-top: 8px; }\n.ne-prose h1 { font-size: 1.6em;  font-weight: 600; line-height: 1.3; }\n.ne-prose h2 { font-size: 1.35em; font-weight: 600; line-height: 1.3; }\n.ne-prose h3 { font-size: 1.15em; font-weight: 600; line-height: 1.3; }\n.ne-prose blockquote {\n  padding: 0 12px;\n  border-left: 3px solid var(--ne-accent);\n  color: var(--ne-muted);\n}\n.ne-prose pre {\n  padding: 8px 12px;\n  background: var(--ne-surface);\n  border: 1px solid var(--ne-border);\n  border-radius: var(--ne-radius);\n  font-family: var(--ne-mono);\n  font-size: 12px;\n  white-space: pre;\n  overflow-x: auto;\n}\n.ne-prose code {\n  padding: 1px 4px;\n  background: var(--ne-surface);\n  border: 1px solid var(--ne-border);\n  border-radius: 3px;\n  font-family: var(--ne-mono);\n  font-size: 0.92em;\n  color: var(--ne-inline-code);\n}\n/* Code block content stays at normal text colour \u2014 only inline `<code>`\n   gets the accent. */\n.ne-prose pre code {\n  padding: 0;\n  background: transparent;\n  border: 0;\n  color: inherit;\n}\n.ne-prose hr {\n  border: 0;\n  border-top: 1px solid var(--ne-border-strong);\n  margin: 10px 0;\n}\n.ne-prose ul,\n.ne-prose ol { padding-left: 1.5em; }\n\n.ne-prose img.ne-img,\n.ne-prose img {\n  max-width: 100%;\n  height: auto;\n  border-radius: var(--ne-radius);\n  display: block;\n  margin: 8px 0;\n}\n\n/* File attachment chip (Excel/PDF/Word/etc. linked into the memo). The\n   underlying anchor stays a real <a target="_blank">, so click handling\n   is the browser\'s responsibility \u2014 no JS hook needed. */\n.ne-prose .ne-file {\n  display: inline-flex;\n  align-items: center;\n  gap: 8px;\n  margin: 4px 2px;\n  padding: 6px 10px;\n  background: var(--ne-surface);\n  border: 1px solid var(--ne-border);\n  border-radius: var(--ne-radius);\n  color: var(--ne-text);\n  text-decoration: none;\n  font-size: var(--ne-font-size);\n  line-height: 1.3;\n  max-width: 100%;\n  cursor: pointer;\n  user-select: none;\n}\n.ne-prose .ne-file:hover {\n  background: var(--ne-accent-soft);\n  border-color: var(--ne-accent);\n}\n.ne-prose .ne-file-ic {\n  flex-shrink: 0;\n  font-size: 1.15em;\n  line-height: 1;\n}\n.ne-prose .ne-file-name {\n  overflow: hidden;\n  text-overflow: ellipsis;\n  white-space: nowrap;\n  min-width: 0;\n  flex: 0 1 auto;\n  max-width: 32em;\n}\n.ne-prose .ne-file-status {\n  flex-shrink: 0;\n  font-size: 11px;\n  color: var(--ne-muted);\n  margin-left: 4px;\n}\n/* Uploading state: dimmed + non-clickable while the host upload is in\n   flight. Removed when the placeholder is swapped for the real chip. */\n.ne-prose .ne-file--uploading {\n  opacity: 0.6;\n  cursor: progress;\n  pointer-events: none;\n}\n\n/* Todo */\n.ne-prose .ne-todo {\n  display: flex;\n  align-items: flex-start;\n  gap: 8px;\n  padding: 2px 0;\n}\n.ne-prose .ne-todo-cb {\n  margin-top: 4px;\n  flex-shrink: 0;\n  cursor: pointer;\n}\n.ne-prose .ne-todo-txt { flex: 1; min-width: 0; }\n.ne-prose .ne-todo-txt.done {\n  text-decoration: line-through;\n  color: var(--ne-muted);\n}\n\n/* Callout */\n.ne-prose .ne-callout {\n  display: flex;\n  gap: 8px;\n  padding: 8px 12px;\n  background: var(--ne-accent-soft);\n  border-left: 3px solid var(--ne-accent);\n  border-radius: var(--ne-radius);\n}\n.ne-prose .ne-callout-ic {\n  flex-shrink: 0;\n  font-size: 1.1em;\n  line-height: 1.5;\n}\n.ne-prose .ne-callout-body { flex: 1; min-width: 0; }\n.ne-prose .ne-callout-body > * { margin: 0; }\n.ne-prose .ne-callout-body > * + * { margin-top: 6px; }\n\n/* Tables */\n.ne-prose .ne-table-wrap {\n  position: relative;\n  overflow-x: auto;\n  margin: 8px 0;\n  /* leave room on the right + below for the hover "+" edge buttons so\n     they don\'t clip against the next block / outer overflow */\n  padding-right: 16px;\n  padding-bottom: 14px;\n}\n.ne-prose .ne-table {\n  border-collapse: collapse;\n  width: max-content;\n  min-width: 240px;\n}\n.ne-prose .ne-table td,\n.ne-prose .ne-table th {\n  border: 1px solid var(--ne-border);\n  padding: 4px 8px;\n  min-width: 60px;\n  vertical-align: top;\n  outline: none;\n}\n.ne-content .ne-table td:focus { background: var(--ne-accent-soft); }\n.ne-prose .ne-table th { background: var(--ne-surface); font-weight: 600; }\n\n/* Hover "+" buttons to grow the table.\n   Hidden by default, fade in when the wrap is hovered. */\n.ne-prose .ne-table-add {\n  position: absolute;\n  appearance: none;\n  background: var(--ne-surface);\n  border: 1px solid var(--ne-border);\n  color: var(--ne-muted);\n  font-size: 12px;\n  line-height: 1;\n  padding: 0;\n  cursor: pointer;\n  opacity: 0;\n  transition: opacity 120ms ease, background 120ms ease, color 120ms ease;\n  border-radius: var(--ne-radius);\n}\n.ne-prose .ne-table-wrap:hover .ne-table-add { opacity: 1; }\n.ne-prose .ne-table-add:hover {\n  background: var(--ne-accent-soft);\n  color: var(--ne-accent);\n  border-color: var(--ne-accent);\n}\n.ne-prose .ne-table-add-row {\n  left: 0;\n  right: 16px;\n  bottom: 0;\n  height: 12px;\n}\n.ne-prose .ne-table-add-col {\n  top: 0;\n  bottom: 14px;\n  right: 0;\n  width: 12px;\n}\n\n/* Right-click context menu (row / column ops) */\n.ne-table-menu {\n  position: fixed;\n  z-index: var(--ne-z-floating);\n  background: var(--ne-bg);\n  color: var(--ne-text);\n  border: 1px solid var(--ne-border-strong);\n  border-radius: var(--ne-radius-lg);\n  box-shadow: var(--ne-shadow);\n  padding: 4px;\n  min-width: 200px;\n  display: flex;\n  flex-direction: column;\n  font-size: var(--ne-font-size);\n}\n.ne-table-menu-item {\n  appearance: none;\n  background: transparent;\n  border: 0;\n  text-align: left;\n  padding: 6px 12px;\n  cursor: pointer;\n  border-radius: var(--ne-radius);\n  font-family: inherit;\n  font-size: inherit;\n  color: var(--ne-text);\n  line-height: 1.4;\n}\n.ne-table-menu-item:hover { background: var(--ne-accent-soft); }\n.ne-table-menu-sep {\n  height: 1px;\n  margin: 4px 6px;\n  background: var(--ne-border);\n}\n\n/* \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 Floating widgets \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 */\n\n/* Drag handle (viewport-fixed so it floats above any host stacking context) */\n.ne-drag-handle {\n  position: fixed;\n  width: 18px;\n  align-items: center;\n  justify-content: center;\n  color: var(--ne-faint);\n  cursor: grab;\n  border-radius: var(--ne-radius);\n  background: transparent;\n  z-index: var(--ne-z-floating);\n  user-select: none;\n}\n.ne-drag-handle:hover {\n  background: var(--ne-surface);\n  color: var(--ne-muted);\n}\n.ne-drag-handle:active { cursor: grabbing; }\n\n.ne-block-dragging { opacity: 0.4; }\n\n.ne-drop-line {\n  height: 2px;\n  background: var(--ne-accent);\n  margin: 1px 0;\n  border-radius: 1px;\n  pointer-events: none;\n}\n\n/* Slash menu */\n.ne-slash {\n  position: fixed;\n  z-index: var(--ne-z-floating);\n  display: none;\n  width: 280px;\n  max-height: 360px;\n  overflow-y: auto;\n  background: var(--ne-bg);\n  color: var(--ne-text);\n  border: 1px solid var(--ne-border-strong);\n  border-radius: var(--ne-radius-lg);\n  box-shadow: var(--ne-shadow);\n  padding: 4px;\n  font-size: var(--ne-font-size);\n  line-height: 1.4;\n}\n.ne-slash.on { display: block; }\n.ne-slash-section {\n  padding: 6px 8px 2px;\n  font-size: 10px;\n  font-weight: 600;\n  text-transform: uppercase;\n  letter-spacing: 0.05em;\n  color: var(--ne-faint);\n}\n.ne-slash-item {\n  display: flex;\n  align-items: center;\n  gap: 8px;\n  padding: 6px 8px;\n  border-radius: var(--ne-radius);\n  cursor: pointer;\n}\n.ne-slash-item:hover,\n.ne-slash-item.sel { background: var(--ne-accent-soft); }\n\n.ne-slash-icon {\n  width: 24px;\n  height: 24px;\n  flex-shrink: 0;\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  font-size: 12px;\n  font-weight: 600;\n  color: var(--ne-text);\n  background: var(--ne-surface);\n  border: 1px solid var(--ne-border);\n  border-radius: var(--ne-radius);\n}\n.ne-slash-body { flex: 1; min-width: 0; }\n.ne-slash-name { font-size: var(--ne-font-size); color: var(--ne-text); line-height: 1.2; }\n.ne-slash-desc { font-size: 11px; color: var(--ne-muted); margin-top: 1px; }\n.ne-slash-kbd {\n  flex-shrink: 0;\n  font-family: var(--ne-mono);\n  font-size: 10px;\n  color: var(--ne-muted);\n  background: var(--ne-surface);\n  border: 1px solid var(--ne-border);\n  border-radius: 2px;\n  padding: 1px 5px;\n}\n\n/* Floating selection toolbar */\n.ne-ftb {\n  position: fixed;\n  z-index: var(--ne-z-floating);\n  display: none;\n  transform: translateX(-50%);\n  padding: 2px;\n  background: var(--ne-bg);\n  border: 1px solid var(--ne-border-strong);\n  border-radius: var(--ne-radius);\n  box-shadow: var(--ne-shadow);\n  gap: 1px;\n}\n.ne-ftb.on { display: flex; }\n.ne-ftb-b {\n  appearance: none;\n  background: transparent;\n  border: 0;\n  padding: 4px 8px;\n  cursor: pointer;\n  font-size: var(--ne-font-size);\n  color: var(--ne-text);\n  border-radius: 2px;\n  line-height: 1;\n}\n.ne-ftb-b:hover { background: var(--ne-surface); }\n';
+  var editor_default = '/* ============================================================\n   note-editor \u2014 drop-in styles\n   ============================================================\n   - All selectors are scoped to `.ne-editor` (the editor root) or\n     `.ne-prose` (for read-only rendering of markdown output).\n   - Floating widgets (.ne-slash, .ne-ftb, .ne-drag-handle) attach\n     to document.body, so they\'re styled at the top level.\n   - Theme via CSS variables with sensible fallbacks. Override them\n     by setting --ne-* on .ne-editor (or any ancestor) in your app.\n   ============================================================ */\n\n.ne-editor,\n.ne-prose,\n.ne-slash,\n.ne-ftb,\n.ne-drag-handle {\n  --ne-bg:           var(--ne-override-bg,           #ffffff);\n  --ne-text:         var(--ne-override-text,         #1f1f1f);\n  --ne-muted:        var(--ne-override-muted,        #6b6b6b);\n  --ne-faint:        var(--ne-override-faint,        #a8a39a);\n  --ne-surface:      var(--ne-override-surface,      #f5f5f3);\n  --ne-border:       var(--ne-override-border,       rgba(0, 0, 0, 0.10));\n  --ne-border-strong:var(--ne-override-border-strong,rgba(0, 0, 0, 0.18));\n  --ne-accent:       var(--ne-override-accent,       #4a7c59);\n  --ne-accent-soft:  var(--ne-override-accent-soft,  rgba(74, 124, 89, 0.16));\n  --ne-radius:       var(--ne-override-radius,       4px);\n  --ne-radius-lg:    var(--ne-override-radius-lg,    6px);\n  --ne-font-size:    var(--ne-override-font-size,    13px);\n  --ne-line-height:  var(--ne-override-line-height,  1.65);\n  --ne-mono:         var(--ne-override-mono,         ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace);\n  --ne-shadow:       var(--ne-override-shadow,       0 8px 24px rgba(0, 0, 0, 0.12));\n  /* Inline `<code>` text colour. Code blocks (<pre><code>) inherit the\n     normal text colour so syntax-highlighted snippets aren\'t tinted. */\n  --ne-inline-code:  var(--ne-override-inline-code,  #c7254e);\n  /* Floating widgets sit at near-max z so they punch through host overlays\n     (e.g. SharePoint UI, fixed-positioned modals). Override with\n     --ne-override-z-floating if your host needs a different stacking. */\n  --ne-z-floating:   var(--ne-override-z-floating,   2147483647);\n}\n\n/* \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 Editor root + content \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 */\n\n.ne-editor {\n  position: relative;\n  min-height: 80px;\n}\n\n.ne-content {\n  position: relative;\n  min-height: 80px;\n  padding: 8px 12px;\n  background: var(--ne-bg);\n  color: var(--ne-text);\n  border: 1px solid var(--ne-border);\n  border-radius: var(--ne-radius);\n  font-size: var(--ne-font-size);\n  line-height: var(--ne-line-height);\n  outline: none;\n  white-space: pre-wrap;\n  word-break: break-word;\n  cursor: text;\n  /* Reserve a small left gutter so the floating drag handle has room to sit\n     just outside the editor border without clipping. */\n  margin-left: 24px;\n}\n.ne-content:focus { border-color: var(--ne-accent); }\n\n/* Placeholder \u2014 shown only while the editor is empty.\n   `<br>` (used by browsers in empty contenteditable paragraphs) is a void\n   element and ignores ::before, so the editor toggles `.ne-empty` itself\n   via JS to drive this rule. */\n.ne-content.ne-empty::before {\n  content: attr(data-placeholder);\n  position: absolute;\n  top: 8px;\n  left: 12px;\n  color: var(--ne-faint);\n  pointer-events: none;\n  white-space: nowrap;\n  overflow: hidden;\n  max-width: calc(100% - 24px);\n  text-overflow: ellipsis;\n}\n\n/* \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 Prose (live + read-only) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 */\n\n.ne-prose > * { margin: 0; }\n.ne-prose > * + * { margin-top: 8px; }\n.ne-prose h1 { font-size: 1.6em;  font-weight: 600; line-height: 1.3; }\n.ne-prose h2 { font-size: 1.35em; font-weight: 600; line-height: 1.3; }\n.ne-prose h3 { font-size: 1.15em; font-weight: 600; line-height: 1.3; }\n.ne-prose blockquote {\n  padding: 0 12px;\n  border-left: 3px solid var(--ne-accent);\n  color: var(--ne-muted);\n}\n.ne-prose pre {\n  padding: 8px 12px;\n  background: var(--ne-surface);\n  border: 1px solid var(--ne-border);\n  border-radius: var(--ne-radius);\n  font-family: var(--ne-mono);\n  font-size: 12px;\n  white-space: pre;\n  overflow-x: auto;\n}\n.ne-prose code {\n  padding: 1px 4px;\n  background: var(--ne-surface);\n  border: 1px solid var(--ne-border);\n  border-radius: 3px;\n  font-family: var(--ne-mono);\n  font-size: 0.92em;\n  color: var(--ne-inline-code);\n}\n/* Code block content stays at normal text colour \u2014 only inline `<code>`\n   gets the accent. */\n.ne-prose pre code {\n  padding: 0;\n  background: transparent;\n  border: 0;\n  color: inherit;\n}\n.ne-prose hr {\n  border: 0;\n  border-top: 1px solid var(--ne-border-strong);\n  margin: 10px 0;\n}\n.ne-prose ul,\n.ne-prose ol { padding-left: 1.5em; }\n\n.ne-prose img.ne-img,\n.ne-prose img {\n  max-width: 100%;\n  height: auto;\n  border-radius: var(--ne-radius);\n  display: block;\n  margin: 8px 0;\n}\n\n/* File attachment chip (Excel/PDF/Word/etc. linked into the memo). The\n   underlying anchor stays a real <a target="_blank">, so click handling\n   is the browser\'s responsibility \u2014 no JS hook needed. */\n.ne-prose .ne-file {\n  display: inline-flex;\n  align-items: center;\n  gap: 8px;\n  margin: 4px 2px;\n  padding: 6px 10px;\n  background: var(--ne-surface);\n  border: 1px solid var(--ne-border);\n  border-radius: var(--ne-radius);\n  color: var(--ne-text);\n  text-decoration: none;\n  font-size: var(--ne-font-size);\n  line-height: 1.3;\n  max-width: 100%;\n  cursor: pointer;\n  user-select: none;\n}\n.ne-prose .ne-file:hover {\n  background: var(--ne-accent-soft);\n  border-color: var(--ne-accent);\n}\n.ne-prose .ne-file-ic {\n  flex-shrink: 0;\n  font-size: 1.15em;\n  line-height: 1;\n}\n.ne-prose .ne-file-name {\n  overflow: hidden;\n  text-overflow: ellipsis;\n  white-space: nowrap;\n  min-width: 0;\n  flex: 0 1 auto;\n  max-width: 32em;\n}\n.ne-prose .ne-file-status {\n  flex-shrink: 0;\n  font-size: 11px;\n  color: var(--ne-muted);\n  margin-left: 4px;\n}\n/* Uploading state: dimmed + non-clickable while the host upload is in\n   flight. Removed when the placeholder is swapped for the real chip. */\n.ne-prose .ne-file--uploading {\n  opacity: 0.6;\n  cursor: progress;\n  pointer-events: none;\n}\n\n/* Todo */\n.ne-prose .ne-todo {\n  display: flex;\n  align-items: flex-start;\n  gap: 8px;\n  padding: 2px 0;\n}\n.ne-prose .ne-todo-cb {\n  margin-top: 4px;\n  flex-shrink: 0;\n  cursor: pointer;\n}\n.ne-prose .ne-todo-txt { flex: 1; min-width: 0; }\n.ne-prose .ne-todo-txt.done {\n  text-decoration: line-through;\n  color: var(--ne-muted);\n}\n\n/* Callout */\n.ne-prose .ne-callout {\n  display: flex;\n  gap: 8px;\n  padding: 8px 12px;\n  background: var(--ne-accent-soft);\n  border-left: 3px solid var(--ne-accent);\n  border-radius: var(--ne-radius);\n}\n.ne-prose .ne-callout-ic {\n  flex-shrink: 0;\n  font-size: 1.1em;\n  line-height: 1.5;\n}\n.ne-prose .ne-callout-body { flex: 1; min-width: 0; }\n.ne-prose .ne-callout-body > * { margin: 0; }\n.ne-prose .ne-callout-body > * + * { margin-top: 6px; }\n\n/* Tables */\n.ne-prose .ne-table-wrap {\n  position: relative;\n  overflow-x: auto;\n  margin: 8px 0;\n  /* leave room on the right + below for the hover "+" edge buttons so\n     they don\'t clip against the next block / outer overflow */\n  padding-right: 16px;\n  padding-bottom: 14px;\n}\n.ne-prose .ne-table {\n  border-collapse: collapse;\n  width: max-content;\n  min-width: 240px;\n}\n.ne-prose .ne-table td,\n.ne-prose .ne-table th {\n  border: 1px solid var(--ne-border);\n  padding: 4px 8px;\n  min-width: 60px;\n  vertical-align: top;\n  outline: none;\n}\n.ne-content .ne-table td:focus { background: var(--ne-accent-soft); }\n.ne-prose .ne-table th { background: var(--ne-surface); font-weight: 600; }\n\n/* Column resize handle \u2014 6px-wide drag strip on the right edge of each\n   cell (except the last column). Invisible by default; the accent rail\n   shows on hover or while actively dragging. */\n.ne-prose .ne-table td,\n.ne-prose .ne-table th { position: relative; }\n.ne-prose .ne-table-resize {\n  position: absolute;\n  top: 0;\n  right: -3px;\n  width: 6px;\n  height: 100%;\n  cursor: col-resize;\n  z-index: 1;\n  user-select: none;\n}\n.ne-prose .ne-table-resize::after {\n  content: \'\';\n  position: absolute;\n  left: 2px;\n  top: 2px;\n  bottom: 2px;\n  width: 2px;\n  border-radius: 1px;\n  background: transparent;\n  transition: background 120ms ease;\n}\n.ne-prose .ne-table-resize:hover::after,\n.ne-prose .ne-table-resize.dragging::after {\n  background: var(--ne-accent);\n}\n\n/* Hover "+" buttons to grow the table.\n   Hidden by default, fade in when the wrap is hovered. */\n.ne-prose .ne-table-add {\n  position: absolute;\n  appearance: none;\n  background: var(--ne-surface);\n  border: 1px solid var(--ne-border);\n  color: var(--ne-muted);\n  font-size: 12px;\n  line-height: 1;\n  padding: 0;\n  cursor: pointer;\n  opacity: 0;\n  transition: opacity 120ms ease, background 120ms ease, color 120ms ease;\n  border-radius: var(--ne-radius);\n}\n.ne-prose .ne-table-wrap:hover .ne-table-add { opacity: 1; }\n.ne-prose .ne-table-add:hover {\n  background: var(--ne-accent-soft);\n  color: var(--ne-accent);\n  border-color: var(--ne-accent);\n}\n.ne-prose .ne-table-add-row {\n  left: 0;\n  right: 16px;\n  bottom: 0;\n  height: 12px;\n}\n.ne-prose .ne-table-add-col {\n  top: 0;\n  bottom: 14px;\n  right: 0;\n  width: 12px;\n}\n\n/* Right-click context menu (row / column ops) */\n.ne-table-menu {\n  position: fixed;\n  z-index: var(--ne-z-floating);\n  background: var(--ne-bg);\n  color: var(--ne-text);\n  border: 1px solid var(--ne-border-strong);\n  border-radius: var(--ne-radius-lg);\n  box-shadow: var(--ne-shadow);\n  padding: 4px;\n  min-width: 200px;\n  display: flex;\n  flex-direction: column;\n  font-size: var(--ne-font-size);\n}\n.ne-table-menu-item {\n  appearance: none;\n  background: transparent;\n  border: 0;\n  text-align: left;\n  padding: 6px 12px;\n  cursor: pointer;\n  border-radius: var(--ne-radius);\n  font-family: inherit;\n  font-size: inherit;\n  color: var(--ne-text);\n  line-height: 1.4;\n}\n.ne-table-menu-item:hover { background: var(--ne-accent-soft); }\n.ne-table-menu-sep {\n  height: 1px;\n  margin: 4px 6px;\n  background: var(--ne-border);\n}\n\n/* \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 Floating widgets \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 */\n\n/* Drag handle (viewport-fixed so it floats above any host stacking context) */\n.ne-drag-handle {\n  position: fixed;\n  width: 18px;\n  align-items: center;\n  justify-content: center;\n  color: var(--ne-faint);\n  cursor: grab;\n  border-radius: var(--ne-radius);\n  background: transparent;\n  z-index: var(--ne-z-floating);\n  user-select: none;\n}\n.ne-drag-handle:hover {\n  background: var(--ne-surface);\n  color: var(--ne-muted);\n}\n.ne-drag-handle:active { cursor: grabbing; }\n\n.ne-block-dragging { opacity: 0.4; }\n\n.ne-drop-line {\n  height: 2px;\n  background: var(--ne-accent);\n  margin: 1px 0;\n  border-radius: 1px;\n  pointer-events: none;\n}\n\n/* Slash menu */\n.ne-slash {\n  position: fixed;\n  z-index: var(--ne-z-floating);\n  display: none;\n  width: 280px;\n  max-height: 360px;\n  overflow-y: auto;\n  background: var(--ne-bg);\n  color: var(--ne-text);\n  border: 1px solid var(--ne-border-strong);\n  border-radius: var(--ne-radius-lg);\n  box-shadow: var(--ne-shadow);\n  padding: 4px;\n  font-size: var(--ne-font-size);\n  line-height: 1.4;\n}\n.ne-slash.on { display: block; }\n.ne-slash-section {\n  padding: 6px 8px 2px;\n  font-size: 10px;\n  font-weight: 600;\n  text-transform: uppercase;\n  letter-spacing: 0.05em;\n  color: var(--ne-faint);\n}\n.ne-slash-item {\n  display: flex;\n  align-items: center;\n  gap: 8px;\n  padding: 6px 8px;\n  border-radius: var(--ne-radius);\n  cursor: pointer;\n}\n.ne-slash-item:hover,\n.ne-slash-item.sel { background: var(--ne-accent-soft); }\n\n.ne-slash-icon {\n  width: 24px;\n  height: 24px;\n  flex-shrink: 0;\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  font-size: 12px;\n  font-weight: 600;\n  color: var(--ne-text);\n  background: var(--ne-surface);\n  border: 1px solid var(--ne-border);\n  border-radius: var(--ne-radius);\n}\n.ne-slash-body { flex: 1; min-width: 0; }\n.ne-slash-name { font-size: var(--ne-font-size); color: var(--ne-text); line-height: 1.2; }\n.ne-slash-desc { font-size: 11px; color: var(--ne-muted); margin-top: 1px; }\n.ne-slash-kbd {\n  flex-shrink: 0;\n  font-family: var(--ne-mono);\n  font-size: 10px;\n  color: var(--ne-muted);\n  background: var(--ne-surface);\n  border: 1px solid var(--ne-border);\n  border-radius: 2px;\n  padding: 1px 5px;\n}\n\n/* Floating selection toolbar */\n.ne-ftb {\n  position: fixed;\n  z-index: var(--ne-z-floating);\n  display: none;\n  transform: translateX(-50%);\n  padding: 2px;\n  background: var(--ne-bg);\n  border: 1px solid var(--ne-border-strong);\n  border-radius: var(--ne-radius);\n  box-shadow: var(--ne-shadow);\n  gap: 1px;\n}\n.ne-ftb.on { display: flex; }\n.ne-ftb-b {\n  appearance: none;\n  background: transparent;\n  border: 0;\n  padding: 4px 8px;\n  cursor: pointer;\n  font-size: var(--ne-font-size);\n  color: var(--ne-text);\n  border-radius: 2px;\n  line-height: 1;\n}\n.ne-ftb-b:hover { background: var(--ne-surface); }\n';
 
   // src/api/repo.ts
   var _repo = null;
@@ -4995,6 +4995,16 @@ var Spira = (() => {
       "| " + sep.join(" | ") + " |",
       ...body.map((r) => "| " + r.join(" | ") + " |")
     ];
+    const cg = table.querySelector("colgroup");
+    if (cg) {
+      const widths = Array.from(cg.querySelectorAll("col")).map((c) => {
+        const w = parseInt(c.style.width || "", 10);
+        return Number.isFinite(w) && w > 0 ? w : 0;
+      });
+      if (widths.some((w) => w > 0)) {
+        lines.push(`<!--ne-cols:${widths.join(",")}-->`);
+      }
+    }
     return lines.join("\n");
   }
   function htmlToMarkdown(html2) {
@@ -5028,11 +5038,18 @@ var Spira = (() => {
     out = out.replace(/  \n/g, "<br>");
     return out;
   }
-  function tableMdToHtml(lines) {
+  function tableMdToHtml(lines, widths = []) {
     const split = (line) => line.replace(/^\||\|$/g, "").split(/(?<!\\)\|/).map((c) => c.trim().replace(/\\\|/g, "|"));
     const head = split(lines[0] ?? "");
     const body = lines.slice(2).map(split);
-    let html2 = '<div class="ne-table-wrap"><table class="ne-table"><tbody>';
+    let html2 = '<div class="ne-table-wrap"><table class="ne-table">';
+    html2 += "<colgroup>";
+    for (let i = 0; i < head.length; i++) {
+      const w = widths[i] ?? 0;
+      html2 += w > 0 ? `<col style="width:${w}px"/>` : "<col/>";
+    }
+    html2 += "</colgroup>";
+    html2 += "<tbody>";
     html2 += "<tr>";
     for (const h of head) html2 += `<td>${inlineMdToHtml(h)}</td>`;
     html2 += "</tr>";
@@ -5085,7 +5102,19 @@ var Spira = (() => {
           tableLines.push(lines[i]);
           i++;
         }
-        out.push(tableMdToHtml(tableLines));
+        let widths = [];
+        const nextLine = lines[i];
+        if (nextLine) {
+          const m = /^<!--ne-cols:([\d,]*)-->$/.exec(nextLine);
+          if (m) {
+            widths = m[1].split(",").map((s) => {
+              const n = parseInt(s, 10);
+              return Number.isFinite(n) && n > 0 ? n : 0;
+            });
+            i++;
+          }
+        }
+        out.push(tableMdToHtml(tableLines, widths));
         continue;
       }
       if (line.startsWith(">")) {
@@ -5661,6 +5690,9 @@ var Spira = (() => {
       wrap.contentEditable = "false";
       const tbl = document.createElement("table");
       tbl.className = "ne-table";
+      const colgroup = document.createElement("colgroup");
+      for (let c = 0; c < cols; c++) colgroup.appendChild(document.createElement("col"));
+      tbl.appendChild(colgroup);
       const tbody = document.createElement("tbody");
       for (let r = 0; r < rows; r++) {
         const tr = document.createElement("tr");
@@ -5680,6 +5712,8 @@ var Spira = (() => {
     function attachTableHandlers(wrap) {
       if (wrap.dataset.neWired === "1") {
         ensureTableEdgeButtons(wrap);
+        const tblEl = wrap.querySelector("table.ne-table");
+        if (tblEl) ensureResizeHandles(tblEl);
         return;
       }
       wrap.dataset.neWired = "1";
@@ -5742,6 +5776,7 @@ var Spira = (() => {
         showTableContextMenu(tbl, cell, e.clientX, e.clientY);
       });
       ensureTableEdgeButtons(wrap);
+      ensureResizeHandles(tbl);
     }
     function moveCell(cell, dir) {
       const tr = cell.parentElement;
@@ -5827,6 +5862,8 @@ var Spira = (() => {
       const newTr = document.createElement("tr");
       for (let i = 0; i < cols; i++) newTr.appendChild(makeEmptyCell());
       tr.parentElement.insertBefore(newTr, tr.nextSibling);
+      const tbl = tr.closest("table.ne-table");
+      if (tbl) ensureResizeHandles(tbl);
       markDirty();
     }
     function insertRowAt(tbl, atIdx) {
@@ -5836,6 +5873,7 @@ var Spira = (() => {
       for (let i = 0; i < cols; i++) newTr.appendChild(makeEmptyCell());
       if (atIdx >= tbody.rows.length) tbody.appendChild(newTr);
       else tbody.insertBefore(newTr, tbody.rows[atIdx]);
+      ensureResizeHandles(tbl);
       markDirty();
     }
     function insertColAt(tbl, atIdx) {
@@ -5844,6 +5882,11 @@ var Spira = (() => {
         if (atIdx >= tr.cells.length) tr.appendChild(td);
         else tr.insertBefore(td, tr.cells[atIdx]);
       }
+      const cg = ensureColgroup(tbl);
+      const newCol = document.createElement("col");
+      if (atIdx >= cg.children.length) cg.appendChild(newCol);
+      else cg.insertBefore(newCol, cg.children[atIdx]);
+      ensureResizeHandles(tbl);
       markDirty();
     }
     function deleteRowAt(tbl, rowIdx) {
@@ -5858,6 +5901,9 @@ var Spira = (() => {
       for (const tr of Array.from(tbl.rows)) {
         if (colIdx >= 0 && colIdx < tr.cells.length) tr.cells[colIdx].remove();
       }
+      const cg = ensureColgroup(tbl);
+      if (cg.children[colIdx]) cg.children[colIdx].remove();
+      ensureResizeHandles(tbl);
       markDirty();
     }
     function focusCell(cell) {
@@ -5900,6 +5946,83 @@ var Spira = (() => {
         });
         wrap.appendChild(btn);
       }
+    }
+    function ensureColgroup(tbl) {
+      let cg = tbl.querySelector("colgroup");
+      const cellCount = colCountOf(tbl);
+      if (!cg) {
+        cg = document.createElement("colgroup");
+        for (let i = 0; i < cellCount; i++) cg.appendChild(document.createElement("col"));
+        tbl.insertBefore(cg, tbl.firstChild);
+      } else {
+        while (cg.children.length < cellCount) cg.appendChild(document.createElement("col"));
+        while (cg.children.length > cellCount) cg.lastElementChild.remove();
+      }
+      return cg;
+    }
+    function ensureResizeHandles(tbl) {
+      ensureColgroup(tbl);
+      for (const tr of Array.from(tbl.rows)) {
+        for (let i = 0; i < tr.cells.length - 1; i++) {
+          const cell = tr.cells[i];
+          if (cell.querySelector(":scope > .ne-table-resize")) continue;
+          cell.style.position = cell.style.position || "relative";
+          const handle2 = document.createElement("span");
+          handle2.className = "ne-table-resize";
+          handle2.contentEditable = "false";
+          handle2.setAttribute("aria-hidden", "true");
+          wireResizeHandle(handle2, tbl, i);
+          cell.appendChild(handle2);
+        }
+      }
+    }
+    function wireResizeHandle(handle2, tbl, colIdx) {
+      handle2.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const cg = ensureColgroup(tbl);
+        const cols = Array.from(cg.children);
+        const col = cols[colIdx];
+        if (!col) return;
+        cols.forEach((c, idx) => {
+          if (idx === colIdx) return;
+          if (!c.style.width) {
+            const refCell2 = tbl.rows[0]?.cells[idx];
+            if (refCell2) c.style.width = `${Math.round(refCell2.getBoundingClientRect().width)}px`;
+          }
+        });
+        const startX = e.clientX;
+        const refCell = tbl.rows[0]?.cells[colIdx];
+        const startW = refCell ? refCell.getBoundingClientRect().width : 100;
+        const prevCursor = document.body.style.cursor;
+        const prevSelect = document.body.style.userSelect;
+        document.body.style.cursor = "col-resize";
+        document.body.style.userSelect = "none";
+        handle2.classList.add("dragging");
+        const onMove = (ev) => {
+          const dx = ev.clientX - startX;
+          const newW = Math.max(40, Math.round(startW + dx));
+          col.style.width = `${newW}px`;
+        };
+        const onUp = () => {
+          document.removeEventListener("mousemove", onMove);
+          document.removeEventListener("mouseup", onUp);
+          document.body.style.cursor = prevCursor;
+          document.body.style.userSelect = prevSelect;
+          handle2.classList.remove("dragging");
+          markDirty();
+        };
+        document.addEventListener("mousemove", onMove);
+        document.addEventListener("mouseup", onUp);
+      });
+      handle2.addEventListener("dblclick", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const cg = ensureColgroup(tbl);
+        const col = cg.children[colIdx];
+        if (col) col.style.width = "";
+        markDirty();
+      });
     }
     function showTableContextMenu(tbl, cell, clientX, clientY) {
       document.querySelectorAll(".ne-table-menu").forEach((n) => n.remove());
@@ -8471,15 +8594,15 @@ var Spira = (() => {
       title: "\u30AF\u30EA\u30C3\u30AF\u3067\u30B3\u30D4\u30FC",
       onclick: async () => {
         try {
-          await navigator.clipboard.writeText("0.0.1-2a1183a+ (2026-05-15T01:22:43Z)");
+          await navigator.clipboard.writeText("0.0.1-42ea49b+ (2026-05-15T01:31:21Z)");
           buildLabel.textContent = "\u2713 \u30B3\u30D4\u30FC\u3057\u307E\u3057\u305F";
           setTimeout(() => {
-            buildLabel.textContent = `build: ${"0.0.1-2a1183a+ (2026-05-15T01:22:43Z)"}`;
+            buildLabel.textContent = `build: ${"0.0.1-42ea49b+ (2026-05-15T01:31:21Z)"}`;
           }, 1200);
         } catch {
         }
       }
-    }, [`build: ${"0.0.1-2a1183a+ (2026-05-15T01:22:43Z)"}`]);
+    }, [`build: ${"0.0.1-42ea49b+ (2026-05-15T01:31:21Z)"}`]);
     const menu = el("div", {
       class: "spira-menu spira-settings-menu",
       style: "position:fixed;z-index:var(--z-modal);min-width:280px"
@@ -9007,7 +9130,7 @@ var Spira = (() => {
       setState({ errorBanner: `\u521D\u671F\u5316\u306B\u5931\u6557\u3057\u307E\u3057\u305F: ${msg}` });
       toast(root2, `\u521D\u671F\u5316\u30A8\u30E9\u30FC: ${msg}`, "error");
     }
-    console.log(`[spira] build: ${"0.0.1-2a1183a+ (2026-05-15T01:22:43Z)"}`);
+    console.log(`[spira] build: ${"0.0.1-42ea49b+ (2026-05-15T01:31:21Z)"}`);
     console.log(`[spira] repo mode: ${getRepoMode()}`);
   }
   async function doSync(root2, silent = false) {
