@@ -8,6 +8,41 @@
 // can style both the live editor surface and any read-only renderer
 // (just apply `.ne-prose` to the host's display container).
 
+// ---------- SharePoint Office for the Web rewriter ----------
+
+/** Rewrite a SharePoint direct-file URL into the Office for the Web
+ *  viewer URL so clicking the chip opens Excel / Word / PowerPoint
+ *  Online in a new tab instead of triggering a download.
+ *
+ *  SP serves direct attachment URLs with `Content-Disposition:
+ *  attachment` for Office content types, which the browser interprets
+ *  as a download. The viewer URLs `https://<tenant>/:x:/r/<path>` (or
+ *  `:w:`, `:p:`) ask SP to render the file in Office for the Web.
+ *
+ *  Idempotent — re-running on an already-rewritten URL is a no-op.
+ *  Returns the input unchanged for non-Office extensions, non-HTTP
+ *  URLs (e.g. mock data URLs), or unparseable input. */
+export function toOfficeViewerUrl(rawUrl: string, filename: string): string {
+  if (!rawUrl) return rawUrl;
+  const ext = (filename.toLowerCase().match(/\.([^.]+)$/)?.[1]) || '';
+  const officePrefix: Record<string, string> = {
+    xlsx: 'x', xls: 'x', xlsm: 'x', xlsb: 'x', csv: 'x',
+    docx: 'w', doc: 'w', docm: 'w', rtf: 'w',
+    pptx: 'p', ppt: 'p', pptm: 'p',
+  };
+  const prefix = officePrefix[ext];
+  if (!prefix) return rawUrl;
+  try {
+    const u = new URL(rawUrl);
+    if (!u.protocol.startsWith('http')) return rawUrl;
+    if (/^\/:[a-z]:\//.test(u.pathname)) return rawUrl; // already rewritten
+    const path = u.pathname.replace(/^\/+/, '');
+    return `${u.origin}/:${prefix}:/r/${path}${u.search}${u.hash}`;
+  } catch {
+    return rawUrl;
+  }
+}
+
 // ---------- HTML -> Markdown ----------
 
 const ESCAPE_RE = /([\\`*_{}\[\]()#+\-.!|])/g;
@@ -160,14 +195,16 @@ function inlineMdToHtml(s: string): string {
     if (m) {
       const icon = m[1];
       const name = m[2];
-      // No `download` attribute: we want the browser / SharePoint to
-      // decide how to open the file (Office Online for .xlsx/.docx/.pptx,
-      // native PDF viewer for .pdf, etc.). The editor itself adds a
-      // double-click handler that calls window.open() — single click is
-      // suppressed there to keep caret positioning predictable.
+      // Rewrite Office file URLs to Office for the Web so clicks open
+      // the file in Excel / Word / PowerPoint Online instead of
+      // downloading. Direct SP file URLs are served with
+      // Content-Disposition: attachment which the browser interprets
+      // as a download — the :x:/r/, :w:/r/, :p:/r/ prefixes are SP's
+      // documented hint to use the web viewer.
+      const viewerHref = toOfficeViewerUrl(h, name);
       const safe = name.replace(/"/g, '&quot;');
       return (
-        `<a class="ne-file" href="${h}" target="_blank" rel="noopener noreferrer" ` +
+        `<a class="ne-file" href="${viewerHref}" target="_blank" rel="noopener noreferrer" ` +
         `title="ダブルクリックで開く: ${safe}" contenteditable="false" data-ne-file="1">` +
         `<span class="ne-file-ic">${icon}</span>` +
         `<span class="ne-file-name">${name}</span></a>`

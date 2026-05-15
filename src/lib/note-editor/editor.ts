@@ -19,7 +19,7 @@
 //     to document.body so they position relative to the viewport, not
 //     the host's flex/grid layout.
 
-import { htmlToMarkdown, markdownToHtml, ensureBlockWrapped } from './markdown';
+import { htmlToMarkdown, markdownToHtml, ensureBlockWrapped, toOfficeViewerUrl } from './markdown';
 
 export interface NoteEditorOptions {
   /** Initial markdown content. */
@@ -476,7 +476,11 @@ export function createNoteEditor(opts: NoteEditorOptions = {}): NoteEditor {
   function buildFileChip(url: string, filename: string): HTMLAnchorElement {
     const a = document.createElement('a');
     a.className = 'ne-file';
-    a.href = url;
+    // Rewrite Office (Excel/Word/PowerPoint) URLs to the SP "Office for
+    // the Web" viewer endpoint so a click opens in the browser viewer
+    // instead of downloading. Other types and non-HTTP URLs are passed
+    // through unchanged.
+    a.href = toOfficeViewerUrl(url, filename);
     a.target = '_blank';
     a.rel = 'noopener noreferrer';
     a.title = `ダブルクリックで開く: ${filename}`;
@@ -1308,7 +1312,12 @@ export function createNoteEditor(opts: NoteEditorOptions = {}): NoteEditor {
     if (!target) return;
     e.preventDefault();
     const href = target.getAttribute('href') ?? '';
-    if (href) window.open(href, '_blank', 'noopener,noreferrer');
+    if (!href) return;
+    // Defensive: ensure Office URLs go through the viewer even if the
+    // chip's href somehow wasn't rewritten (e.g. legacy memos saved
+    // before the rewrite landed). toOfficeViewerUrl is idempotent.
+    const filename = target.querySelector('.ne-file-name')?.textContent ?? '';
+    window.open(toOfficeViewerUrl(href, filename), '_blank', 'noopener,noreferrer');
   });
 
   // ── Append-on-focus: when the editor gains focus, ensure the user can
