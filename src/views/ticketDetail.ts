@@ -435,20 +435,38 @@ function attachCollapseToggle(
     }
   };
 
+  const flipExpanded = (): void => {
+    if (expandedSet.has(id)) expandedSet.delete(id);
+    else expandedSet.add(id);
+    apply();
+    toggle.innerHTML = '';
+    toggle.appendChild(toggleLabel(expandedSet.has(id)));
+  };
+
   const toggle = el('button', {
     type: 'button',
     class: 'spira-th-toggle',
     onclick: (e: Event) => {
       e.preventDefault();
       e.stopPropagation();
-      if (expandedSet.has(id)) expandedSet.delete(id);
-      else expandedSet.add(id);
-      apply();
-      toggle.innerHTML = '';
-      toggle.appendChild(toggleLabel(expandedSet.has(id)));
+      flipExpanded();
     },
   }, [toggleLabel(expandedSet.has(id))]);
   card.appendChild(toggle);
+
+  // Same toggle on card double-click. We ignore dblclicks that originated
+  // on interactive children (buttons / links / form controls) and on the
+  // toggle button itself, and skip when the user is double-clicking to
+  // select a word in the body text — `getSelection().toString()` is the
+  // simplest signal that text was selected by the dblclick.
+  card.addEventListener('dblclick', (e: MouseEvent) => {
+    const target = e.target as Element | null;
+    if (target && target.closest('button, a, input, textarea, select, [contenteditable="true"]')) return;
+    const sel = window.getSelection();
+    if (sel && !sel.isCollapsed && sel.toString().length > 0) return;
+    e.preventDefault();
+    flipExpanded();
+  });
 
   // Apply collapse before mounting so the user never sees a flash of full height.
   apply();

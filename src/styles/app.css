@@ -1181,6 +1181,41 @@
 .spira-th-card-head svg { width: 14px; height: 14px; stroke: currentColor; fill: none; stroke-width: 1.7; }
 .spira-th-card-from { color: var(--ink); font-weight: 500; }
 .spira-th-card-body { font-size: var(--fs-md); line-height: 1.7; word-break: break-word; }
+/* HTML メールの段落/見出し/リストのマージンを復活 (上の .spira-root リセットで
+   全て margin:0 になっていたため、`<p>line1</p><p>line2</p>` の段落間が
+   潰れて改行が消えていた)。
+   インラインメモの編集領域 (.ne-prose / .ne-content) は独自に margin を
+   管理するので除外。 */
+#spira-root .spira-th-card-body p,
+#spira-root .spira-th-card-body h1,
+#spira-root .spira-th-card-body h2,
+#spira-root .spira-th-card-body h3,
+#spira-root .spira-th-card-body h4,
+#spira-root .spira-th-card-body h5,
+#spira-root .spira-th-card-body h6,
+#spira-root .spira-th-card-body ul,
+#spira-root .spira-th-card-body ol,
+#spira-root .spira-th-card-body blockquote,
+#spira-root .spira-th-card-body pre {
+  margin: 0.6em 0;
+}
+#spira-root .spira-th-card-body > *:first-child { margin-top: 0; }
+#spira-root .spira-th-card-body > *:last-child  { margin-bottom: 0; }
+/* メモの編集領域 (.ne-prose) はパッケージ側で margin を管理しているので
+   ここの復活ルールは適用しない (二重マージンを防ぐ) */
+#spira-root .spira-th-card-body.ne-prose p,
+#spira-root .spira-th-card-body.ne-prose h1,
+#spira-root .spira-th-card-body.ne-prose h2,
+#spira-root .spira-th-card-body.ne-prose h3,
+#spira-root .spira-th-card-body.ne-prose h4,
+#spira-root .spira-th-card-body.ne-prose h5,
+#spira-root .spira-th-card-body.ne-prose h6,
+#spira-root .spira-th-card-body.ne-prose ul,
+#spira-root .spira-th-card-body.ne-prose ol,
+#spira-root .spira-th-card-body.ne-prose blockquote,
+#spira-root .spira-th-card-body.ne-prose pre {
+  margin: 0;
+}
 #spira-root .spira-th-card-body[data-collapsed="true"] {
   position: relative !important;
   max-height: 6em !important; /* approx 3 lines */
