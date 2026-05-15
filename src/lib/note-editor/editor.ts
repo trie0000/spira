@@ -691,7 +691,12 @@ export function createNoteEditor(opts: NoteEditorOptions = {}): NoteEditor {
   }
 
   function attachTableHandlers(wrap: HTMLElement): void {
-    if (wrap.dataset.neWired === '1') return;
+    if (wrap.dataset.neWired === '1') {
+      // Already wired — but legacy tables may still be missing the edge
+      // buttons that we added later. Idempotently ensure they exist.
+      ensureTableEdgeButtons(wrap);
+      return;
+    }
     wrap.dataset.neWired = '1';
     const tbl = wrap.querySelector('table.ne-table') as HTMLTableElement | null;
     if (!tbl) return;
@@ -701,7 +706,12 @@ export function createNoteEditor(opts: NoteEditorOptions = {}): NoteEditor {
       if (ke.isComposing || ke.keyCode === 229) return;
       const cell = (e.target as HTMLElement).closest('td,th') as HTMLTableCellElement | null;
       if (!cell) return;
-      if (ke.key === 'Tab') { e.preventDefault(); moveCell(cell, ke.shiftKey ? -1 : 1); return; }
+
+      if (ke.key === 'Tab') {
+        e.preventDefault();
+        moveCell(cell, ke.shiftKey ? -1 : 1);
+        return;
+      }
       if (ke.key === 'Enter' && !ke.shiftKey && !ke.metaKey && !ke.ctrlKey) {
         e.preventDefault();
         const tr = cell.parentElement as HTMLTableRowElement;
@@ -710,8 +720,52 @@ export function createNoteEditor(opts: NoteEditorOptions = {}): NoteEditor {
         else moveDown(cell);
         return;
       }
+      // Arrow-key cell navigation — fires only when the caret reaches
+      // the visual edge of the cell so multi-line cell content (Shift+
+      // Enter inserts <br>) is still navigable line-by-line via the
+      // browser's default behavior.
+      if (ke.key === 'ArrowDown' && caretOnBottomLine(cell)) {
+        const tr = cell.parentElement as HTMLTableRowElement;
+        const next = tr.nextElementSibling as HTMLTableRowElement | null;
+        if (next) {
+          e.preventDefault();
+          const idx = Array.from(tr.cells).indexOf(cell);
+          focusCell(next.cells[Math.min(idx, next.cells.length - 1)]!);
+        }
+        return;
+      }
+      if (ke.key === 'ArrowUp' && caretOnTopLine(cell)) {
+        const tr = cell.parentElement as HTMLTableRowElement;
+        const prev = tr.previousElementSibling as HTMLTableRowElement | null;
+        if (prev) {
+          e.preventDefault();
+          const idx = Array.from(tr.cells).indexOf(cell);
+          focusCell(prev.cells[Math.min(idx, prev.cells.length - 1)]!);
+        }
+        return;
+      }
+      if (ke.key === 'ArrowLeft' && caretAtStartOfCell(cell)) {
+        e.preventDefault();
+        moveCell(cell, -1);
+        return;
+      }
+      if (ke.key === 'ArrowRight' && caretAtEndOfCell(cell)) {
+        e.preventDefault();
+        moveCell(cell, 1);
+        return;
+      }
     });
     tbl.addEventListener('input', () => markDirty());
+
+    // Right-click on a cell opens the row/column context menu.
+    tbl.addEventListener('contextmenu', (e) => {
+      const cell = (e.target as HTMLElement).closest('td,th') as HTMLTableCellElement | null;
+      if (!cell) return;
+      e.preventDefault();
+      showTableContextMenu(tbl, cell, (e as MouseEvent).clientX, (e as MouseEvent).clientY);
+    });
+
+    ensureTableEdgeButtons(wrap);
   }
 
   function moveCell(cell: HTMLTableCellElement, dir: 1 | -1): void {
@@ -740,16 +794,111 @@ export function createNoteEditor(opts: NoteEditorOptions = {}): NoteEditor {
     if (nextRow) focusCell(nextRow.cells[idx]!);
   }
 
+  // ── Caret position helpers used by arrow-key navigation ────────────
+
+  function caretAtStartOfCell(cell: HTMLElement): boolean {
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount) return true;
+    const r = sel.getRangeAt(0);
+    if (!r.collapsed) return false;
+    const probe = document.createRange();
+    probe.selectNodeContents(cell);
+    probe.setEnd(r.startContainer, r.startOffset);
+    return probe.toString() === '';
+  }
+
+  function caretAtEndOfCell(cell: HTMLElement): boolean {
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount) return true;
+    const r = sel.getRangeAt(0);
+    if (!r.collapsed) return false;
+    const probe = document.createRange();
+    probe.selectNodeContents(cell);
+    probe.setStart(r.startContainer, r.startOffset);
+    return probe.toString() === '';
+  }
+
+  function caretOnTopLine(cell: HTMLElement): boolean {
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount) return true;
+    const r = sel.getRangeAt(0);
+    if (!r.collapsed) return false;
+    const caretRect = r.getBoundingClientRect();
+    const cellRect = cell.getBoundingClientRect();
+    // height==0 means the caret is in an empty / collapsed text node;
+    // treat that as "top line" so the user can still escape upward.
+    if (caretRect.height === 0) return true;
+    const lh = caretRect.height || parseFloat(getComputedStyle(cell).lineHeight) || 20;
+    return caretRect.top - cellRect.top < lh;
+  }
+
+  function caretOnBottomLine(cell: HTMLElement): boolean {
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount) return true;
+    const r = sel.getRangeAt(0);
+    if (!r.collapsed) return false;
+    const caretRect = r.getBoundingClientRect();
+    const cellRect = cell.getBoundingClientRect();
+    if (caretRect.height === 0) return true;
+    const lh = caretRect.height || parseFloat(getComputedStyle(cell).lineHeight) || 20;
+    return cellRect.bottom - caretRect.bottom < lh;
+  }
+
+  // ── Row / column mutation helpers ──────────────────────────────────
+
+  function colCountOf(tbl: HTMLTableElement): number {
+    return tbl.rows[0]?.cells.length ?? 0;
+  }
+
+  function makeEmptyCell(): HTMLTableCellElement {
+    const td = document.createElement('td');
+    td.contentEditable = 'true';
+    td.appendChild(document.createElement('br'));
+    return td;
+  }
+
   function addRowAfter(tr: HTMLTableRowElement): void {
     const cols = tr.cells.length;
     const newTr = document.createElement('tr');
-    for (let i = 0; i < cols; i++) {
-      const td = document.createElement('td');
-      td.contentEditable = 'true';
-      td.appendChild(document.createElement('br'));
-      newTr.appendChild(td);
-    }
+    for (let i = 0; i < cols; i++) newTr.appendChild(makeEmptyCell());
     tr.parentElement!.insertBefore(newTr, tr.nextSibling);
+    markDirty();
+  }
+
+  /** Insert a fresh row at the given 0-based index (clamped). atIdx ==
+   *  tbl.rows.length appends at end. */
+  function insertRowAt(tbl: HTMLTableElement, atIdx: number): void {
+    const tbody = tbl.tBodies[0] ?? tbl;
+    const cols = colCountOf(tbl) || 1;
+    const newTr = document.createElement('tr');
+    for (let i = 0; i < cols; i++) newTr.appendChild(makeEmptyCell());
+    if (atIdx >= tbody.rows.length) tbody.appendChild(newTr);
+    else tbody.insertBefore(newTr, tbody.rows[atIdx] as Node);
+    markDirty();
+  }
+
+  function insertColAt(tbl: HTMLTableElement, atIdx: number): void {
+    for (const tr of Array.from(tbl.rows)) {
+      const td = makeEmptyCell();
+      if (atIdx >= tr.cells.length) tr.appendChild(td);
+      else tr.insertBefore(td, tr.cells[atIdx] as Node);
+    }
+    markDirty();
+  }
+
+  function deleteRowAt(tbl: HTMLTableElement, rowIdx: number): void {
+    const tbody = tbl.tBodies[0] ?? tbl;
+    if (tbody.rows.length <= 1) return; // keep at least 1 row
+    if (rowIdx < 0 || rowIdx >= tbody.rows.length) return;
+    tbody.rows[rowIdx]!.remove();
+    markDirty();
+  }
+
+  function deleteColAt(tbl: HTMLTableElement, colIdx: number): void {
+    if (colCountOf(tbl) <= 1) return; // keep at least 1 column
+    for (const tr of Array.from(tbl.rows)) {
+      if (colIdx >= 0 && colIdx < tr.cells.length) tr.cells[colIdx]!.remove();
+    }
     markDirty();
   }
 
@@ -760,6 +909,118 @@ export function createNoteEditor(opts: NoteEditorOptions = {}): NoteEditor {
     r.selectNodeContents(cell);
     r.collapse(true);
     if (sel) { sel.removeAllRanges(); sel.addRange(r); }
+  }
+
+  // ── Edge "+" buttons (hover to grow the table) ─────────────────────
+
+  function ensureTableEdgeButtons(wrap: HTMLElement): void {
+    const tbl = wrap.querySelector('table.ne-table') as HTMLTableElement | null;
+    if (!tbl) return;
+    if (!wrap.querySelector('.ne-table-add-row')) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'ne-table-add ne-table-add-row';
+      btn.title = '行を追加';
+      btn.textContent = '+';
+      btn.contentEditable = 'false';
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        insertRowAt(tbl, tbl.rows.length);
+      });
+      wrap.appendChild(btn);
+    }
+    if (!wrap.querySelector('.ne-table-add-col')) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'ne-table-add ne-table-add-col';
+      btn.title = '列を追加';
+      btn.textContent = '+';
+      btn.contentEditable = 'false';
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        insertColAt(tbl, colCountOf(tbl));
+      });
+      wrap.appendChild(btn);
+    }
+  }
+
+  // ── Right-click context menu (row / col ops) ───────────────────────
+
+  function showTableContextMenu(
+    tbl: HTMLTableElement,
+    cell: HTMLTableCellElement,
+    clientX: number,
+    clientY: number,
+  ): void {
+    // Close any existing menu so we don't stack them on rapid right-clicks.
+    document.querySelectorAll('.ne-table-menu').forEach((n) => n.remove());
+
+    const tr = cell.parentElement as HTMLTableRowElement;
+    const rowIdx = Array.from(tbl.tBodies[0]?.rows ?? tbl.rows).indexOf(tr);
+    const colIdx = Array.from(tr.cells).indexOf(cell);
+
+    const menu = document.createElement('div');
+    menu.className = 'ne-table-menu';
+    menu.style.left = `${clientX}px`;
+    menu.style.top  = `${clientY}px`;
+    menu.contentEditable = 'false';
+
+    const item = (label: string, action: () => void): HTMLElement => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'ne-table-menu-item';
+      b.textContent = label;
+      b.addEventListener('mousedown', (e) => {
+        // mousedown (not click) so the menu fires before the document
+        // click handler below tears it down.
+        e.preventDefault();
+        action();
+        menu.remove();
+      });
+      return b;
+    };
+    const sep = (): HTMLElement => {
+      const d = document.createElement('div');
+      d.className = 'ne-table-menu-sep';
+      return d;
+    };
+
+    menu.append(
+      item('↑ 上に行を挿入',   () => insertRowAt(tbl, rowIdx)),
+      item('↓ 下に行を挿入',   () => insertRowAt(tbl, rowIdx + 1)),
+      sep(),
+      item('← 左に列を挿入',   () => insertColAt(tbl, colIdx)),
+      item('→ 右に列を挿入',   () => insertColAt(tbl, colIdx + 1)),
+      sep(),
+      item('🗑 行を削除',      () => deleteRowAt(tbl, rowIdx)),
+      item('🗑 列を削除',      () => deleteColAt(tbl, colIdx)),
+    );
+
+    // Position into floating container (same stacking context as
+    // slash menu / floating toolbar — punches through host overlays).
+    const floatRoot = opts.floatingContainer ?? document.body;
+    floatRoot.appendChild(menu);
+
+    // Clamp inside the viewport so the menu isn't clipped at the right
+    // or bottom edge.
+    requestAnimationFrame(() => {
+      const r = menu.getBoundingClientRect();
+      if (r.right > window.innerWidth) menu.style.left = `${window.innerWidth - r.width - 8}px`;
+      if (r.bottom > window.innerHeight) menu.style.top = `${window.innerHeight - r.height - 8}px`;
+    });
+
+    // Close on outside click / Escape.
+    const close = (e: Event): void => {
+      if (e instanceof KeyboardEvent && e.key !== 'Escape') return;
+      if (e instanceof MouseEvent && menu.contains(e.target as Node)) return;
+      menu.remove();
+      document.removeEventListener('mousedown', close);
+      document.removeEventListener('keydown', close);
+    };
+    setTimeout(() => {
+      document.addEventListener('mousedown', close);
+      document.addEventListener('keydown', close);
+    }, 0);
   }
 
   function insertTableBlock(cols: number, rows: number): void {

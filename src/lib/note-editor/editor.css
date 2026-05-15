@@ -227,8 +227,13 @@
 
 /* Tables */
 .ne-prose .ne-table-wrap {
+  position: relative;
   overflow-x: auto;
   margin: 8px 0;
+  /* leave room on the right + below for the hover "+" edge buttons so
+     they don't clip against the next block / outer overflow */
+  padding-right: 16px;
+  padding-bottom: 14px;
 }
 .ne-prose .ne-table {
   border-collapse: collapse;
@@ -245,6 +250,76 @@
 }
 .ne-content .ne-table td:focus { background: var(--ne-accent-soft); }
 .ne-prose .ne-table th { background: var(--ne-surface); font-weight: 600; }
+
+/* Hover "+" buttons to grow the table.
+   Hidden by default, fade in when the wrap is hovered. */
+.ne-prose .ne-table-add {
+  position: absolute;
+  appearance: none;
+  background: var(--ne-surface);
+  border: 1px solid var(--ne-border);
+  color: var(--ne-muted);
+  font-size: 12px;
+  line-height: 1;
+  padding: 0;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 120ms ease, background 120ms ease, color 120ms ease;
+  border-radius: var(--ne-radius);
+}
+.ne-prose .ne-table-wrap:hover .ne-table-add { opacity: 1; }
+.ne-prose .ne-table-add:hover {
+  background: var(--ne-accent-soft);
+  color: var(--ne-accent);
+  border-color: var(--ne-accent);
+}
+.ne-prose .ne-table-add-row {
+  left: 0;
+  right: 16px;
+  bottom: 0;
+  height: 12px;
+}
+.ne-prose .ne-table-add-col {
+  top: 0;
+  bottom: 14px;
+  right: 0;
+  width: 12px;
+}
+
+/* Right-click context menu (row / column ops) */
+.ne-table-menu {
+  position: fixed;
+  z-index: var(--ne-z-floating);
+  background: var(--ne-bg);
+  color: var(--ne-text);
+  border: 1px solid var(--ne-border-strong);
+  border-radius: var(--ne-radius-lg);
+  box-shadow: var(--ne-shadow);
+  padding: 4px;
+  min-width: 200px;
+  display: flex;
+  flex-direction: column;
+  font-size: var(--ne-font-size);
+}
+.ne-table-menu-item {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  text-align: left;
+  padding: 6px 12px;
+  cursor: pointer;
+  border-radius: var(--ne-radius);
+  font-family: inherit;
+  font-size: inherit;
+  color: var(--ne-text);
+  line-height: 1.4;
+}
+.ne-table-menu-item:hover { background: var(--ne-accent-soft); }
+.ne-table-menu-sep {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--ne-border);
+}
 
 /* ────────────────────────── Floating widgets ──────────────────────── */
 
