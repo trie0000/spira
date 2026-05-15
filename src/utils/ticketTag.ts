@@ -96,24 +96,52 @@ export function buildCopyableSubject(id: number, rawTitleOrSubject: string | nul
 }
 
 // Primary shape: [<prefix>#NNN+]. Prefix may be empty.
-const PRIMARY_RE = /\[([A-Za-z0-9_-]{0,12})#(\d+)\]/;
+// Spaces are allowed inside the brackets to tolerate hand-typed tags like
+// `[ #003 ]` that some mobile mailers / IMEs auto-pad.
+const PRIMARY_RE = /\[\s*([A-Za-z0-9_-]{0,12})\s*#\s*(\d+)\s*\]/;
 // Legacy fallbacks — accepted on read so subjects sent under earlier
 // settings still auto-link. Order doesn't matter; first match wins.
 const LEGACY_RES: RegExp[] = [
-  /\[CASE-(\d+)\]/i,    // earlier "bracket-case" preset
-  /\(#(\d+)\)/,          // earlier "paren-hash" preset
-  /<#(\d+)>/,            // earlier "angle-hash" preset
+  /\[\s*CASE-\s*(\d+)\s*\]/i,    // earlier "bracket-case" preset
+  /\(\s*#\s*(\d+)\s*\)/,          // earlier "paren-hash" preset
+  /<\s*#\s*(\d+)\s*>/,            // earlier "angle-hash" preset
 ];
 
-/** Extract the ticket id embedded in a mail subject, or null if none. */
+/** Normalize full-width punctuation / digits to their ASCII counterparts
+ *  before tag matching. Japanese IMEs frequently insert full-width
+ *  brackets (`［ ］`), full-width hash (`＃`), and full-width digits
+ *  (`０`-`９`) when the user types a tag while in JP input mode. Without
+ *  this normalization the otherwise-correct tag misses parseTicketTag
+ *  entirely and the reply never auto-links to its ticket. */
+function normalizeForTagParse(s: string): string {
+  return s.replace(/[＃（）＜＞［］０-９]/g, (c) => {
+    const code = c.charCodeAt(0);
+    if (code >= 0xFF10 && code <= 0xFF19) return String.fromCharCode(code - 0xFEE0); // FW digits
+    switch (code) {
+      case 0xFF03: return '#';
+      case 0xFF08: return '(';
+      case 0xFF09: return ')';
+      case 0xFF1C: return '<';
+      case 0xFF1E: return '>';
+      case 0xFF3B: return '[';
+      case 0xFF3D: return ']';
+      default: return c;
+    }
+  });
+}
+
+/** Extract the ticket id embedded in a mail subject, or null if none.
+ *  Tolerant of full-width characters and stray whitespace inside the
+ *  bracketed tag. */
 export function parseTicketTag(subject: string): number | null {
-  const m = PRIMARY_RE.exec(subject);
+  const normalized = normalizeForTagParse(subject);
+  const m = PRIMARY_RE.exec(normalized);
   if (m) {
     const n = Number(m[2]);
     return Number.isFinite(n) ? n : null;
   }
   for (const re of LEGACY_RES) {
-    const lm = re.exec(subject);
+    const lm = re.exec(normalized);
     if (lm) {
       const n = Number(lm[1]);
       if (Number.isFinite(n)) return n;

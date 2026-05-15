@@ -643,9 +643,18 @@ export class SpRepository implements Repository {
     for (const m of unprocessed) {
       try {
         const tid = parseTicketTag(m.subject);
-        if (tid == null) continue;
+        if (tid == null) {
+          // Visible diagnostic — DevTools console shows exactly why a
+          // reply didn't auto-link. Most common cause is the PA mapping
+          // not populating Subject, or an unrecognized tag format.
+          console.warn(`[spira/sync] inbox #${m.id}: no ticket tag in subject "${m.subject?.slice(0, 80)}"`);
+          continue;
+        }
         const ticket = byId.get(tid);
-        if (!ticket || ticket.isDeleted) continue;
+        if (!ticket || ticket.isDeleted) {
+          console.warn(`[spira/sync] inbox #${m.id}: tag parsed as #${tid} but ticket ${ticket ? 'is deleted' : 'not found'}`);
+          continue;
+        }
         // Idempotency: if a previous syncInbox pass added the comment
         // but then crashed before markInboxProcessed could fire (or PA
         // delivered the same mail in two inbox rows), don't re-append

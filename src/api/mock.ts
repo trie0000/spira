@@ -298,9 +298,15 @@ export class MockRepository implements Repository {
     for (const m of store.inbox.filter(x => !x.isProcessed)) {
       try {
         const tid = parseTicketTag(m.subject);
-        if (tid == null) continue;
+        if (tid == null) {
+          console.warn(`[spira/sync] inbox #${m.id}: no ticket tag in subject "${m.subject?.slice(0, 80)}"`);
+          continue;
+        }
         const ticket = store.tickets.find(t => t.id === tid && !t.isDeleted);
-        if (!ticket) continue;
+        if (!ticket) {
+          console.warn(`[spira/sync] inbox #${m.id}: tag parsed as #${tid} but ticket not found / deleted`);
+          continue;
+        }
         // Idempotency: skip if a received comment with the same
         // internetMessageId already exists on this ticket (left over
         // from a previous half-finished sync, or a PA duplicate row).
