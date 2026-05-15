@@ -251,6 +251,37 @@
 .ne-content .ne-table td:focus { background: var(--ne-accent-soft); }
 .ne-prose .ne-table th { background: var(--ne-surface); font-weight: 600; }
 
+/* Column resize handle — 6px-wide drag strip on the right edge of each
+   cell (except the last column). Invisible by default; the accent rail
+   shows on hover or while actively dragging. */
+.ne-prose .ne-table td,
+.ne-prose .ne-table th { position: relative; }
+.ne-prose .ne-table-resize {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 1;
+  user-select: none;
+}
+.ne-prose .ne-table-resize::after {
+  content: '';
+  position: absolute;
+  left: 2px;
+  top: 2px;
+  bottom: 2px;
+  width: 2px;
+  border-radius: 1px;
+  background: transparent;
+  transition: background 120ms ease;
+}
+.ne-prose .ne-table-resize:hover::after,
+.ne-prose .ne-table-resize.dragging::after {
+  background: var(--ne-accent);
+}
+
 /* Hover "+" buttons to grow the table.
    Hidden by default, fade in when the wrap is hovered. */
 .ne-prose .ne-table-add {

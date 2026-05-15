@@ -673,6 +673,14 @@ export function createNoteEditor(opts: NoteEditorOptions = {}): NoteEditor {
     wrap.contentEditable = 'false';
     const tbl = document.createElement('table');
     tbl.className = 'ne-table';
+    // colgroup drives column widths so the drag-to-resize handle can
+    // mutate a single dimension that affects the whole column. New
+    // tables start with no explicit width; the user resizes as needed
+    // and the chosen widths round-trip via the trailing
+    // `<!--ne-cols:N,N,N-->` markdown comment (see markdown.ts).
+    const colgroup = document.createElement('colgroup');
+    for (let c = 0; c < cols; c++) colgroup.appendChild(document.createElement('col'));
+    tbl.appendChild(colgroup);
     const tbody = document.createElement('tbody');
     for (let r = 0; r < rows; r++) {
       const tr = document.createElement('tr');
@@ -693,8 +701,11 @@ export function createNoteEditor(opts: NoteEditorOptions = {}): NoteEditor {
   function attachTableHandlers(wrap: HTMLElement): void {
     if (wrap.dataset.neWired === '1') {
       // Already wired — but legacy tables may still be missing the edge
-      // buttons that we added later. Idempotently ensure they exist.
+      // buttons / colgroup / resize handles that we added later.
+      // Idempotently ensure they exist.
       ensureTableEdgeButtons(wrap);
+      const tblEl = wrap.querySelector('table.ne-table') as HTMLTableElement | null;
+      if (tblEl) ensureResizeHandles(tblEl);
       return;
     }
     wrap.dataset.neWired = '1';
@@ -766,6 +777,7 @@ export function createNoteEditor(opts: NoteEditorOptions = {}): NoteEditor {
     });
 
     ensureTableEdgeButtons(wrap);
+    ensureResizeHandles(tbl);
   }
 
   function moveCell(cell: HTMLTableCellElement, dir: 1 | -1): void {
@@ -862,6 +874,8 @@ export function createNoteEditor(opts: NoteEditorOptions = {}): NoteEditor {
     const newTr = document.createElement('tr');
     for (let i = 0; i < cols; i++) newTr.appendChild(makeEmptyCell());
     tr.parentElement!.insertBefore(newTr, tr.nextSibling);
+    const tbl = tr.closest('table.ne-table') as HTMLTableElement | null;
+    if (tbl) ensureResizeHandles(tbl);
     markDirty();
   }
 
@@ -874,6 +888,7 @@ export function createNoteEditor(opts: NoteEditorOptions = {}): NoteEditor {
     for (let i = 0; i < cols; i++) newTr.appendChild(makeEmptyCell());
     if (atIdx >= tbody.rows.length) tbody.appendChild(newTr);
     else tbody.insertBefore(newTr, tbody.rows[atIdx] as Node);
+    ensureResizeHandles(tbl);
     markDirty();
   }
 
@@ -883,6 +898,12 @@ export function createNoteEditor(opts: NoteEditorOptions = {}): NoteEditor {
       if (atIdx >= tr.cells.length) tr.appendChild(td);
       else tr.insertBefore(td, tr.cells[atIdx] as Node);
     }
+    // Insert matching <col> so column widths line up.
+    const cg = ensureColgroup(tbl);
+    const newCol = document.createElement('col');
+    if (atIdx >= cg.children.length) cg.appendChild(newCol);
+    else cg.insertBefore(newCol, cg.children[atIdx] as Node);
+    ensureResizeHandles(tbl);
     markDirty();
   }
 
@@ -899,6 +920,10 @@ export function createNoteEditor(opts: NoteEditorOptions = {}): NoteEditor {
     for (const tr of Array.from(tbl.rows)) {
       if (colIdx >= 0 && colIdx < tr.cells.length) tr.cells[colIdx]!.remove();
     }
+    // Remove matching <col> so colgroup stays in sync.
+    const cg = ensureColgroup(tbl);
+    if (cg.children[colIdx]) cg.children[colIdx]!.remove();
+    ensureResizeHandles(tbl);
     markDirty();
   }
 
@@ -942,6 +967,108 @@ export function createNoteEditor(opts: NoteEditorOptions = {}): NoteEditor {
       });
       wrap.appendChild(btn);
     }
+  }
+
+  // ── Column resize ──────────────────────────────────────────────────
+
+  /** Ensure `<colgroup>` exists with one `<col>` per column. Called on
+   *  load (for legacy markdown tables without explicit colgroups) and
+   *  after any column add / delete so the col count stays in sync with
+   *  the actual cell count. */
+  function ensureColgroup(tbl: HTMLTableElement): HTMLTableColElement {
+    let cg = tbl.querySelector('colgroup');
+    const cellCount = colCountOf(tbl);
+    if (!cg) {
+      cg = document.createElement('colgroup');
+      for (let i = 0; i < cellCount; i++) cg.appendChild(document.createElement('col'));
+      tbl.insertBefore(cg, tbl.firstChild);
+    } else {
+      // Reconcile cardinality if it drifted.
+      while (cg.children.length < cellCount) cg.appendChild(document.createElement('col'));
+      while (cg.children.length > cellCount) cg.lastElementChild!.remove();
+    }
+    return cg as HTMLTableColElement;
+  }
+
+  /** Attach a 6px-wide draggable resize handle on the right edge of each
+   *  cell. The handle is contenteditable=false + an absolutely positioned
+   *  child of the cell, so it doesn't get caught up in the cell's text
+   *  editing. The cursor flips to col-resize on hover. */
+  function ensureResizeHandles(tbl: HTMLTableElement): void {
+    ensureColgroup(tbl);
+    for (const tr of Array.from(tbl.rows)) {
+      // Skip the last cell in each row — resizing it doesn't have a
+      // natural neighbor to take the space from.
+      for (let i = 0; i < tr.cells.length - 1; i++) {
+        const cell = tr.cells[i] as HTMLElement;
+        if (cell.querySelector(':scope > .ne-table-resize')) continue;
+        cell.style.position = cell.style.position || 'relative';
+        const handle = document.createElement('span');
+        handle.className = 'ne-table-resize';
+        handle.contentEditable = 'false';
+        handle.setAttribute('aria-hidden', 'true');
+        wireResizeHandle(handle, tbl, i);
+        cell.appendChild(handle);
+      }
+    }
+  }
+
+  function wireResizeHandle(
+    handle: HTMLElement,
+    tbl: HTMLTableElement,
+    colIdx: number,
+  ): void {
+    handle.addEventListener('mousedown', (e: MouseEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const cg = ensureColgroup(tbl);
+      const cols = Array.from(cg.children) as HTMLTableColElement[];
+      const col = cols[colIdx];
+      if (!col) return;
+      // Lock every other col's width to its current rendered size so
+      // the table doesn't reflow when we change the active column.
+      cols.forEach((c, idx) => {
+        if (idx === colIdx) return;
+        if (!c.style.width) {
+          const refCell = tbl.rows[0]?.cells[idx];
+          if (refCell) c.style.width = `${Math.round(refCell.getBoundingClientRect().width)}px`;
+        }
+      });
+      const startX = e.clientX;
+      const refCell = tbl.rows[0]?.cells[colIdx];
+      const startW = refCell ? refCell.getBoundingClientRect().width : 100;
+      const prevCursor = document.body.style.cursor;
+      const prevSelect = document.body.style.userSelect;
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+      handle.classList.add('dragging');
+
+      const onMove = (ev: MouseEvent): void => {
+        const dx = ev.clientX - startX;
+        const newW = Math.max(40, Math.round(startW + dx));
+        col.style.width = `${newW}px`;
+      };
+      const onUp = (): void => {
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+        document.body.style.cursor = prevCursor;
+        document.body.style.userSelect = prevSelect;
+        handle.classList.remove('dragging');
+        markDirty();
+      };
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    });
+
+    // Double-click resets the column to auto width.
+    handle.addEventListener('dblclick', (e: Event) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const cg = ensureColgroup(tbl);
+      const col = cg.children[colIdx] as HTMLTableColElement | undefined;
+      if (col) col.style.width = '';
+      markDirty();
+    });
   }
 
   // ── Right-click context menu (row / col ops) ───────────────────────

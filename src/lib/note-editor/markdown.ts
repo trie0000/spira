@@ -159,6 +159,22 @@ function tableToMd(table: HTMLElement): string {
     '| ' + sep.join(' | ') + ' |',
     ...body.map((r) => '| ' + r.join(' | ') + ' |'),
   ];
+  // Persist column widths set by the editor's drag-resize handles as a
+  // trailing HTML comment. Markdown parsers ignore it, so the table
+  // still renders elsewhere; our markdownToHtml side reads the same
+  // comment to reapply the widths on next load. Skip the comment
+  // entirely when no column has an explicit width — keeps the saved
+  // markdown clean.
+  const cg = table.querySelector('colgroup');
+  if (cg) {
+    const widths = Array.from(cg.querySelectorAll('col')).map((c) => {
+      const w = parseInt((c as HTMLElement).style.width || '', 10);
+      return Number.isFinite(w) && w > 0 ? w : 0;
+    });
+    if (widths.some((w) => w > 0)) {
+      lines.push(`<!--ne-cols:${widths.join(',')}-->`);
+    }
+  }
   return lines.join('\n');
 }
 
@@ -216,14 +232,25 @@ function inlineMdToHtml(s: string): string {
   return out;
 }
 
-function tableMdToHtml(lines: string[]): string {
+function tableMdToHtml(lines: string[], widths: number[] = []): string {
   const split = (line: string) =>
     line.replace(/^\||\|$/g, '').split(/(?<!\\)\|/).map((c) => c.trim().replace(/\\\|/g, '|'));
   const head = split(lines[0] ?? '');
   const body = lines.slice(2).map(split);
   // Wrap in a div so the table is contenteditable=false-friendly when
   // re-mounted in the editor (the editor rewires it on setMarkdown).
-  let html = '<div class="ne-table-wrap"><table class="ne-table"><tbody>';
+  let html = '<div class="ne-table-wrap"><table class="ne-table">';
+  // colgroup with optional explicit widths from the `<!--ne-cols:...-->`
+  // sidecar comment. Each <col> is unconditionally emitted so the editor
+  // can find/mutate it for resize handles; columns without persisted
+  // widths render at the table's auto-layout default.
+  html += '<colgroup>';
+  for (let i = 0; i < head.length; i++) {
+    const w = widths[i] ?? 0;
+    html += w > 0 ? `<col style="width:${w}px"/>` : '<col/>';
+  }
+  html += '</colgroup>';
+  html += '<tbody>';
   html += '<tr>';
   for (const h of head) html += `<td>${inlineMdToHtml(h)}</td>`;
   html += '</tr>';
@@ -276,7 +303,21 @@ export function markdownToHtml(md: string): string {
         tableLines.push(lines[i]!);
         i++;
       }
-      out.push(tableMdToHtml(tableLines));
+      // Peek for the sidecar widths comment that htmlToMarkdown writes
+      // immediately after the table block.
+      let widths: number[] = [];
+      const nextLine = lines[i];
+      if (nextLine) {
+        const m = /^<!--ne-cols:([\d,]*)-->$/.exec(nextLine);
+        if (m) {
+          widths = m[1]!.split(',').map((s) => {
+            const n = parseInt(s, 10);
+            return Number.isFinite(n) && n > 0 ? n : 0;
+          });
+          i++; // consume the comment line so it doesn't surface as text
+        }
+      }
+      out.push(tableMdToHtml(tableLines, widths));
       continue;
     }
     // blockquote
