@@ -4854,6 +4854,23 @@ var Spira = (() => {
   }
   var NOTE_ALLOWED_TAGS = [...ALLOWED_TAGS, "input", "s", "del"];
   var NOTE_ALLOWED_ATTR = [...ALLOWED_ATTR, "class", "type", "checked", "disabled"];
+  var HTML_BLOCK_RE = /<(br|p|div|table|tr|td|th|li|ul|ol|h[1-6]|blockquote|pre|hr|section|article)\b/i;
+  function renderMailBody(el2, bodyHtml, bodyText) {
+    const html2 = (bodyHtml ?? "").trim();
+    if (html2) {
+      const looksPlain = !HTML_BLOCK_RE.test(html2);
+      const prepared = looksPlain ? html2.replace(/\r?\n/g, "<br>") : html2;
+      el2.innerHTML = sanitizeMailHtml(prepared);
+      return;
+    }
+    const text2 = bodyText ?? "";
+    if (text2) {
+      el2.style.whiteSpace = "pre-wrap";
+      el2.textContent = text2;
+      return;
+    }
+    el2.textContent = "(\u672C\u6587\u306A\u3057)";
+  }
 
   // src/utils/owa.ts
   var OWA_INBOX_URL = "https://outlook.office.com/mail/";
@@ -7364,11 +7381,7 @@ var Spira = (() => {
       searchBtn
     ]);
     const body = el("div", { class: "spira-th-card-body" });
-    if (c.isHtml) body.innerHTML = sanitizeMailHtml(c.content);
-    else {
-      body.style.whiteSpace = "pre-wrap";
-      body.textContent = c.content;
-    }
+    renderMailBody(body, c.isHtml ? c.content : null, c.isHtml ? null : c.content);
     const card = el("div", {
       class: "spira-th-card spira-th-card--received",
       "data-side": internal ? "internal" : "external"
@@ -8008,13 +8021,7 @@ var Spira = (() => {
   }
   function renderExpandedRow(m) {
     const previewBody = el("div", { class: "spira-th-card-body", style: "max-height:360px;overflow:auto" });
-    if (m.bodyHtml) previewBody.innerHTML = sanitizeMailHtml(m.bodyHtml);
-    else if (m.bodyText) {
-      previewBody.style.whiteSpace = "pre-wrap";
-      previewBody.textContent = m.bodyText;
-    } else {
-      previewBody.textContent = "(\u672C\u6587\u306A\u3057)";
-    }
+    renderMailBody(previewBody, m.bodyHtml, m.bodyText);
     const meta = (label2, value) => el("div", { style: "display:grid;grid-template-columns:120px 1fr;gap:var(--s-3);font-size:var(--fs-sm);padding:var(--s-1) 0" }, [
       el("span", { style: "color:var(--ink-3)" }, [label2]),
       typeof value === "string" ? el("span", {}, [value]) : value
@@ -8040,8 +8047,7 @@ var Spira = (() => {
     ]);
     const dueInput = el("input", { type: "date", class: "spira-input" });
     const previewBody = el("div", { class: "spira-th-card-body" });
-    if (m.bodyHtml) previewBody.innerHTML = sanitizeMailHtml(m.bodyHtml);
-    else previewBody.textContent = m.bodyText || "(\u672C\u6587\u306A\u3057)";
+    renderMailBody(previewBody, m.bodyHtml, m.bodyText);
     const preview = m.id > 0 ? el("div", { class: "spira-th-card spira-th-card--received", style: "max-height:240px;overflow:auto" }, [
       el("div", { class: "spira-th-card-head" }, [
         el("span", { html: icon("mail") }),
@@ -8594,15 +8600,15 @@ var Spira = (() => {
       title: "\u30AF\u30EA\u30C3\u30AF\u3067\u30B3\u30D4\u30FC",
       onclick: async () => {
         try {
-          await navigator.clipboard.writeText("0.0.1-42ea49b+ (2026-05-15T01:31:21Z)");
+          await navigator.clipboard.writeText("0.0.1-21387cf+ (2026-05-15T01:37:51Z)");
           buildLabel.textContent = "\u2713 \u30B3\u30D4\u30FC\u3057\u307E\u3057\u305F";
           setTimeout(() => {
-            buildLabel.textContent = `build: ${"0.0.1-42ea49b+ (2026-05-15T01:31:21Z)"}`;
+            buildLabel.textContent = `build: ${"0.0.1-21387cf+ (2026-05-15T01:37:51Z)"}`;
           }, 1200);
         } catch {
         }
       }
-    }, [`build: ${"0.0.1-42ea49b+ (2026-05-15T01:31:21Z)"}`]);
+    }, [`build: ${"0.0.1-21387cf+ (2026-05-15T01:37:51Z)"}`]);
     const menu = el("div", {
       class: "spira-menu spira-settings-menu",
       style: "position:fixed;z-index:var(--z-modal);min-width:280px"
@@ -9130,7 +9136,7 @@ var Spira = (() => {
       setState({ errorBanner: `\u521D\u671F\u5316\u306B\u5931\u6557\u3057\u307E\u3057\u305F: ${msg}` });
       toast(root2, `\u521D\u671F\u5316\u30A8\u30E9\u30FC: ${msg}`, "error");
     }
-    console.log(`[spira] build: ${"0.0.1-42ea49b+ (2026-05-15T01:31:21Z)"}`);
+    console.log(`[spira] build: ${"0.0.1-21387cf+ (2026-05-15T01:37:51Z)"}`);
     console.log(`[spira] repo mode: ${getRepoMode()}`);
   }
   async function doSync(root2, silent = false) {
