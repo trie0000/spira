@@ -230,10 +230,11 @@ export class MockRepository implements Repository {
       .filter(c => c.ticketId === ticketId)
       .sort((a, b) => a.sentAt.localeCompare(b.sentAt));
   }
-  async updateComment(id: number, patch: { content: string }): Promise<void> {
+  async updateComment(id: number, patch: { content: string; isHtml?: boolean }): Promise<void> {
     const c = store.comments.find(x => x.id === id);
     if (!c) return;
     c.content = patch.content;
+    if (patch.isHtml !== undefined) c.isHtml = patch.isHtml;
     const t = store.tickets.find(x => x.id === c.ticketId);
     if (t) t.updatedAt = now();
   }
@@ -300,6 +301,20 @@ export class MockRepository implements Repository {
         if (tid == null) continue;
         const ticket = store.tickets.find(t => t.id === tid && !t.isDeleted);
         if (!ticket) continue;
+        // Idempotency: skip if a received comment with the same
+        // internetMessageId already exists on this ticket (left over
+        // from a previous half-finished sync, or a PA duplicate row).
+        if (m.internetMessageId) {
+          const dup = store.comments.some(
+            (c) => c.ticketId === tid && c.type === 'received' &&
+              c.internetMessageId === m.internetMessageId,
+          );
+          if (dup) {
+            await this.markInboxProcessed(m.id, { ticketId: tid, result: 'auto-linked' });
+            autoLinked++;
+            continue;
+          }
+        }
         await this.addComment({
           ticketId: tid, type: 'received',
           fromEmail: m.fromEmail, fromName: m.fromName,

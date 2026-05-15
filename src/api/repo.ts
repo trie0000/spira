@@ -61,7 +61,13 @@ export interface Repository {
   // comments
   listComments(ticketId: number): Promise<Comment[]>;
   addComment(input: AddCommentInput): Promise<Comment>;
-  updateComment(id: number, patch: { content: string }): Promise<void>;
+  /** Update a comment's content (and optionally its isHtml flag).
+   *  Pass `isHtml: false` after migrating a legacy HTML memo to the new
+   *  markdown editor — otherwise the SP row keeps `IsHtml=true` and the
+   *  next reload treats the saved markdown as HTML, hiding everything
+   *  past the first markdown character that looks like an HTML tag
+   *  (e.g. `>` for blockquote). */
+  updateComment(id: number, patch: { content: string; isHtml?: boolean }): Promise<void>;
   deleteComment(id: number): Promise<void>;
 
   // inbox

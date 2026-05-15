@@ -703,7 +703,10 @@ export function openLinkModal(m: InboxMail): void {
           ticketId: selectedId, type: 'received',
           fromEmail: m.fromEmail, fromName: m.fromName,
           content: m.bodyHtml || m.bodyText, isHtml: !!m.bodyHtml,
-          sentAt: m.receivedAt, sourceEmailId: m.id,
+          // Use sent time (with received-time fallback) to match the key
+          // findDuplicateTicketForMail() compares against — otherwise a
+          // later `+ 起票` on the same message can miss this ticket.
+          sentAt: m.sentAt ?? m.receivedAt, sourceEmailId: m.id,
           hasAttachments: m.hasAttachments,
           internetMessageId: m.internetMessageId,
         });

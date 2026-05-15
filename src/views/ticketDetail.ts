@@ -668,7 +668,13 @@ function renderNoteCard(c: Comment): HTMLElement {
     saving = true;
     status.textContent = '保存中...';
     try {
-      await getRepo().updateComment(c.id, { content: v });
+      // Persist `isHtml: false` whenever we save — the new editor always
+      // produces markdown, so legacy HTML memos that we converted on
+      // edit must be re-tagged in SP too. Otherwise the next reload
+      // still sees `IsHtml=true` and the markdown leaks raw HTML
+      // entities through sanitizeNoteHtml instead of going through
+      // markdownToHtml.
+      await getRepo().updateComment(c.id, { content: v, isHtml: false });
       c.content = v;
       c.isHtml = false;
       flashSaved();
@@ -740,8 +746,35 @@ function renderNoteCard(c: Comment): HTMLElement {
     }
   };
   window.addEventListener('beforeunload', onBeforeUnload);
-  // `saving` is read inside flushSave to avoid concurrent writes — referenced
-  // for the type-checker which can't see across closures.
+
+  // Detach cleanup — runs when the card is removed from the DOM (e.g.
+  // setState() re-paints the ticket detail mid-edit). Without this the
+  // debounced saveTimer could still fire after the card is gone, and
+  // the window-level beforeunload listener would leak across renders.
+  // We schedule a synchronous flush via the inflight chain so anything
+  // the user has typed at the moment of detach reaches SP.
+  let cardCleanedUp = false;
+  const cleanupCard = (): void => {
+    if (cardCleanedUp) return;
+    cardCleanedUp = true;
+    if (saveTimer) {
+      clearTimeout(saveTimer); saveTimer = null;
+      inflight = inflight.then(flushSave);
+    }
+    window.removeEventListener('beforeunload', onBeforeUnload);
+    detachObserver?.disconnect();
+  };
+  let detachObserver: MutationObserver | null = null;
+  if (typeof MutationObserver !== 'undefined') {
+    let wasConnected = false;
+    detachObserver = new MutationObserver(() => {
+      if (card.isConnected) wasConnected = true;
+      else if (wasConnected) cleanupCard();
+    });
+    detachObserver.observe(document.body, { childList: true, subtree: true });
+  }
+  // `saving` is read inside flushSave to avoid concurrent writes —
+  // referenced here for the type-checker which can't see across closures.
   void saving;
 
   return card;

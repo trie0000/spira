@@ -304,9 +304,20 @@ export class SpRepository implements Repository {
     if (!res.ok) throw new SpError(res.status, await res.text(), uploadUrl);
     // The site-relative URL is what we want to embed in the memo (works
     // when the bookmarklet runs from a different sub-site, etc.).
+    // IMPORTANT: encode the filename segment with encodeURIComponent so
+    // reserved URL chars (`#`, `?`, `&`, ` `, etc.) don't get interpreted
+    // as a fragment/query when the user clicks the chip. The folder path
+    // came straight from our own code (only ASCII + ticket-NNNNN) so it
+    // doesn't need per-segment encoding, but we still pre-encode it for
+    // safety in case the site-relative path ever picks up a non-ASCII
+    // sub-segment from a renamed SP site.
     const tenantOrigin = new URL(this.cfg.siteUrl).origin;
+    const safePath = folderServerRel
+      .split('/')
+      .map((seg) => (seg ? encodeURIComponent(seg) : seg))
+      .join('/');
     return {
-      url: `${tenantOrigin}${folderServerRel}/${encodeURI(finalName)}`,
+      url: `${tenantOrigin}${safePath}/${encodeURIComponent(finalName)}`,
       filename: finalName,
     };
   }
@@ -559,10 +570,10 @@ export class SpRepository implements Repository {
     return (res.value ?? []).map(asComment);
   }
 
-  async updateComment(id: number, patch: { content: string }): Promise<void> {
-    await this.tx.update(this.listPath(this.cfg.listComments), id, {
-      Content: patch.content,
-    });
+  async updateComment(id: number, patch: { content: string; isHtml?: boolean }): Promise<void> {
+    const body: Record<string, unknown> = { Content: patch.content };
+    if (patch.isHtml !== undefined) body.IsHtml = patch.isHtml;
+    await this.tx.update(this.listPath(this.cfg.listComments), id, body);
   }
 
   async deleteComment(id: number): Promise<void> {
@@ -635,6 +646,23 @@ export class SpRepository implements Repository {
         if (tid == null) continue;
         const ticket = byId.get(tid);
         if (!ticket || ticket.isDeleted) continue;
+        // Idempotency: if a previous syncInbox pass added the comment
+        // but then crashed before markInboxProcessed could fire (or PA
+        // delivered the same mail in two inbox rows), don't re-append
+        // the same body. Match by internetMessageId — that's globally
+        // unique per email and is the only signal that survives the
+        // server-side encoding round-trip.
+        if (m.internetMessageId) {
+          const existing = await this.listComments(tid);
+          const dup = existing.some(
+            (c) => c.type === 'received' && c.internetMessageId === m.internetMessageId,
+          );
+          if (dup) {
+            await this.markInboxProcessed(m.id, { ticketId: tid, result: 'auto-linked' });
+            autoLinked++;
+            continue;
+          }
+        }
         await this.addComment({
           ticketId: tid, type: 'received',
           fromEmail: m.fromEmail, fromName: m.fromName,
