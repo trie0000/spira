@@ -47,3 +47,42 @@ export function sanitizeNoteHtml(input: string): string {
     FORBID_TAGS: ['script', 'iframe', 'object', 'embed', 'form', 'button', 'meta', 'link', 'style'],
   });
 }
+
+/** Render a mail body into a host element using whichever of bodyHtml /
+ *  bodyText is most useful.
+ *
+ *  PA's Office 365 Outlook connector hands plain-text mails to us as
+ *  "HTML" that's actually just escaped text with literal `\n` line
+ *  breaks (no `<br>` / `<p>`). innerHTML then collapses those newlines
+ *  to whitespace and the body renders as one long unreadable line.
+ *
+ *  This helper detects that case (HTML body without any block-level
+ *  tags) and rewrites `\n` to `<br>` before sanitization, so the
+ *  user-perceived line breaks survive. Genuine HTML bodies (with
+ *  `<p>` / `<br>` / `<div>` / `<table>` / etc.) are sanitized as-is.
+ *
+ *  Falls back to `<pre>`-style rendering of bodyText when bodyHtml is
+ *  absent or empty.
+ */
+const HTML_BLOCK_RE = /<(br|p|div|table|tr|td|th|li|ul|ol|h[1-6]|blockquote|pre|hr|section|article)\b/i;
+
+export function renderMailBody(
+  el: HTMLElement,
+  bodyHtml: string | null | undefined,
+  bodyText: string | null | undefined,
+): void {
+  const html = (bodyHtml ?? '').trim();
+  if (html) {
+    const looksPlain = !HTML_BLOCK_RE.test(html);
+    const prepared = looksPlain ? html.replace(/\r?\n/g, '<br>') : html;
+    el.innerHTML = sanitizeMailHtml(prepared);
+    return;
+  }
+  const text = bodyText ?? '';
+  if (text) {
+    el.style.whiteSpace = 'pre-wrap';
+    el.textContent = text;
+    return;
+  }
+  el.textContent = '(本文なし)';
+}

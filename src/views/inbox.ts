@@ -3,7 +3,7 @@ import { icon } from '../icons';
 import { ticketStatusList, priorityList } from '../api/sp';
 import { getRepo } from '../api/repo';
 import { setState, getState } from '../state';
-import { sanitizeMailHtml } from '../utils/sanitize';
+import { renderMailBody } from '../utils/sanitize';
 import { openModal, confirmModal } from '../components/modal';
 import { toast } from '../components/toast';
 import { attachColumnResize, savedColWidth } from '../utils/colResize';
@@ -493,13 +493,7 @@ function renderHeaderRow(m: InboxMail): HTMLElement {
 
 function renderExpandedRow(m: InboxMail): HTMLElement {
   const previewBody = el('div', { class: 'spira-th-card-body', style: 'max-height:360px;overflow:auto' });
-  if (m.bodyHtml) previewBody.innerHTML = sanitizeMailHtml(m.bodyHtml);
-  else if (m.bodyText) {
-    previewBody.style.whiteSpace = 'pre-wrap';
-    previewBody.textContent = m.bodyText;
-  } else {
-    previewBody.textContent = '(本文なし)';
-  }
+  renderMailBody(previewBody, m.bodyHtml, m.bodyText);
 
   const meta = (label: string, value: string | HTMLElement) =>
     el('div', { style: 'display:grid;grid-template-columns:120px 1fr;gap:var(--s-3);font-size:var(--fs-sm);padding:var(--s-1) 0' }, [
@@ -531,8 +525,7 @@ export function openNewTicketModal(m: InboxMail): void {
   const dueInput = el('input', { type: 'date', class: 'spira-input' }) as HTMLInputElement;
 
   const previewBody = el('div', { class: 'spira-th-card-body' });
-  if (m.bodyHtml) previewBody.innerHTML = sanitizeMailHtml(m.bodyHtml);
-  else previewBody.textContent = m.bodyText || '(本文なし)';
+  renderMailBody(previewBody, m.bodyHtml, m.bodyText);
 
   const preview = m.id > 0
     ? el('div', { class: 'spira-th-card spira-th-card--received', style: 'max-height:240px;overflow:auto' }, [

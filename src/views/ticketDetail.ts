@@ -3,7 +3,7 @@ import { icon } from '../icons';
 import { ticketStatusList, priorityList } from '../api/sp';
 import { getRepo } from '../api/repo';
 import { setState, getState } from '../state';
-import { sanitizeMailHtml } from '../utils/sanitize';
+import { renderMailBody } from '../utils/sanitize';
 import { buildOwaSearchQuery, OWA_INBOX_URL } from '../utils/owa';
 import { createNoteEditor, htmlToMarkdown } from '../lib/note-editor';
 import { formatTicketTag, formatTicketIdShort, buildCopyableSubject } from '../utils/ticketTag';
@@ -715,8 +715,10 @@ function renderReceivedCard(t: Ticket, c: Comment): HTMLElement {
   ]);
 
   const body = el('div', { class: 'spira-th-card-body' });
-  if (c.isHtml) body.innerHTML = sanitizeMailHtml(c.content);
-  else { body.style.whiteSpace = 'pre-wrap'; body.textContent = c.content; }
+  // renderMailBody handles the awkward case where PA's "Body" returns
+  // a plain-text mail as HTML without any <br>/<p> tags — converting
+  // its literal \n line breaks into <br> so the message stays readable.
+  renderMailBody(body, c.isHtml ? c.content : null, c.isHtml ? null : c.content);
 
   const card = el('div', {
     class: 'spira-th-card spira-th-card--received',
