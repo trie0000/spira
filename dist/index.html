@@ -160,14 +160,39 @@ var Spira = (() => {
     const tag = formatTicketTag(id);
     return core ? `${tag} ${core}` : tag;
   }
+  function normalizeForTagParse(s) {
+    return s.replace(/[＃（）＜＞［］０-９]/g, (c) => {
+      const code = c.charCodeAt(0);
+      if (code >= 65296 && code <= 65305) return String.fromCharCode(code - 65248);
+      switch (code) {
+        case 65283:
+          return "#";
+        case 65288:
+          return "(";
+        case 65289:
+          return ")";
+        case 65308:
+          return "<";
+        case 65310:
+          return ">";
+        case 65339:
+          return "[";
+        case 65341:
+          return "]";
+        default:
+          return c;
+      }
+    });
+  }
   function parseTicketTag(subject) {
-    const m = PRIMARY_RE.exec(subject);
+    const normalized = normalizeForTagParse(subject);
+    const m = PRIMARY_RE.exec(normalized);
     if (m) {
       const n = Number(m[2]);
       return Number.isFinite(n) ? n : null;
     }
     for (const re of LEGACY_RES) {
-      const lm = re.exec(subject);
+      const lm = re.exec(normalized);
       if (lm) {
         const n = Number(lm[1]);
         if (Number.isFinite(n)) return n;
@@ -184,13 +209,13 @@ var Spira = (() => {
       DEFAULT_PREFIX = "";
       PREFIX_MAX = 12;
       PREFIX_RE = /^[A-Za-z0-9_-]*$/;
-      PRIMARY_RE = /\[([A-Za-z0-9_-]{0,12})#(\d+)\]/;
+      PRIMARY_RE = /\[\s*([A-Za-z0-9_-]{0,12})\s*#\s*(\d+)\s*\]/;
       LEGACY_RES = [
-        /\[CASE-(\d+)\]/i,
+        /\[\s*CASE-\s*(\d+)\s*\]/i,
         // earlier "bracket-case" preset
-        /\(#(\d+)\)/,
+        /\(\s*#\s*(\d+)\s*\)/,
         // earlier "paren-hash" preset
-        /<#(\d+)>/
+        /<\s*#\s*(\d+)\s*>/
         // earlier "angle-hash" preset
       ];
     }
@@ -535,9 +560,15 @@ var Spira = (() => {
           for (const m of store.inbox.filter((x) => !x.isProcessed)) {
             try {
               const tid = parseTicketTag(m.subject);
-              if (tid == null) continue;
+              if (tid == null) {
+                console.warn(`[spira/sync] inbox #${m.id}: no ticket tag in subject "${m.subject?.slice(0, 80)}"`);
+                continue;
+              }
               const ticket = store.tickets.find((t) => t.id === tid && !t.isDeleted);
-              if (!ticket) continue;
+              if (!ticket) {
+                console.warn(`[spira/sync] inbox #${m.id}: tag parsed as #${tid} but ticket not found / deleted`);
+                continue;
+              }
               if (m.internetMessageId) {
                 const dup = store.comments.some(
                   (c) => c.ticketId === tid && c.type === "received" && c.internetMessageId === m.internetMessageId
@@ -1225,9 +1256,15 @@ var Spira = (() => {
           for (const m of unprocessed) {
             try {
               const tid = parseTicketTag(m.subject);
-              if (tid == null) continue;
+              if (tid == null) {
+                console.warn(`[spira/sync] inbox #${m.id}: no ticket tag in subject "${m.subject?.slice(0, 80)}"`);
+                continue;
+              }
               const ticket = byId.get(tid);
-              if (!ticket || ticket.isDeleted) continue;
+              if (!ticket || ticket.isDeleted) {
+                console.warn(`[spira/sync] inbox #${m.id}: tag parsed as #${tid} but ticket ${ticket ? "is deleted" : "not found"}`);
+                continue;
+              }
               if (m.internetMessageId) {
                 const existing = await this.listComments(tid);
                 const dup = existing.some(
@@ -8084,15 +8121,15 @@ var Spira = (() => {
       title: "\u30AF\u30EA\u30C3\u30AF\u3067\u30B3\u30D4\u30FC",
       onclick: async () => {
         try {
-          await navigator.clipboard.writeText("0.0.1-81aaf4f+ (2026-05-15T00:17:01Z)");
+          await navigator.clipboard.writeText("0.0.1-80c5239+ (2026-05-15T00:47:29Z)");
           buildLabel.textContent = "\u2713 \u30B3\u30D4\u30FC\u3057\u307E\u3057\u305F";
           setTimeout(() => {
-            buildLabel.textContent = `build: ${"0.0.1-81aaf4f+ (2026-05-15T00:17:01Z)"}`;
+            buildLabel.textContent = `build: ${"0.0.1-80c5239+ (2026-05-15T00:47:29Z)"}`;
           }, 1200);
         } catch {
         }
       }
-    }, [`build: ${"0.0.1-81aaf4f+ (2026-05-15T00:17:01Z)"}`]);
+    }, [`build: ${"0.0.1-80c5239+ (2026-05-15T00:47:29Z)"}`]);
     const menu = el("div", {
       class: "spira-menu spira-settings-menu",
       style: "position:fixed;z-index:var(--z-modal);min-width:280px"
@@ -8620,7 +8657,7 @@ var Spira = (() => {
       setState({ errorBanner: `\u521D\u671F\u5316\u306B\u5931\u6557\u3057\u307E\u3057\u305F: ${msg}` });
       toast(root2, `\u521D\u671F\u5316\u30A8\u30E9\u30FC: ${msg}`, "error");
     }
-    console.log(`[spira] build: ${"0.0.1-81aaf4f+ (2026-05-15T00:17:01Z)"}`);
+    console.log(`[spira] build: ${"0.0.1-80c5239+ (2026-05-15T00:47:29Z)"}`);
     console.log(`[spira] repo mode: ${getRepoMode()}`);
   }
   async function doSync(root2, silent = false) {
