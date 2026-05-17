@@ -18,9 +18,13 @@ interface State {
   trashCount: number;
   // cached AD picker users
   users: SiteUser[];
+  /** 現在ログインしているユーザー (bootstrap で取得)。 */
+  currentUser: SiteUser | null;
   // bootstrap status
   ready: boolean;
   errorBanner: string | null;
+  /** 古いビルドを使っている時の更新案内バナー。null なら非表示。 */
+  updateBanner: { message: string; url: string | null } | null;
 }
 
 type Listener = () => void;
@@ -35,8 +39,10 @@ const state: State = {
   inboxCount: 0,
   trashCount: 0,
   users: [],
+  currentUser: null,
   ready: false,
   errorBanner: null,
+  updateBanner: null,
 };
 
 const listeners = new Set<Listener>();

@@ -168,6 +168,8 @@ export function createNoteEditor(opts: NoteEditorOptions = {}): NoteEditor {
     /** Block currently containing the caret (selectionchange-driven). */
     caretBlock: null as HTMLElement | null,
     dragSrc: null as HTMLElement | null,
+    /** Table row/col swap drag state. */
+    tableSwap: null as { kind: 'row' | 'col'; srcRowIdx: number; srcColIdx: number; tbl: HTMLTableElement } | null,
   };
 
   const markDirty = (): void => { opts.onDirty?.(); };
@@ -768,16 +770,106 @@ export function createNoteEditor(opts: NoteEditorOptions = {}): NoteEditor {
     });
     tbl.addEventListener('input', () => markDirty());
 
-    // Right-click on a cell opens the row/column context menu.
-    tbl.addEventListener('contextmenu', (e) => {
+    // 行/列ハンドルのドラッグ操作はテーブル外でも有効。dragover/drop は
+    // document レベルで受けて、カーソル位置から挿入先の gap を計算し、
+    // 強調ライン (.ne-tbl-drop-line) を表示する。実体登録は 1 度だけ。
+    if (!(tbl as unknown as { __spiraSwapWired?: boolean }).__spiraSwapWired) {
+      (tbl as unknown as { __spiraSwapWired?: boolean }).__spiraSwapWired = true;
+      const onDocDragOver = (e: DragEvent): void => {
+        const sw = state.tableSwap;
+        if (!sw || sw.tbl !== tbl) return;
+        e.preventDefault();
+        if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+        updateTableDropLine(tbl, sw.kind, e.clientX, e.clientY);
+      };
+      const onDocDrop = (e: DragEvent): void => {
+        const sw = state.tableSwap;
+        if (!sw || sw.tbl !== tbl) return;
+        e.preventDefault();
+        const beforeIdx = computeTableInsertBefore(tbl, sw.kind, e.clientX, e.clientY);
+        if (sw.kind === 'row') moveRowBefore(tbl, sw.srcRowIdx, beforeIdx);
+        else moveColBefore(tbl, sw.srcColIdx, beforeIdx);
+        clearTableDropLine();
+        state.tableSwap = null;
+        // 行/列移動後はハンドルが旧 index の位置に残るので一旦非表示に。
+        // 次のセルクリックで新しい位置に再配置される。
+        const wrap = tbl.closest('.ne-table-wrap') as HTMLElement | null;
+        if (wrap) hideTableHandles(wrap);
+      };
+      document.addEventListener('dragover', onDocDragOver);
+      document.addEventListener('drop', onDocDrop);
+    }
+
+    // Unified table interaction (Notion-style):
+    //   - Click a cell → row + column handles appear at the row's left
+    //     and column's top edges. Hover-only affordance — no right-click
+    //     menu, no border-click hit zones.
+    //   - Click a handle → opens an action picker (same chrome as the
+    //     slash menu) with insert / delete / etc.
+    //   - Drag mouse from cell A to cell B → highlights the range.
+    let dragAnchor: HTMLTableCellElement | null = null;
+    const clearCellSelection = (): void => {
+      tbl.querySelectorAll<HTMLElement>('.ne-cell-selected').forEach((c) =>
+        c.classList.remove('ne-cell-selected'),
+      );
+    };
+    const paintRange = (a: HTMLTableCellElement, b: HTMLTableCellElement): void => {
+      clearCellSelection();
+      const ra = a.parentElement as HTMLTableRowElement;
+      const rb = b.parentElement as HTMLTableRowElement;
+      const allRows = Array.from(tbl.tBodies[0]?.rows ?? tbl.rows);
+      const r1 = Math.min(allRows.indexOf(ra), allRows.indexOf(rb));
+      const r2 = Math.max(allRows.indexOf(ra), allRows.indexOf(rb));
+      const c1 = Math.min(Array.from(ra.cells).indexOf(a), Array.from(rb.cells).indexOf(b));
+      const c2 = Math.max(Array.from(ra.cells).indexOf(a), Array.from(rb.cells).indexOf(b));
+      for (let i = r1; i <= r2; i++) {
+        const row = allRows[i]!;
+        for (let j = c1; j <= c2; j++) {
+          row.cells[j]?.classList.add('ne-cell-selected');
+        }
+      }
+    };
+
+    tbl.addEventListener('mousedown', (e) => {
       const cell = (e.target as HTMLElement).closest('td,th') as HTMLTableCellElement | null;
-      if (!cell) return;
-      e.preventDefault();
-      showTableContextMenu(tbl, cell, (e as MouseEvent).clientX, (e as MouseEvent).clientY);
+      if (!cell || !tbl.contains(cell)) return;
+      const t = e.target as HTMLElement;
+      if (t.classList.contains('ne-table-resize')) return;
+      if (t.closest('.ne-table-add')) return;
+      if (t.closest('.ne-table-handle')) return;
+      clearCellSelection();
+      dragAnchor = cell;
+      // Position the row + column handles for this cell.
+      positionTableHandles(wrap, tbl, cell);
+    });
+
+    tbl.addEventListener('mouseover', (e) => {
+      if (!dragAnchor) return;
+      const ev = e as MouseEvent;
+      if ((ev.buttons & 1) === 0) { dragAnchor = null; return; }
+      const cell = (ev.target as HTMLElement).closest('td,th') as HTMLTableCellElement | null;
+      if (!cell || !tbl.contains(cell)) return;
+      if (cell === dragAnchor) return;
+      paintRange(dragAnchor, cell);
+      window.getSelection()?.removeAllRanges();
+    });
+
+    document.addEventListener('mouseup', () => { dragAnchor = null; });
+    document.addEventListener('mousedown', (e) => {
+      // Outside-table click clears the visual range AND the handles.
+      // 行/列ハンドル自身 + picker メニュー上のクリックは「テーブル外」
+      // とみなさない (ハンドルクリック・ドラッグを許可する)。
+      const tgt = e.target as Node;
+      if (tbl.contains(tgt)) return;
+      const te = tgt as HTMLElement;
+      if (te.closest?.('.ne-table-handle, .ne-table-picker, .ne-table-resize')) return;
+      clearCellSelection();
+      hideTableHandles(wrap);
     });
 
     ensureTableEdgeButtons(wrap);
     ensureResizeHandles(tbl);
+    ensureTableHandles(wrap, tbl);
   }
 
   function moveCell(cell: HTMLTableCellElement, dir: 1 | -1): void {
@@ -915,6 +1007,15 @@ export function createNoteEditor(opts: NoteEditorOptions = {}): NoteEditor {
     markDirty();
   }
 
+  /** 先頭行をヘッダ行 (色付き) に変換 / 解除するトグル。
+   *  クラス `.ne-table-has-header` の付け外しで切り替える。
+   *  色は CSS で固定 (accent-soft 系)。markdown round-trip は
+   *  sidecar コメント `<!--ne-thead-->` で行う。 */
+  function toggleHeaderRow(tbl: HTMLTableElement): void {
+    tbl.classList.toggle('ne-table-has-header');
+    markDirty();
+  }
+
   function deleteColAt(tbl: HTMLTableElement, colIdx: number): void {
     if (colCountOf(tbl) <= 1) return; // keep at least 1 column
     for (const tr of Array.from(tbl.rows)) {
@@ -924,6 +1025,134 @@ export function createNoteEditor(opts: NoteEditorOptions = {}): NoteEditor {
     const cg = ensureColgroup(tbl);
     if (cg.children[colIdx]) cg.children[colIdx]!.remove();
     ensureResizeHandles(tbl);
+    markDirty();
+  }
+
+  /** テーブル全体 (wrapper の .ne-table-wrap ごと) を削除する。 */
+  function deleteTable(tbl: HTMLTableElement): void {
+    const wrap = tbl.closest('.ne-table-wrap');
+    (wrap ?? tbl).remove();
+    markDirty();
+  }
+
+  /** カーソル位置から「挿入先 row/col index (beforeIdx)」を算出。
+   *  beforeIdx === rows/cols.length なら末尾追加。 */
+  function computeTableInsertBefore(
+    tbl: HTMLTableElement, kind: 'row' | 'col', clientX: number, clientY: number,
+  ): number {
+    if (kind === 'row') {
+      const rows = Array.from(tbl.rows);
+      for (let i = 0; i < rows.length; i++) {
+        const r = rows[i]!.getBoundingClientRect();
+        if (clientY < r.top + r.height / 2) return i;
+      }
+      return rows.length;
+    } else {
+      const firstRow = tbl.rows[0];
+      if (!firstRow) return 0;
+      const cells = Array.from(firstRow.cells);
+      for (let i = 0; i < cells.length; i++) {
+        const r = cells[i]!.getBoundingClientRect();
+        if (clientX < r.left + r.width / 2) return i;
+      }
+      return cells.length;
+    }
+  }
+
+  /** ドロップ位置インジケータライン (row なら水平、col なら垂直) を
+   *  document.body に直接配置 (position:fixed)。テーブル全幅/全高に
+   *  跨る一本の太いラインで挿入位置を強調。 */
+  function updateTableDropLine(
+    tbl: HTMLTableElement, kind: 'row' | 'col', clientX: number, clientY: number,
+  ): void {
+    clearTableDropLine();
+    const beforeIdx = computeTableInsertBefore(tbl, kind, clientX, clientY);
+    const tblRect = tbl.getBoundingClientRect();
+    const line = document.createElement('div');
+    line.className = 'ne-tbl-drop-line';
+    line.style.position = 'fixed';
+    line.style.zIndex = '2147483700';
+    line.style.background = 'var(--ne-accent, #4a7c59)';
+    line.style.pointerEvents = 'none';
+    line.style.borderRadius = '2px';
+    line.style.boxShadow = '0 0 0 1px rgba(255,255,255,0.8)';
+    if (kind === 'row') {
+      const rows = Array.from(tbl.rows);
+      let y: number;
+      if (beforeIdx >= rows.length) {
+        y = (rows[rows.length - 1]?.getBoundingClientRect().bottom ?? tblRect.bottom);
+      } else {
+        y = rows[beforeIdx]!.getBoundingClientRect().top;
+      }
+      line.style.left = `${tblRect.left}px`;
+      line.style.width = `${tblRect.width}px`;
+      line.style.top = `${y - 2}px`;
+      line.style.height = '4px';
+    } else {
+      const firstRow = tbl.rows[0];
+      if (!firstRow) return;
+      const cells = Array.from(firstRow.cells);
+      let x: number;
+      if (beforeIdx >= cells.length) {
+        x = (cells[cells.length - 1]?.getBoundingClientRect().right ?? tblRect.right);
+      } else {
+        x = cells[beforeIdx]!.getBoundingClientRect().left;
+      }
+      line.style.top = `${tblRect.top}px`;
+      line.style.height = `${tblRect.height}px`;
+      line.style.left = `${x - 2}px`;
+      line.style.width = '4px';
+    }
+    document.body.appendChild(line);
+  }
+
+  function clearTableDropLine(): void {
+    document.querySelectorAll('.ne-tbl-drop-line').forEach(n => n.remove());
+  }
+
+  /** 行を「beforeIdx の直前」に移動。beforeIdx === rows.length なら末尾。 */
+  function moveRowBefore(tbl: HTMLTableElement, srcIdx: number, beforeIdx: number): void {
+    const tbody = tbl.tBodies[0] ?? tbl;
+    const rows = Array.from(tbody.rows);
+    if (srcIdx < 0 || srcIdx >= rows.length) return;
+    const src = rows[srcIdx]!;
+    if (beforeIdx >= rows.length) {
+      tbody.appendChild(src);
+    } else if (beforeIdx >= 0) {
+      const before = rows[beforeIdx]!;
+      if (src === before) return;
+      tbody.insertBefore(src, before);
+    }
+    markDirty();
+  }
+
+  /** 列を「beforeIdx の直前」に移動 (各行 cell + colgroup col を同時)。 */
+  function moveColBefore(tbl: HTMLTableElement, srcIdx: number, beforeIdx: number): void {
+    const cg = ensureColgroup(tbl);
+    const cols = Array.from(cg.children) as HTMLTableColElement[];
+    if (srcIdx < 0 || srcIdx >= cols.length) return;
+    const srcCol = cols[srcIdx]!;
+    // colgroup の col 移動
+    if (beforeIdx >= cols.length) {
+      cg.appendChild(srcCol);
+    } else if (beforeIdx >= 0) {
+      const beforeCol = cols[beforeIdx]!;
+      if (srcCol === beforeCol) return;
+      cg.insertBefore(srcCol, beforeCol);
+    }
+    // 各行のセル移動
+    for (const tr of Array.from(tbl.rows)) {
+      const cells = Array.from(tr.cells);
+      if (cells.length <= srcIdx) continue;
+      const src = cells[srcIdx]!;
+      if (beforeIdx >= cells.length) {
+        tr.appendChild(src);
+      } else if (beforeIdx >= 0) {
+        const before = cells[beforeIdx]!;
+        if (src === before) continue;
+        tr.insertBefore(src, before);
+      }
+    }
     markDirty();
   }
 
@@ -997,9 +1226,10 @@ export function createNoteEditor(opts: NoteEditorOptions = {}): NoteEditor {
   function ensureResizeHandles(tbl: HTMLTableElement): void {
     ensureColgroup(tbl);
     for (const tr of Array.from(tbl.rows)) {
-      // Skip the last cell in each row — resizing it doesn't have a
-      // natural neighbor to take the space from.
-      for (let i = 0; i < tr.cells.length - 1; i++) {
+      // 全列にリサイズハンドルを付ける (最右列も含む)。最右列のドラッグ
+      // はその列の col.style.width だけを変えるので、テーブル全体の幅が
+      // 拡縮する形になる。
+      for (let i = 0; i < tr.cells.length; i++) {
         const cell = tr.cells[i] as HTMLElement;
         if (cell.querySelector(':scope > .ne-table-resize')) continue;
         cell.style.position = cell.style.position || 'relative';
@@ -1071,72 +1301,186 @@ export function createNoteEditor(opts: NoteEditorOptions = {}): NoteEditor {
     });
   }
 
-  // ── Right-click context menu (row / col ops) ───────────────────────
+  // ── Cell-focus row + column handles ────────────────────────────────
+  //
+  // When a cell is clicked we surface two small "drag" handles in the
+  // gutter — one on the left of the row, one on the top of the column.
+  // Clicking either handle opens a picker (slash-menu styled) with
+  // insert / delete actions scoped to that row or column.
+  //
+  // Handles live as siblings INSIDE `.ne-table-wrap` (which is already
+  // `position: relative`), so they're positioned in the same coordinate
+  // space as the table cells and follow horizontal scroll naturally.
 
-  function showTableContextMenu(
-    tbl: HTMLTableElement,
-    cell: HTMLTableCellElement,
-    clientX: number,
-    clientY: number,
-  ): void {
-    // Close any existing menu so we don't stack them on rapid right-clicks.
-    document.querySelectorAll('.ne-table-menu').forEach((n) => n.remove());
+  function ensureTableHandles(wrap: HTMLElement, _tbl: HTMLTableElement): void {
+    if (wrap.querySelector(':scope > .ne-table-handle--row')) return;
+    const rowH = document.createElement('div');
+    rowH.className = 'ne-table-handle ne-table-handle--row';
+    rowH.contentEditable = 'false';
+    rowH.title = '行アクション';
+    rowH.innerHTML = dragDotsSvg();
+    rowH.style.display = 'none';
+    wrap.appendChild(rowH);
+
+    const colH = document.createElement('div');
+    colH.className = 'ne-table-handle ne-table-handle--col';
+    colH.contentEditable = 'false';
+    colH.title = '列アクション';
+    colH.innerHTML = dragDotsSvg();
+    colH.style.display = 'none';
+    wrap.appendChild(colH);
+  }
+
+  function dragDotsSvg(): string {
+    // 6-dot drag affordance, same iconography as the block drag handle.
+    return (
+      '<svg viewBox="0 0 10 16" width="10" height="16" fill="currentColor" aria-hidden="true">' +
+      '<circle cx="2" cy="3" r="1.2"/><circle cx="2" cy="8" r="1.2"/><circle cx="2" cy="13" r="1.2"/>' +
+      '<circle cx="8" cy="3" r="1.2"/><circle cx="8" cy="8" r="1.2"/><circle cx="8" cy="13" r="1.2"/>' +
+      '</svg>'
+    );
+  }
+
+  function hideTableHandles(wrap: HTMLElement): void {
+    wrap.querySelectorAll<HTMLElement>('.ne-table-handle').forEach((h) => {
+      h.style.display = 'none';
+    });
+  }
+
+  function positionTableHandles(wrap: HTMLElement, tbl: HTMLTableElement, cell: HTMLTableCellElement): void {
+    const rowH = wrap.querySelector<HTMLElement>('.ne-table-handle--row');
+    const colH = wrap.querySelector<HTMLElement>('.ne-table-handle--col');
+    if (!rowH || !colH) return;
 
     const tr = cell.parentElement as HTMLTableRowElement;
     const rowIdx = Array.from(tbl.tBodies[0]?.rows ?? tbl.rows).indexOf(tr);
     const colIdx = Array.from(tr.cells).indexOf(cell);
 
+    // All offsets are computed relative to the wrap's content box so
+    // they don't drift when the wrap is horizontally scrolled.
+    const wrapRect = wrap.getBoundingClientRect();
+    const trRect = tr.getBoundingClientRect();
+    const cellRect = cell.getBoundingClientRect();
+
+    rowH.style.display = 'flex';
+    rowH.style.top = `${trRect.top - wrapRect.top + (trRect.height - 16) / 2}px`;
+    rowH.style.left = `${trRect.left - wrapRect.left - 18}px`;
+    attachTableHandleBehavior(rowH, 'row', tbl, rowIdx, colIdx);
+
+    // 列ハンドルは「テーブルの最上行の上」に常時配置 (どのセルを
+    // クリックしても上端に出る)。クリックしたセルの真上に出すと
+    // 行の途中にハンドルが現れて操作対象が分かりにくいため。
+    const topRowRect = (tbl.rows[0] ?? tr).getBoundingClientRect();
+    colH.style.display = 'flex';
+    colH.style.top = `${topRowRect.top - wrapRect.top - 18}px`;
+    colH.style.left = `${cellRect.left - wrapRect.left + (cellRect.width - 16) / 2}px`;
+    attachTableHandleBehavior(colH, 'col', tbl, rowIdx, colIdx);
+  }
+
+  /** 行/列ハンドルの挙動: クリックで picker、ドラッグで行/列の入れ替え。 */
+  function attachTableHandleBehavior(
+    handle: HTMLElement,
+    kind: 'row' | 'col',
+    tbl: HTMLTableElement,
+    rowIdx: number,
+    colIdx: number,
+  ): void {
+    // 既存のリスナーをクリア (re-position で何度も呼ばれるため)
+    handle.onclick = null;
+    handle.onmousedown = null;
+    handle.ondragstart = null;
+
+    // クリック (ドラッグなし) → picker を開く
+    handle.onclick = (e: MouseEvent): void => {
+      e.preventDefault();
+      e.stopPropagation();
+      showTablePicker(handle, kind, tbl, rowIdx, colIdx);
+    };
+
+    // ドラッグ開始 → 入れ替えモード
+    handle.draggable = true;
+    handle.ondragstart = (e: DragEvent): void => {
+      if (!e.dataTransfer) return;
+      e.dataTransfer.setData(
+        'application/x-spira-table-swap',
+        JSON.stringify({ kind, rowIdx, colIdx }),
+      );
+      e.dataTransfer.effectAllowed = 'move';
+      state.tableSwap = { kind, srcRowIdx: rowIdx, srcColIdx: colIdx, tbl };
+    };
+    handle.ondragend = (): void => {
+      state.tableSwap = null;
+      clearTableDropLine();
+    };
+  }
+
+  // ── Unified action picker (slash-menu chrome) ──────────────────────
+
+  function showTablePicker(
+    anchor: HTMLElement,
+    kind: 'row' | 'col',
+    tbl: HTMLTableElement,
+    rowIdx: number,
+    colIdx: number,
+  ): void {
+    document.querySelectorAll('.ne-table-picker').forEach((n) => n.remove());
+
+    const hasHeader = tbl.classList.contains('ne-table-has-header');
+    const items: { icon: string; label: string; desc?: string; action: () => void }[] =
+      kind === 'row'
+        ? [
+          // 先頭行のみ: ヘッダ行への変換/解除トグル
+          ...(rowIdx === 0 ? [{
+            icon: hasHeader ? '⬜' : '🏷',
+            label: hasHeader ? '通常の行に戻す' : '見出し行に変換',
+            action: () => toggleHeaderRow(tbl),
+          }] : []),
+          { icon: '↑', label: '上に行を挿入', action: () => insertRowAt(tbl, rowIdx) },
+          { icon: '↓', label: '下に行を挿入', action: () => insertRowAt(tbl, rowIdx + 1) },
+          { icon: '🗑', label: 'この行を削除', action: () => deleteRowAt(tbl, rowIdx) },
+          { icon: '⛔', label: 'テーブル全体を削除', action: () => deleteTable(tbl) },
+        ]
+        : [
+          { icon: '←', label: '左に列を挿入', action: () => insertColAt(tbl, colIdx) },
+          { icon: '→', label: '右に列を挿入', action: () => insertColAt(tbl, colIdx + 1) },
+          { icon: '🗑', label: 'この列を削除', action: () => deleteColAt(tbl, colIdx) },
+          { icon: '⛔', label: 'テーブル全体を削除', action: () => deleteTable(tbl) },
+        ];
+
     const menu = document.createElement('div');
-    menu.className = 'ne-table-menu';
-    menu.style.left = `${clientX}px`;
-    menu.style.top  = `${clientY}px`;
+    menu.className = 'ne-slash ne-table-picker on';
     menu.contentEditable = 'false';
-
-    const item = (label: string, action: () => void): HTMLElement => {
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.className = 'ne-table-menu-item';
-      b.textContent = label;
-      b.addEventListener('mousedown', (e) => {
-        // mousedown (not click) so the menu fires before the document
-        // click handler below tears it down.
+    for (const it of items) {
+      const row = document.createElement('div');
+      row.className = 'ne-slash-item';
+      row.innerHTML =
+        `<span class="ne-slash-icon">${it.icon}</span>` +
+        `<span class="ne-slash-body"><span class="ne-slash-name"></span></span>`;
+      (row.querySelector('.ne-slash-name') as HTMLElement).textContent = it.label;
+      row.addEventListener('mousedown', (e) => {
         e.preventDefault();
-        action();
+        it.action();
         menu.remove();
+        document.removeEventListener('mousedown', close);
+        document.removeEventListener('keydown', close);
       });
-      return b;
-    };
-    const sep = (): HTMLElement => {
-      const d = document.createElement('div');
-      d.className = 'ne-table-menu-sep';
-      return d;
-    };
+      menu.appendChild(row);
+    }
 
-    menu.append(
-      item('↑ 上に行を挿入',   () => insertRowAt(tbl, rowIdx)),
-      item('↓ 下に行を挿入',   () => insertRowAt(tbl, rowIdx + 1)),
-      sep(),
-      item('← 左に列を挿入',   () => insertColAt(tbl, colIdx)),
-      item('→ 右に列を挿入',   () => insertColAt(tbl, colIdx + 1)),
-      sep(),
-      item('🗑 行を削除',      () => deleteRowAt(tbl, rowIdx)),
-      item('🗑 列を削除',      () => deleteColAt(tbl, colIdx)),
-    );
-
-    // Position into floating container (same stacking context as
-    // slash menu / floating toolbar — punches through host overlays).
     const floatRoot = opts.floatingContainer ?? document.body;
     floatRoot.appendChild(menu);
 
-    // Clamp inside the viewport so the menu isn't clipped at the right
-    // or bottom edge.
+    // Anchor the picker to the clicked handle. fixed positioning so it
+    // doesn't get clipped by overflow ancestors.
+    const a = anchor.getBoundingClientRect();
+    menu.style.left = `${a.right + 6}px`;
+    menu.style.top = `${a.top}px`;
     requestAnimationFrame(() => {
       const r = menu.getBoundingClientRect();
       if (r.right > window.innerWidth) menu.style.left = `${window.innerWidth - r.width - 8}px`;
       if (r.bottom > window.innerHeight) menu.style.top = `${window.innerHeight - r.height - 8}px`;
     });
 
-    // Close on outside click / Escape.
     const close = (e: Event): void => {
       if (e instanceof KeyboardEvent && e.key !== 'Escape') return;
       if (e instanceof MouseEvent && menu.contains(e.target as Node)) return;
@@ -1272,6 +1616,24 @@ export function createNoteEditor(opts: NoteEditorOptions = {}): NoteEditor {
     } else {
       ed.appendChild(img);
     }
+    // Shrink large images to a comfortable initial size — screenshots
+    // are often 1920+ px wide and dominate the memo if dropped raw. We
+    // cap initial display width at min(60% of editor width, 480px) so
+    // the image is visible at a glance. Users can drag-resize from
+    // there. Smaller images (natural < cap) are left untouched.
+    const sizeOnLoad = (): void => {
+      const natural = img.naturalWidth || 0;
+      if (!natural) return;
+      const editorW = ed.clientWidth || 600;
+      const cap = Math.min(editorW * 0.6, 480);
+      if (natural > cap) {
+        img.style.width = `${Math.round(cap)}px`;
+        img.style.height = 'auto';
+        markDirty();
+      }
+    };
+    if (img.complete && img.naturalWidth) sizeOnLoad();
+    else img.addEventListener('load', sizeOnLoad, { once: true });
     markDirty();
   }
 
@@ -1283,6 +1645,54 @@ export function createNoteEditor(opts: NoteEditorOptions = {}): NoteEditor {
       r.readAsDataURL(file);
     });
   }
+
+  // ─── Image resize (drag bottom-right corner) ─────────────────────
+  //
+  // Hovering over an `.ne-img` shows an outline + a resize cursor in
+  // its bottom-right ~16px. Dragging from there changes the image's
+  // inline `width` (height stays `auto` so aspect ratio is preserved).
+  // The new width is round-tripped through markdown via a `{w=N}`
+  // suffix on the image markdown (handled in markdown.ts).
+  const RESIZE_ZONE = 16;
+  const MIN_IMG_WIDTH = 50;
+
+  ed.addEventListener('mousemove', (e) => {
+    const t = e.target as HTMLElement;
+    if (t instanceof HTMLImageElement && t.classList.contains('ne-img')) {
+      const r = t.getBoundingClientRect();
+      const inHandle = e.clientX >= r.right - RESIZE_ZONE && e.clientY >= r.bottom - RESIZE_ZONE;
+      t.style.cursor = inHandle ? 'nwse-resize' : '';
+    }
+  });
+
+  ed.addEventListener('mousedown', (e) => {
+    const t = e.target as HTMLElement;
+    if (!(t instanceof HTMLImageElement) || !t.classList.contains('ne-img')) return;
+    const r = t.getBoundingClientRect();
+    const inHandle = e.clientX >= r.right - RESIZE_ZONE && e.clientY >= r.bottom - RESIZE_ZONE;
+    if (!inHandle) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    const startX = e.clientX;
+    const startW = t.offsetWidth;
+    // Cap at the editor's content width so the image can't escape its column.
+    const maxW = Math.max(MIN_IMG_WIDTH, ed.clientWidth - 8);
+
+    const onMove = (em: MouseEvent): void => {
+      const newW = Math.min(maxW, Math.max(MIN_IMG_WIDTH, startW + (em.clientX - startX)));
+      t.style.width = `${Math.round(newW)}px`;
+      t.style.height = 'auto';
+    };
+    const onUp = (): void => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      markDirty();
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  });
 
   ed.addEventListener('paste', async (e) => {
     const items = e.clipboardData?.items;
@@ -1349,8 +1759,25 @@ export function createNoteEditor(opts: NoteEditorOptions = {}): NoteEditor {
   function positionHandleAt(target: HTMLElement): void {
     const rect = target.getBoundingClientRect();
     const handleH = 20;
+    // ハンドル x 位置:
+    //   - 内部メモカード (.spira-th-card--note): カードの左枠線とメモ先頭
+    //     文字の間 (左 padding 領域) に配置。border 3px の直後 + 2px 余白。
+    //   - その他のカード (received など): カード外側の左に配置。
+    //   - カード外: ブロックの左から 22px 左。
+    const noteCard = target.closest<HTMLElement>('.spira-th-card--note');
+    const otherCard = !noteCard
+      ? target.closest<HTMLElement>('.spira-th-card--received')
+      : null;
+    let xLeft: number;
+    if (noteCard) {
+      xLeft = noteCard.getBoundingClientRect().left + 3 + 2; // border + 余白
+    } else if (otherCard) {
+      xLeft = otherCard.getBoundingClientRect().left - 22;
+    } else {
+      xLeft = rect.left - 22;
+    }
     handle.style.top = (rect.top + Math.max(0, (rect.height - handleH) / 2)) + 'px';
-    handle.style.left = (rect.left - 22) + 'px';
+    handle.style.left = xLeft + 'px';
     handle.style.height = handleH + 'px';
     handle.style.display = 'flex';
   }
@@ -1371,12 +1798,15 @@ export function createNoteEditor(opts: NoteEditorOptions = {}): NoteEditor {
   // Cursor traveling between the editor block and the handle passes through
   // a ~22px gap that's neither inside `ed` nor `handle`. A naive
   // `if (!ed.contains(t) && !handle.contains(t)) hide()` flickers the
-  // handle off mid-travel. Use a geometric hit zone instead: ed's bbox
-  // extended ~40px to the left counts as "still hovering". Once the cursor
-  // leaves both ed's extended zone AND the handle, we drop hoverBlock and
-  // fall back to caretBlock (or hide if there's no caret).
+  // handle off mid-travel. Use a geometric hit zone instead.
+  // 内部メモカード内では「カード左 border 領域」もホバー有効範囲に含める
+  // — カードのアクセントボーダー (3px) を狙ってハンドルを呼び出せるよう
+  // にするため。
   const onDocMouseMove = (e: MouseEvent): void => {
-    const r = ed.getBoundingClientRect();
+    const card = ed.closest<HTMLElement>(
+      '.spira-th-card--note, .spira-th-card--received',
+    );
+    const r = (card ?? ed).getBoundingClientRect();
     const hr = handle.getBoundingClientRect();
     const inExtendedEd =
       e.clientX >= r.left - 44 && e.clientX <= r.right &&
@@ -1393,6 +1823,35 @@ export function createNoteEditor(opts: NoteEditorOptions = {}): NoteEditor {
   };
   document.addEventListener('mousemove', onDocMouseMove);
 
+  // カードの border / margin 領域を hover すると、e.target はカード自身
+  // (ed の外) になり mousemove on ed が発火しない。document-level listener
+  // で「カード境界上にいるが ed の外」というケースを拾い、Y 座標から
+  // 該当ブロックを推測して hoverBlock をセットする。
+  const onDocCardHover = (e: MouseEvent): void => {
+    const card = ed.closest<HTMLElement>(
+      '.spira-th-card--note, .spira-th-card--received',
+    );
+    if (!card) return;
+    if (ed.contains(e.target as Node)) return; // ed 内なら ed の mousemove に任せる
+    const cardRect = card.getBoundingClientRect();
+    if (
+      e.clientX < cardRect.left - 4 || e.clientX > cardRect.right + 4 ||
+      e.clientY < cardRect.top      || e.clientY > cardRect.bottom
+    ) return;
+    // Y 座標 → ブロック特定 (editor 配下の direct children を走査)
+    const blocks = Array.from(ed.children) as HTMLElement[];
+    let hit: HTMLElement | null = null;
+    for (const b of blocks) {
+      const br = b.getBoundingClientRect();
+      if (e.clientY >= br.top - 2 && e.clientY <= br.bottom + 2) { hit = b; break; }
+    }
+    if (hit && hit !== state.hoverBlock) {
+      state.hoverBlock = hit;
+      refreshHandle();
+    }
+  };
+  document.addEventListener('mousemove', onDocCardHover);
+
   handle.addEventListener('dragstart', (e) => {
     const src = effectiveHandleBlock();
     if (!src) { e.preventDefault(); return; }
@@ -1407,18 +1866,71 @@ export function createNoteEditor(opts: NoteEditorOptions = {}): NoteEditor {
     ed.querySelectorAll('.ne-drop-line').forEach((n) => n.remove());
   });
 
+  // 挿入位置インジケータの更新 (ed への dragover + カード padding 越しの
+  // document-level dragover 両方から共用)。カーソル Y だけでブロック
+  // 間のどこに挿入するかを決める。
+  const updateDropLine = (clientY: number): void => {
+    if (!state.dragSrc) return;
+    const blocks = (Array.from(ed.children) as HTMLElement[])
+      .filter((b) => b !== state.dragSrc && !b.classList.contains('ne-drop-line'));
+    let insertBefore: HTMLElement | null = null;
+    for (const b of blocks) {
+      const r = b.getBoundingClientRect();
+      if (clientY < r.top + r.height / 2) { insertBefore = b; break; }
+    }
+    ed.querySelectorAll('.ne-drop-line').forEach((n) => n.remove());
+    const line = document.createElement('div');
+    line.className = 'ne-drop-line';
+    if (insertBefore) ed.insertBefore(line, insertBefore);
+    else ed.appendChild(line);
+  };
+
   ed.addEventListener('dragover', (e) => {
     if (!state.dragSrc) return;
     e.preventDefault();
     e.dataTransfer!.dropEffect = 'move';
-    const target = topBlockOf(e.target as Node);
-    if (!target || target === state.dragSrc) return;
-    const r = target.getBoundingClientRect();
-    const before = e.clientY < r.top + r.height / 2;
-    ed.querySelectorAll('.ne-drop-line').forEach((n) => n.remove());
-    const line = document.createElement('div');
-    line.className = 'ne-drop-line';
-    target.parentNode!.insertBefore(line, before ? target : target.nextSibling);
+    updateDropLine(e.clientY);
+  });
+
+  // カードの padding / 枠線領域でもドラッグを受け付け、挿入インジケータを
+  // 更新する。dragover は ed の外 (カード padding 上等) で発火するため、
+  // document レベルで監視。
+  document.addEventListener('dragover', (e: DragEvent) => {
+    if (!state.dragSrc) return;
+    const card = ed.closest<HTMLElement>(
+      '.spira-th-card--note, .spira-th-card--received',
+    );
+    if (!card) return;
+    if (ed.contains(e.target as Node)) return; // ed 内部は上の handler に任せる
+    const r = card.getBoundingClientRect();
+    if (
+      e.clientX < r.left || e.clientX > r.right ||
+      e.clientY < r.top  || e.clientY > r.bottom
+    ) return;
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+    updateDropLine(e.clientY);
+  });
+  // drop も document レベルで拾い、ed.drop に流す。
+  document.addEventListener('drop', (e: DragEvent) => {
+    if (!state.dragSrc) return;
+    const card = ed.closest<HTMLElement>(
+      '.spira-th-card--note, .spira-th-card--received',
+    );
+    if (!card) return;
+    if (ed.contains(e.target as Node)) return;
+    const r = card.getBoundingClientRect();
+    if (
+      e.clientX < r.left || e.clientX > r.right ||
+      e.clientY < r.top  || e.clientY > r.bottom
+    ) return;
+    e.preventDefault();
+    // ed 上で drop を擬似発火
+    ed.dispatchEvent(new DragEvent('drop', {
+      bubbles: true, cancelable: true,
+      clientX: e.clientX, clientY: e.clientY,
+      dataTransfer: e.dataTransfer ?? undefined,
+    }));
   });
   ed.addEventListener('drop', (e) => {
     if (!state.dragSrc) return;
@@ -1727,11 +2239,12 @@ export function createNoteEditor(opts: NoteEditorOptions = {}): NoteEditor {
     return !b.querySelector('img,canvas,svg,input,table');
   }
 
-  ed.addEventListener('focus', () => {
+  /** Append a fresh `<p><br></p>` (if the last block isn't already
+   *  empty) and place the caret there. Used by the focus-trail logic
+   *  and the click-below-last-block handler. */
+  function appendTrailingAndFocus(rememberThrowaway: boolean): void {
     const last = ed.lastElementChild as HTMLElement | null;
     if (!last) {
-      // shouldn't really happen — ensureNonEmpty guarantees at least one
-      // block, but be defensive.
       const p = document.createElement('p');
       p.appendChild(document.createElement('br'));
       ed.appendChild(p);
@@ -1739,21 +2252,43 @@ export function createNoteEditor(opts: NoteEditorOptions = {}): NoteEditor {
       return;
     }
     if (isBlockEmpty(last)) {
-      // Already an empty trailing line — caret will land naturally; no
-      // need to remember it as a throwaway.
+      placeCaretAtStart(last);
       return;
     }
-    // Add a throwaway empty line and park caret in it. We *don't*
-    // markDirty: until the user types something, this addition is
-    // invisible to autosave (htmlToMarkdown trims trailing whitespace
-    // anyway, so even if save fires it's a no-op).
     const p = document.createElement('p');
     p.appendChild(document.createElement('br'));
     ed.appendChild(p);
-    appendedTrailingP = p;
-    // setTimeout so the caret survives whatever the browser was about
-    // to do with the focus event.
-    setTimeout(() => { if (appendedTrailingP === p) placeCaretAtStart(p); }, 0);
+    if (rememberThrowaway) appendedTrailingP = p;
+    setTimeout(() => { placeCaretAtStart(p); }, 0);
+  }
+
+  ed.addEventListener('focus', () => {
+    // Append a throwaway empty line + park caret. Not marked dirty —
+    // autosave only fires when content actually changes. If the user
+    // blurs without typing, the throwaway block is removed.
+    appendTrailingAndFocus(true);
+  });
+
+  // Click-below-last-block: when the user clicks anywhere in the editor's
+  // padding area (below the last block but inside `.ne-content`), append
+  // a fresh line and put the caret in it. Without this the browser would
+  // place the caret at the end of the last block, surprising users who
+  // expect "click below text → new line" behavior.
+  ed.addEventListener('mousedown', (e) => {
+    if (e.target !== ed) return; // direct click on .ne-content, not a child
+    const last = ed.lastElementChild as HTMLElement | null;
+    if (!last) return;
+    const lastRect = last.getBoundingClientRect();
+    if (e.clientY <= lastRect.bottom) return;
+    e.preventDefault();
+    if (isBlockEmpty(last)) {
+      placeCaretAtStart(last);
+    } else {
+      const p = document.createElement('p');
+      p.appendChild(document.createElement('br'));
+      ed.appendChild(p);
+      placeCaretAtStart(p);
+    }
   });
 
   // If the user actually edits, the throwaway block is no longer

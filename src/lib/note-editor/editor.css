@@ -138,6 +138,21 @@
   margin: 8px 0;
 }
 
+/* Image resize affordance — only inside the editable area (not the
+ * read-only `.ne-prose` view). Hovering the image shows a subtle
+ * outline; the bottom-right ~16px receives a `nwse-resize` cursor via
+ * the editor.ts mousemove handler, so users can grab there to drag-
+ * resize. Width is stored as inline style and round-tripped through
+ * markdown as `{w=N}`. */
+.ne-content img.ne-img {
+  cursor: default;
+  transition: outline-color 0.1s;
+}
+.ne-content img.ne-img:hover {
+  outline: 2px solid rgba(74, 139, 255, 0.5);
+  outline-offset: 2px;
+}
+
 /* File attachment chip (Excel/PDF/Word/etc. linked into the memo). The
    underlying anchor stays a real <a target="_blank">, so click handling
    is the browser's responsibility — no JS hook needed. */
@@ -225,13 +240,22 @@
 .ne-prose .ne-callout-body > * { margin: 0; }
 .ne-prose .ne-callout-body > * + * { margin-top: 6px; }
 
-/* Tables */
+/* Tables — wrap shrinks to the table's own width so the right-edge
+ * add-column "+" button sits at the table's right edge instead of
+ * floating in empty space. `width: fit-content` keeps the wrap as
+ * narrow as the table; `max-width: 100%` lets overflow-x kick in for
+ * tables wider than the container. */
 .ne-prose .ne-table-wrap {
   position: relative;
+  display: block;
+  width: fit-content;
+  max-width: 100%;
   overflow-x: auto;
   margin: 8px 0;
-  /* leave room on the right + below for the hover "+" edge buttons so
-     they don't clip against the next block / outer overflow */
+  /* 行ハンドル (左) / 列ハンドル (上) が罫線外に出ても見切れないように
+     padding で表示領域を確保。右/下のホバー "+" ボタン用余白も同じ理由。 */
+  padding-top: 22px;
+  padding-left: 22px;
   padding-right: 16px;
   padding-bottom: 14px;
 }
@@ -249,6 +273,13 @@
   outline: none;
 }
 .ne-content .ne-table td:focus { background: var(--ne-accent-soft); }
+/* Cells included in a drag-selection range. Softer than focus so a
+ * focused cell within a range still stands out. */
+.ne-content .ne-table td.ne-cell-selected,
+.ne-content .ne-table th.ne-cell-selected {
+  background: var(--ne-accent-soft);
+  box-shadow: inset 0 0 0 1px var(--ne-accent);
+}
 .ne-prose .ne-table th { background: var(--ne-surface); font-weight: 600; }
 
 /* Column resize handle — 6px-wide drag strip on the right edge of each
@@ -317,7 +348,39 @@
   width: 12px;
 }
 
-/* Right-click context menu (row / column ops) */
+/* Row / column action handles — appear at the left edge of the active
+ * row and the top edge of the active column when a cell is clicked.
+ * Click handle → opens the slash-menu-styled picker. Notion-like UX. */
+.ne-table-handle {
+  position: absolute;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  background: var(--ne-surface);
+  border: 1px solid var(--ne-border);
+  color: var(--ne-muted);
+  cursor: pointer;
+  user-select: none;
+  z-index: 2;
+  transition: background 0.1s, color 0.1s, border-color 0.1s;
+}
+.ne-table-handle:hover {
+  background: var(--ne-accent-soft);
+  color: var(--ne-accent);
+  border-color: var(--ne-accent);
+}
+.ne-table-handle--row svg { transform: rotate(0deg); }   /* vertical dots */
+.ne-table-handle--col svg { transform: rotate(90deg); }  /* horizontal dots */
+
+/* Picker chrome reuses .ne-slash so the look matches the slash menu.
+ * Just give it a sensible default width. */
+.ne-table-picker { width: 200px; }
+
+/* Right-click context menu (row / column ops) — legacy, kept until
+ * fully removed from the codebase. */
 .ne-table-menu {
   position: fixed;
   z-index: var(--ne-z-floating);
@@ -474,3 +537,26 @@
   line-height: 1;
 }
 .ne-ftb-b:hover { background: var(--ne-surface); }
+
+/* 空段落 (round-trip で保持された Enter Enter による空行)。
+   zero-width space を 1 文字含むため cursor が確実に位置決めでき、
+   最低限の高さを与えて margin だけで埋もれないようにする。 */
+.ne-blank-p {
+  min-height: 1em;
+}
+
+/* ヘッダ行に変換されたテーブルの先頭行 (固定色)。
+   .ne-table-has-header クラスが付いている時のみ tr:first-child を強調。 */
+.ne-prose .ne-table.ne-table-has-header > tbody > tr:first-child > td,
+.ne-prose .ne-table.ne-table-has-header > tr:first-child > td {
+  background: var(--ne-accent-soft);
+  font-weight: 600;
+  color: var(--ne-text);
+}
+
+/* 行/列ハンドルのドラッグ中、入れ替え先となる行/列のセルをハイライト。 */
+.ne-prose .ne-table td.ne-tbl-swap-target,
+.ne-prose .ne-table th.ne-tbl-swap-target {
+  background: var(--ne-accent-soft);
+  box-shadow: inset 0 0 0 2px var(--ne-accent);
+}

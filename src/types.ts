@@ -11,8 +11,16 @@ export interface Ticket {
   description?: string;
   status: TicketStatus;
   priority: Priority;
-  assigneeEmail?: string;
-  assigneeName?: string;
+  /** 担当者のメールアドレス (複数可)。SP には AssigneeEmail 列に
+   *  カンマ区切りで保存。空配列または undefined = 未割当。 */
+  assigneeEmails?: string[];
+  /** 担当者の表示名 (assigneeEmails と同順)。 */
+  assigneeNames?: string[];
+  /** 問い合わせ部門 (設定で改廃可能なリストから選択)。 */
+  department?: string;
+  /** 問い合わせ種別 (設定で改廃可能なリストから選択)。
+   *  Forms 起票時は応答のカテゴリ値が自動で入る。 */
+  inquiryCategory?: string;
   reporterEmail?: string;
   reporterName?: string;
   dueDate?: string;            // ISO datetime
@@ -22,6 +30,17 @@ export interface Ticket {
   deletedAt?: string;
   createdAt: string;
   updatedAt: string;
+  // --- Teams 連携 (Forms → Spira → Teams 運用案) ---
+  /** 顧客 Team 識別子（外部スレッド起票先の切替用） */
+  customerTeam?: string;
+  /** 内部スレッド (社内議論用) の Teams messageId / channelId / DeepLink */
+  internalThreadId?: string;
+  internalChannelId?: string;
+  internalDeepLink?: string;
+  /** ユーザースレッド (顧客向け) の Teams messageId / channelId / DeepLink */
+  userThreadId?: string;
+  userChannelId?: string;
+  userDeepLink?: string;
 }
 
 export interface Comment {
@@ -36,6 +55,21 @@ export interface Comment {
   sourceEmailId?: number;
   hasAttachments?: boolean;    // true when the source mail had real attachments
   internetMessageId?: string;  // RFC 822 Message-ID (世界で一意)。OWA messageid: 検索用
+  /** Origin of this comment, used to pick the icon on the card.
+   *   - 'mail'  : received via auto-sync from InboxMails, or manually
+   *               added through the "履歴を追加" modal with source=mail.
+   *   - 'teams' : pasted from Teams via the "履歴を追加" modal.
+   *   - 'other' : any other manual entry (phone, in-person, etc.).
+   *  Legacy comments without this field render with the mail icon. */
+  source?: 'mail' | 'teams' | 'other';
+  /** SP の Author (登録者) と Editor (最終更新者)。SP 側の自動付与で、
+   *  受信スレッドカードに「誰がいつ登録/更新したか」を表示するために使う。 */
+  createdBy?: string;
+  updatedBy?: string;
+  /** SP の Created / Modified タイムスタンプ (ISO)。sentAt は送信時刻、
+   *  これらは SP リストへの登録/更新時刻。 */
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface InboxMail {

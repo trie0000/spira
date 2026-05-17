@@ -84,7 +84,12 @@ function inlineToMd(node: Node): string {
     case 'IMG': {
       const alt = el.getAttribute('alt') ?? '';
       const src = el.getAttribute('src') ?? '';
-      return `![${alt}](${src})`;
+      // Preserve user-resized width as a `{w=N}` suffix so the next
+      // markdownToHtml round can re-apply the inline style. We only
+      // serialize a width when the user has explicitly resized.
+      const w = parseFloat((el as HTMLImageElement).style.width || '');
+      const sizeSuffix = Number.isFinite(w) && w > 0 ? `{w=${Math.round(w)}}` : '';
+      return `![${alt}](${src})${sizeSuffix}`;
     }
     case 'SPAN':
       return inner;
@@ -139,7 +144,15 @@ function blockToMd(el: HTMLElement): string {
     if (tbl) return tableToMd(tbl);
   }
   if (tag === 'TABLE') return tableToMd(el);
-  if (tag === 'P' || tag === 'DIV') return inlineToMd(el);
+  if (tag === 'P' || tag === 'DIV') {
+    const md = inlineToMd(el);
+    // 空段落 (contenteditable が cursor placeholder として置く <p><br></p>
+    // や、ユーザーが Enter で意図的に作った空行) は round-trip で消えない
+    // ように HTML コメントのセンチネルで保持する。markdownToHtml で同じ
+    // コメントを検出して <p><br></p> に復元する。
+    if (!md.trim()) return '<!--ne-blank-->';
+    return md;
+  }
   return inlineToMd(el);
 }
 
@@ -159,6 +172,12 @@ function tableToMd(table: HTMLElement): string {
     '| ' + sep.join(' | ') + ' |',
     ...body.map((r) => '| ' + r.join(' | ') + ' |'),
   ];
+  // ヘッダ行フラグ (色付きの見出し行) を sidecar コメントで保存。
+  // 標準 markdown では区別がつかないので、Spira 独自の `<!--ne-thead-->`
+  // を表の直後に書き、パース側で復元する。
+  if (table.classList.contains('ne-table-has-header')) {
+    lines.push('<!--ne-thead-->');
+  }
   // Persist column widths set by the editor's drag-resize handles as a
   // trailing HTML comment. Markdown parsers ignore it, so the table
   // still renders elsewhere; our markdownToHtml side reads the same
@@ -186,7 +205,15 @@ export function htmlToMarkdown(html: string): string {
   for (const child of Array.from(tmp.children)) {
     out.push(blockToMd(child as HTMLElement));
   }
-  return out.filter(Boolean).join('\n\n').trim();
+  // 末尾の空段落 (センチネル含む) は削除して clean に保つ。
+  // ただし途中の空段落は保持して、ユーザーが意図的に作った縦余白を
+  // round-trip で再現する。
+  while (out.length > 0) {
+    const last = out[out.length - 1];
+    if (!last || !last.trim() || last === '<!--ne-blank-->') out.pop();
+    else break;
+  }
+  return out.join('\n\n');
 }
 
 // ---------- Markdown -> HTML ----------
@@ -201,11 +228,34 @@ function inlineMdToHtml(s: string): string {
   out = out.replace(/\*\*([^*]+)\*\*/g, (_, c) => `<strong>${c}</strong>`);
   out = out.replace(/\*([^*]+)\*/g, (_, c) => `<em>${c}</em>`);
   out = out.replace(/~~([^~]+)~~/g, (_, c) => `<s>${c}</s>`);
-  out = out.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_, alt, src) => `<img src="${src}" alt="${alt}" class="ne-img"/>`);
-  // Link rewriting. A link whose text starts with one of our recognized
-  // file-icon emojis (📎/📊/📕/📝/📈/📦) becomes a `.ne-file` chip so
-  // the editor & read-only renderer style it consistently. Everything
-  // else stays as a plain anchor.
+  // Image: matches `![alt](src)` with optional `{w=N}` suffix for
+  // user-resized width. The width (if present) becomes an inline style.
+  out = out.replace(/!\[([^\]]*)\]\(([^)]+)\)(?:\{w=(\d+)\})?/g, (_, alt, src, w) => {
+    const style = w ? ` style="width:${w}px;height:auto"` : '';
+    return `<img src="${src}" alt="${alt}" class="ne-img"${style}/>`;
+  });
+  // ファイルチップ (file-icon emoji で始まる link) を先に処理。
+  // URL に `)` が含まれる場合に備えて、URL は (a) 行末まで or (b) 直後が
+  // 空白か行末になる `)` までを greedy に取る。SP の Office viewer URL に
+  // クエリストリングが付くと `)` が含まれることがあるため。
+  out = out.replace(
+    /\[((?:📎|📊|📕|📝|📈|📦)\s+[^\]]+)\]\((.+?)\)(?=$|[\s])/gm,
+    (_, t, h) => {
+      const m = /^(📎|📊|📕|📝|📈|📦)\s+(.+)$/.exec(t);
+      if (!m) return `[${t}](${h})`;
+      const icon = m[1];
+      const name = m[2];
+      const viewerHref = toOfficeViewerUrl(h, name ?? '');
+      const safe = (name ?? '').replace(/"/g, '&quot;');
+      return (
+        `<a class="ne-file" href="${viewerHref}" target="_blank" rel="noopener noreferrer" ` +
+        `title="ダブルクリックで開く: ${safe}" contenteditable="false" data-ne-file="1">` +
+        `<span class="ne-file-ic">${icon}</span>` +
+        `<span class="ne-file-name">${name}</span></a>`
+      );
+    },
+  );
+  // 通常リンク。ファイルチップは既に処理済みなのでスキップされる。
   out = out.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, t, h) => {
     const m = /^(📎|📊|📕|📝|📈|📦)\s+(.+)$/.exec(t);
     if (m) {
@@ -232,14 +282,15 @@ function inlineMdToHtml(s: string): string {
   return out;
 }
 
-function tableMdToHtml(lines: string[], widths: number[] = []): string {
+function tableMdToHtml(lines: string[], widths: number[] = [], hasHeader = false): string {
   const split = (line: string) =>
     line.replace(/^\||\|$/g, '').split(/(?<!\\)\|/).map((c) => c.trim().replace(/\\\|/g, '|'));
   const head = split(lines[0] ?? '');
   const body = lines.slice(2).map(split);
   // Wrap in a div so the table is contenteditable=false-friendly when
   // re-mounted in the editor (the editor rewires it on setMarkdown).
-  let html = '<div class="ne-table-wrap"><table class="ne-table">';
+  const tableClass = hasHeader ? 'ne-table ne-table-has-header' : 'ne-table';
+  let html = `<div class="ne-table-wrap"><table class="${tableClass}">`;
   // colgroup with optional explicit widths from the `<!--ne-cols:...-->`
   // sidecar comment. Each <col> is unconditionally emitted so the editor
   // can find/mutate it for resize handles; columns without persisted
@@ -263,13 +314,39 @@ function tableMdToHtml(lines: string[], widths: number[] = []): string {
   return html;
 }
 
+/** SP の HTML サニタイザが HTML コメントを剥がすため、保存時に
+ *  `[[NEM:base64]]` 形式にエンコードしている。何らかの理由で sp.ts 側の
+ *  decode が走らなかった場合のフォールバックとして、ここでも decode する。 */
+function decodeNemMarkers(s: string): string {
+  return s.replace(/\[\[NEM:([A-Za-z0-9+/=]+)\]\]/g, (_, b64) => {
+    try {
+      // atob → UTF-8 復元
+      const bin = atob(b64);
+      let out = '';
+      for (let i = 0; i < bin.length; i++) out += '%' + ('00' + bin.charCodeAt(i).toString(16)).slice(-2);
+      return decodeURIComponent(out);
+    } catch { return ''; }
+  });
+}
+
 export function markdownToHtml(md: string): string {
   if (!md.trim()) return '';
+  // Defensive decode of NEM markers (SP roundtrip safety net)。
+  md = decodeNemMarkers(md);
   const lines = md.replace(/\r\n?/g, '\n').split('\n');
   const out: string[] = [];
   let i = 0;
   while (i < lines.length) {
     const line = lines[i] ?? '';
+    // 空段落センチネル (htmlToMarkdown が出力したもの) → 空段落を復元。
+    // <p><br></p> だと一部ブラウザで段落マージン領域をクリックしても
+    // カーソルが「次の段落」に飛んでしまい入力できない。zero-width space
+    // (U+200B) を 1 文字入れておくと cursor が確実に位置決めできる。
+    // この文字は HTML 上では不可視で、Backspace 1 回で消える。
+    if (line.trim() === '<!--ne-blank-->') {
+      out.push('<p class="ne-blank-p">​</p>');
+      i++; continue;
+    }
     if (!line.trim()) { i++; continue; }
     // h1-6
     const h = line.match(/^(#{1,6})\s+(.*)$/);
@@ -303,21 +380,31 @@ export function markdownToHtml(md: string): string {
         tableLines.push(lines[i]!);
         i++;
       }
-      // Peek for the sidecar widths comment that htmlToMarkdown writes
-      // immediately after the table block.
+      // Peek for the sidecar comments (widths + header-row flag) that
+      // htmlToMarkdown writes immediately after the table block. SP の
+      // サニタイザが行を <p> で wrap することもあるので、HTML タグを
+      // 剥がしてから regex マッチする (lenient parsing)。
       let widths: number[] = [];
-      const nextLine = lines[i];
-      if (nextLine) {
-        const m = /^<!--ne-cols:([\d,]*)-->$/.exec(nextLine);
-        if (m) {
-          widths = m[1]!.split(',').map((s) => {
+      let hasHeader = false;
+      for (let peeks = 0; peeks < 3; peeks++) {
+        const nextLine = lines[i];
+        if (!nextLine) break;
+        // <p>...</p> や <div>...</div> など SP が付ける wrapper を除去
+        const stripped = nextLine.replace(/<\/?(p|div|span)[^>]*>/gi, '').trim();
+        const wm = /<!--ne-cols:([\d,]*)-->/.exec(stripped);
+        if (wm) {
+          widths = wm[1]!.split(',').map((s) => {
             const n = parseInt(s, 10);
             return Number.isFinite(n) && n > 0 ? n : 0;
           });
-          i++; // consume the comment line so it doesn't surface as text
+          i++; continue;
         }
+        if (/<!--ne-thead-->/.test(stripped)) { hasHeader = true; i++; continue; }
+        // empty line (after comment) skip
+        if (stripped === '') { i++; continue; }
+        break;
       }
-      out.push(tableMdToHtml(tableLines, widths));
+      out.push(tableMdToHtml(tableLines, widths, hasHeader));
       continue;
     }
     // blockquote

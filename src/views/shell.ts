@@ -5,13 +5,27 @@ import { renderTicketList } from './ticketList';
 import { renderTicketDetail } from './ticketDetail';
 import { renderInbox } from './inbox';
 import { renderTrash } from './trash';
+import { openSearchModal } from './search';
 import { confirmModal, openModal } from '../components/modal';
 import { toast } from '../components/toast';
 import { getRepo, getRepoMode } from '../api/repo';
-import { getInternalMembers, setInternalMembers } from '../utils/members';
+import { getInternalMembers, setInternalMembers, getInternalDisplayNames, setInternalDisplayNames } from '../utils/members';
 import {
   getTicketIdPrefix, setTicketIdPrefix, formatTicketTagWith, sanitizePrefix,
 } from '../utils/ticketTag';
+import {
+  parseTeamsChannelUrl,
+  getInternalChannelConfig, setInternalChannelConfig,
+  getExternalChannelConfig, setExternalChannelConfig,
+  type TeamsChannelConfig,
+} from '../utils/teamsChannels';
+import {
+  currentBuildId, loadVersionInfo, saveUpdateUrl,
+} from '../utils/versionCheck';
+import {
+  getDepartmentOptions, setDepartmentOptions,
+  getInquiryCategoryOptions, setInquiryCategoryOptions,
+} from '../utils/optionLists';
 
 export function renderShell(): HTMLElement {
   // id + class — ID セレクタで host CSS の !important / ID rules を上書きできる
@@ -19,22 +33,26 @@ export function renderShell(): HTMLElement {
   const main = el('main', { class: 'spira-main' });
   const sideWrap = el('div', { style: 'display:contents' });
   sideWrap.appendChild(renderSidebar());
-  const topbar = renderTopbar(root);
+  const topbarSlot = el('div', { style: 'display:contents' });
+  topbarSlot.appendChild(renderTopbar(root));
   const errorSlot = el('div');
 
   const shell = el('div', { class: 'spira-shell' }, [
-    topbar,
+    topbarSlot,
     errorSlot,
     el('div', { class: 'spira-body' }, [sideWrap, main]),
   ]);
   root.appendChild(shell);
 
-  // initial paint + on state change
+  // initial paint + on state change. topbar も state 変化で再描画する
+  // (ログインユーザー取得は bootstrap で非同期に完了するため)。
   paintMain(main);
   subscribe(() => {
     paintMain(main);
     clear(sideWrap);
     sideWrap.appendChild(renderSidebar());
+    clear(topbarSlot);
+    topbarSlot.appendChild(renderTopbar(root));
     paintErrorBanner(errorSlot);
   });
   return root;
@@ -180,19 +198,39 @@ function errorToText(e: Error): string {
 
 function paintErrorBanner(slot: HTMLElement): void {
   clear(slot);
-  const msg = getState().errorBanner;
-  if (!msg) return;
-  slot.appendChild(el('div', { class: 'spira-error-banner' }, [
-    el('span', { html: icon('alert'), style: 'display:inline-flex;width:16px;height:16px' }),
-    msg,
-    el('div', { class: 'spira-error-banner-spacer' }),
-    el('button', {
-      class: 'spira-iconbtn',
-      'aria-label': '閉じる',
-      onclick: () => setState({ errorBanner: null }),
-      html: icon('x'),
-    }),
-  ]));
+  const s = getState();
+  if (s.errorBanner) {
+    slot.appendChild(el('div', { class: 'spira-error-banner' }, [
+      el('span', { html: icon('alert'), style: 'display:inline-flex;width:16px;height:16px' }),
+      s.errorBanner,
+      el('div', { class: 'spira-error-banner-spacer' }),
+      el('button', {
+        class: 'spira-iconbtn',
+        'aria-label': '閉じる',
+        onclick: () => setState({ errorBanner: null }),
+        html: icon('x'),
+      }),
+    ]));
+  }
+  if (s.updateBanner) {
+    const ub = s.updateBanner;
+    slot.appendChild(el('div', { class: 'spira-update-banner' }, [
+      el('span', { html: icon('alert'), style: 'display:inline-flex;width:16px;height:16px' }),
+      el('span', { style: 'flex:1' }, [ub.message]),
+      ...(ub.url ? [el('a', {
+        href: ub.url, target: '_blank', rel: 'noopener',
+        class: 'spira-btn spira-btn--primary spira-btn--sm',
+        style: 'text-decoration:none',
+      }, ['更新ページを開く →'])] : []),
+      el('button', {
+        class: 'spira-iconbtn',
+        'aria-label': '閉じる',
+        title: '今は表示しない',
+        onclick: () => setState({ updateBanner: null }),
+        html: icon('x'),
+      }),
+    ]));
+  }
 }
 
 function renderTopbar(root: HTMLElement): HTMLElement {
@@ -237,10 +275,45 @@ function renderTopbar(root: HTMLElement): HTMLElement {
     openSettingsMenu(root, settingsBtn);
   });
 
+  // ログインユーザー表示。state.currentUser が bootstrap で取得される
+  // (SP は /_api/web/currentuser、mock はテストユーザー)。SP の
+  // _spPageContextInfo にもフォールバック。
+  const currentUser = getState().currentUser;
+  const ctx = (window as unknown as {
+    _spPageContextInfo?: { userDisplayName?: string; userEmail?: string; userLoginName?: string };
+  })._spPageContextInfo;
+  const displayName = currentUser?.displayName ?? ctx?.userDisplayName ?? '';
+  const email = currentUser?.email ?? ctx?.userEmail ?? ctx?.userLoginName ?? '';
+  const userInitials = (() => {
+    const src = displayName || email || '?';
+    return src.slice(0, 1).toUpperCase();
+  })();
+  const userChip = el('div', {
+    class: 'spira-topbar-user',
+    title: displayName && email ? `${displayName} <${email}>` : (displayName || email || 'ログイン情報なし'),
+    style:
+      'display:inline-flex;align-items:center;gap:6px;padding:2px 8px 2px 4px;' +
+      'border-radius:999px;background:var(--paper-2);color:var(--ink);' +
+      'font-size:var(--fs-sm);max-width:200px',
+  }, [
+    el('span', {
+      class: 'spira-topbar-user-avatar',
+      style:
+        'display:inline-flex;align-items:center;justify-content:center;' +
+        'width:22px;height:22px;border-radius:50%;background:var(--accent);' +
+        'color:#fff;font-weight:600;font-size:12px;flex-shrink:0',
+    }, [userInitials]),
+    el('span', {
+      class: 'spira-topbar-user-name',
+      style: 'min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap',
+    }, [displayName || email || 'ログイン情報なし']),
+  ]);
+
   return el('header', { class: 'spira-topbar', role: 'banner' }, [
     el('div', { class: 'spira-topbar-brand' }, ['Spira']),
     el('div', { class: 'spira-topbar-spacer' }),
     el('div', { class: 'spira-topbar-actions' }, [
+      userChip,
       syncBtn,
       themeBtn,
       settingsBtn,
@@ -267,6 +340,38 @@ function openSettingsMenu(root: HTMLElement, anchor: HTMLElement): void {
   }, [
     el('span', { html: icon('hash'), style: 'display:inline-flex;width:14px;height:14px' }),
     'チケット ID 形式',
+  ]);
+
+  const channelsItem = el('div', {
+    class: 'spira-menu-item',
+    onclick: () => { menu.remove(); openTeamsChannelsModal(root); },
+  }, [
+    el('span', { html: icon('chat'), style: 'display:inline-flex;width:14px;height:14px' }),
+    'Teams チャネル設定',
+  ]);
+
+  const versionItem = el('div', {
+    class: 'spira-menu-item',
+    onclick: () => { menu.remove(); openVersionModal(root); },
+  }, [
+    el('span', { html: icon('sync'), style: 'display:inline-flex;width:14px;height:14px' }),
+    'バージョン管理',
+  ]);
+
+  const deptItem = el('div', {
+    class: 'spira-menu-item',
+    onclick: () => { menu.remove(); openOptionsModal(root, 'dept'); },
+  }, [
+    el('span', { html: icon('list'), style: 'display:inline-flex;width:14px;height:14px' }),
+    '部門の選択肢',
+  ]);
+
+  const categoryItem = el('div', {
+    class: 'spira-menu-item',
+    onclick: () => { menu.remove(); openOptionsModal(root, 'category'); },
+  }, [
+    el('span', { html: icon('list'), style: 'display:inline-flex;width:14px;height:14px' }),
+    '問い合わせ種別の選択肢',
   ]);
 
   const helpItem = el('div', {
@@ -317,6 +422,10 @@ function openSettingsMenu(root: HTMLElement, anchor: HTMLElement): void {
     el('div', { class: 'spira-menu-divider' }),
     membersItem,
     idFormatItem,
+    channelsItem,
+    deptItem,
+    categoryItem,
+    versionItem,
     helpItem,
     el('div', { class: 'spira-menu-divider' }),
     resetItem,
@@ -352,13 +461,15 @@ function openSettingsMenu(root: HTMLElement, anchor: HTMLElement): void {
 function openInternalMembersModal(root: HTMLElement): void {
   const adUsers = getState().users; // already loaded on bootstrap
   let members = getInternalMembers();
+  let names = getInternalDisplayNames();
 
-  const listWrap = el('div', { style: 'display:flex;flex-direction:column;gap:var(--s-2);min-height:60px;margin-bottom:var(--s-5)' });
+  // ============== email-based (AD) list
+  const emailListWrap = el('div', { style: 'display:flex;flex-direction:column;gap:var(--s-2);min-height:60px;margin-bottom:var(--s-5)' });
 
-  function renderList(): void {
-    clear(listWrap);
+  function renderEmailList(): void {
+    clear(emailListWrap);
     if (members.length === 0) {
-      listWrap.appendChild(el('div', { class: 'spira-empty', style: 'padding:var(--s-5);font-size:var(--fs-sm)' }, ['まだ登録されていません']));
+      emailListWrap.appendChild(el('div', { class: 'spira-empty', style: 'padding:var(--s-5);font-size:var(--fs-sm)' }, ['まだ登録されていません']));
       return;
     }
     for (const email of members) {
@@ -371,16 +482,15 @@ function openInternalMembersModal(root: HTMLElement): void {
           class: 'spira-btn spira-btn--ghost spira-btn--sm',
           onclick: () => {
             members = members.filter(e => e !== email);
-            renderList();
+            renderEmailList();
           },
         }, ['削除']),
       ]);
-      listWrap.appendChild(row);
+      emailListWrap.appendChild(row);
     }
   }
-  renderList();
+  renderEmailList();
 
-  // Add control: select from AD users + free-text fallback
   const select = el('select', { class: 'spira-select', style: 'flex:1' }, [
     el('option', { value: '' }, ['AD ユーザーから選択...']),
     ...adUsers
@@ -393,7 +503,7 @@ function openInternalMembersModal(root: HTMLElement): void {
     placeholder: 'または直接メールアドレスを入力',
   }) as HTMLInputElement;
 
-  const addBtn = el('button', {
+  const addEmailBtn = el('button', {
     class: 'spira-btn spira-btn--secondary spira-btn--sm',
     onclick: () => {
       const v = (select.value || freeInput.value).trim().toLowerCase();
@@ -402,22 +512,75 @@ function openInternalMembersModal(root: HTMLElement): void {
       members = [...members, v];
       select.value = '';
       freeInput.value = '';
-      renderList();
+      renderEmailList();
     },
   }, ['＋ 追加']);
 
+  // ============== display-name list (for Teams / other non-AD sources)
+  const nameListWrap = el('div', { style: 'display:flex;flex-direction:column;gap:var(--s-2);min-height:60px;margin-bottom:var(--s-5)' });
+
+  function renderNameList(): void {
+    clear(nameListWrap);
+    if (names.length === 0) {
+      nameListWrap.appendChild(el('div', { class: 'spira-empty', style: 'padding:var(--s-5);font-size:var(--fs-sm)' }, ['まだ登録されていません']));
+      return;
+    }
+    for (const name of names) {
+      const row = el('div', {
+        style: 'display:flex;align-items:center;gap:var(--s-3);padding:var(--s-2) var(--s-3);background:var(--paper-2);border-radius:var(--r-2)',
+      }, [
+        el('span', { style: 'flex:1' }, [name]),
+        el('button', {
+          class: 'spira-btn spira-btn--ghost spira-btn--sm',
+          onclick: () => {
+            names = names.filter(n => n !== name);
+            renderNameList();
+          },
+        }, ['削除']),
+      ]);
+      nameListWrap.appendChild(row);
+    }
+  }
+  renderNameList();
+
+  const nameInput = el('input', {
+    type: 'text', class: 'spira-input', style: 'flex:1',
+    placeholder: 'Teams 等の表示名を入力 (例: 山田 太郎)',
+  }) as HTMLInputElement;
+
+  const addNameBtn = el('button', {
+    class: 'spira-btn spira-btn--secondary spira-btn--sm',
+    onclick: () => {
+      const v = nameInput.value.trim().toLowerCase();
+      if (!v) return;
+      if (names.includes(v)) return;
+      names = [...names, v];
+      nameInput.value = '';
+      renderNameList();
+    },
+  }, ['＋ 追加']);
+
+  nameInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); addNameBtn.click(); }
+  });
+
   const body = el('div', {}, [
     el('div', { class: 'spira-field' }, [
-      el('label', { class: 'spira-field-label' }, ['登録済みの内部メンバー']),
-      listWrap,
-    ]),
-    el('div', { class: 'spira-field' }, [
-      el('label', { class: 'spira-field-label' }, ['追加']),
-      el('div', { style: 'display:flex;gap:var(--s-3);align-items:center' }, [select, addBtn]),
+      el('label', { class: 'spira-field-label' }, ['内部メンバー (メールアドレス)']),
+      emailListWrap,
+      el('div', { style: 'display:flex;gap:var(--s-3);align-items:center' }, [select, addEmailBtn]),
       el('div', { style: 'display:flex;gap:var(--s-3);align-items:center;margin-top:var(--s-2)' }, [freeInput]),
+      el('div', { style: 'font-size:var(--fs-xs);color:var(--ink-3);margin-top:var(--s-2)' }, [
+        '※ 受信メールの差出人がここに登録されている場合「社内」扱いになります。',
+      ]),
     ]),
-    el('div', { style: 'font-size:var(--fs-xs);color:var(--ink-3);margin-top:var(--s-3)' }, [
-      '※ ここに登録したメールアドレスから来たメールは「社内」扱いになり、チケット詳細画面で右側に表示されます。',
+    el('div', { class: 'spira-field', style: 'margin-top:var(--s-6);padding-top:var(--s-5);border-top:1px solid var(--line)' }, [
+      el('label', { class: 'spira-field-label' }, ['内部メンバー (Teams / その他の表示名)']),
+      nameListWrap,
+      el('div', { style: 'display:flex;gap:var(--s-3);align-items:center' }, [nameInput, addNameBtn]),
+      el('div', { style: 'font-size:var(--fs-xs);color:var(--ink-3);margin-top:var(--s-2)' }, [
+        '※ Teams ペーストや「対応履歴を追加」で取り込んだ発言は AD と紐付かないので、表示名で判定します。大文字小文字は無視。',
+      ]),
     ]),
   ]);
 
@@ -427,7 +590,8 @@ function openInternalMembersModal(root: HTMLElement): void {
     primaryLabel: '保存',
     onPrimary: () => {
       setInternalMembers(members);
-      toast(root, `内部メンバー ${members.length} 件を保存しました`, 'ok');
+      setInternalDisplayNames(names);
+      toast(root, `内部メンバー ${members.length} 件 / 表示名 ${names.length} 件を保存しました`, 'ok');
       setState({}); // re-render to apply colors
     },
   });
@@ -511,19 +675,437 @@ function openTicketIdFormatModal(root: HTMLElement): void {
   });
 }
 
+/** Teams チャネル設定モーダル。
+ *  内部用 / 外部用の Teams チャネル URL を入力させ、URL から Channel ID /
+ *  Team ID をパース。保存先は SP の SpiraSettings リスト (Spira 全体共有)。
+ *  レイアウトは「履歴を追加」「チケットプロパティ」と同じ 2 列グリッド。 */
+function openTeamsChannelsModal(root: HTMLElement): void {
+  // 編集中ドラフト (保存ボタンで一括 commit)。SP から読込中は null。
+  let internalDraft: TeamsChannelConfig | null = null;
+  let externalDraft: TeamsChannelConfig | null = null;
+
+  // 履歴追加・チケットプロパティ と同じスタイル
+  const LABEL_STYLE =
+    'color:var(--ink-3);font-size:var(--fs-sm);' +
+    'align-self:center;justify-self:end;text-align:right;white-space:nowrap';
+  const LABEL_TOP_STYLE = LABEL_STYLE + ';align-self:start;padding-top:8px';
+  const SECTION_HEAD_STYLE =
+    'grid-column:1 / -1;' +
+    'font-size:var(--fs-md);font-weight:600;color:var(--ink);' +
+    'border-top:1px solid var(--line);padding-top:var(--s-3);margin-top:var(--s-2)';
+  const CODE_STYLE =
+    'font-family:ui-monospace,Menlo,monospace;font-size:12px;' +
+    'background:var(--paper-2);padding:2px 6px;border-radius:3px;' +
+    'word-break:break-all;display:inline-block;max-width:100%';
+
+  const grid = el('div', {
+    style:
+      'display:grid;grid-template-columns:96px minmax(0,1fr);' +
+      'gap:var(--s-3) var(--s-4);align-items:center',
+  });
+
+  /** 1 スレッド分の rows を grid に流し込む。 */
+  const appendChannelRows = (
+    sectionLabel: string,
+    initial: TeamsChannelConfig | null,
+    onChange: (cfg: TeamsChannelConfig | null) => void,
+  ): void => {
+    // セクションヘッダ
+    grid.append(el('div', { style: SECTION_HEAD_STYLE }, [sectionLabel]));
+
+    // 状態 + プレビュー (再描画用ホスト)
+    const statusValue = el('div', { style: 'min-width:0' });
+    const previewHost = el('div', { style: 'min-width:0' });
+
+    const renderStatusAndPreview = (cfg: TeamsChannelConfig | null): void => {
+      statusValue.replaceChildren(
+        cfg
+          ? el('span', { style: 'color:rgb(34,197,94);font-weight:500' }, ['● 設定済み'])
+          : el('span', { style: 'color:var(--ink-3)' }, ['○ 未設定']),
+      );
+      previewHost.replaceChildren();
+      if (!cfg) return;
+      const rows: HTMLElement[] = [];
+      if (cfg.channelName) {
+        rows.push(el('div', { style: 'display:flex;gap:var(--s-2)' }, [
+          el('span', { style: 'color:var(--ink-3);font-size:var(--fs-sm);width:60px;flex-shrink:0' }, ['Name']),
+          el('code', { style: CODE_STYLE }, [cfg.channelName]),
+        ]));
+      }
+      rows.push(
+        el('div', { style: 'display:flex;gap:var(--s-2)' }, [
+          el('span', { style: 'color:var(--ink-3);font-size:var(--fs-sm);width:60px;flex-shrink:0' }, ['Channel']),
+          el('code', { style: CODE_STYLE }, [cfg.channelId]),
+        ]),
+        el('div', { style: 'display:flex;gap:var(--s-2)' }, [
+          el('span', { style: 'color:var(--ink-3);font-size:var(--fs-sm);width:60px;flex-shrink:0' }, ['Team']),
+          el('code', { style: CODE_STYLE }, [cfg.teamId]),
+        ]),
+      );
+      previewHost.append(el('div', { style: 'display:flex;flex-direction:column;gap:4px' }, rows));
+    };
+
+    // URL 入力 + 解析エラー表示
+    const urlInput = el('input', {
+      type: 'url',
+      placeholder: 'Teams のチャネル「···」→「チャネルへのリンクを取得」した URL を貼り付け',
+      value: initial?.url ?? '',
+      style:
+        'width:100%;padding:var(--s-2) var(--s-3);' +
+        'border:1px solid var(--line);border-radius:var(--r-2);' +
+        'font-size:12px;font-family:ui-monospace,Menlo,monospace;' +
+        'background:var(--paper);color:var(--ink)',
+    }) as HTMLInputElement;
+
+    const errLine = el('div', { style: 'font-size:var(--fs-xs);color:rgb(239,68,68)' });
+
+    const tryParse = (raw: string): void => {
+      errLine.replaceChildren();
+      if (raw.trim() === '') {
+        onChange(null);
+        renderStatusAndPreview(null);
+        return;
+      }
+      const parsed = parseTeamsChannelUrl(raw);
+      if (parsed) {
+        onChange(parsed);
+        renderStatusAndPreview(parsed);
+      } else {
+        errLine.textContent = '⚠ Teams チャネル URL を解析できませんでした';
+        onChange(null);
+        renderStatusAndPreview(null);
+      }
+    };
+
+    urlInput.addEventListener('paste', (e: ClipboardEvent) => {
+      const text = e.clipboardData?.getData('text') ?? '';
+      if (!text) return;
+      setTimeout(() => { tryParse(text); }, 0);
+    });
+    urlInput.addEventListener('input', () => { tryParse(urlInput.value); });
+
+    const clearBtn = el('button', {
+      type: 'button',
+      class: 'spira-btn spira-btn--ghost spira-btn--sm',
+      onclick: () => {
+        urlInput.value = '';
+        tryParse('');
+      },
+    }, ['クリア']);
+
+    renderStatusAndPreview(initial);
+
+    grid.append(
+      el('label', { style: LABEL_STYLE }, ['状態']),
+      statusValue,
+      el('label', { style: LABEL_TOP_STYLE }, ['URL を貼付']),
+      el('div', { style: 'display:flex;flex-direction:column;gap:var(--s-2);min-width:0' }, [
+        el('div', { style: 'display:flex;gap:var(--s-2);align-items:flex-start' }, [
+          el('div', { style: 'flex:1;min-width:0' }, [urlInput]),
+          clearBtn,
+        ]),
+        errLine,
+      ]),
+      el('label', { style: LABEL_TOP_STYLE }, ['抽出結果']),
+      previewHost,
+    );
+  };
+
+  const renderGrid = (): void => {
+    grid.replaceChildren();
+    appendChannelRows('🏢 内部用チャネル (社内議論)', internalDraft, (cfg) => { internalDraft = cfg; });
+    appendChannelRows('👥 外部用チャネル (顧客対応)', externalDraft, (cfg) => { externalDraft = cfg; });
+    grid.append(el('div', {
+      style:
+        'grid-column:1 / -1;' +
+        'font-size:var(--fs-xs);color:var(--ink-3);' +
+        'background:var(--paper-2);padding:var(--s-3);' +
+        'border-radius:var(--r-2);line-height:1.6;margin-top:var(--s-2)',
+    }, [
+      '※ 設定は SharePoint の SpiraSettings リストに保存され、Spira 全体で共有されます。',
+      el('br'),
+      '※ Teams で対象チャネルの「···」→「チャネルへのリンクを取得」した URL を貼ると自動パース。',
+      el('br'),
+      '※ PA フローのチャネル選択も併せて更新してください (Spira 設定は自動反映されません)。',
+    ]));
+  };
+
+  // 初期描画 (まだロード中なので未設定状態)
+  renderGrid();
+
+  // SP から非同期ロード
+  Promise.all([getInternalChannelConfig(), getExternalChannelConfig()])
+    .then(([i, e]) => {
+      internalDraft = i;
+      externalDraft = e;
+      renderGrid();
+    })
+    .catch((err: Error) => {
+      toast(root, `設定読込失敗: ${err.message}`, 'error');
+    });
+
+  openModal(root, {
+    title: 'Teams チャネル設定',
+    body: grid,
+    size: 'lg',
+    primaryLabel: '保存',
+    onPrimary: async () => {
+      try {
+        await Promise.all([
+          setInternalChannelConfig(internalDraft),
+          setExternalChannelConfig(externalDraft),
+        ]);
+        const msgs: string[] = [];
+        msgs.push(`内部: ${internalDraft ? '✅ 設定済み' : '(未設定)'}`);
+        msgs.push(`外部: ${externalDraft ? '✅ 設定済み' : '(未設定)'}`);
+        toast(root, `チャネル設定を保存しました — ${msgs.join(' / ')}`, 'ok', 5000);
+      } catch (e) {
+        toast(root, `保存失敗: ${(e as Error).message}`, 'error');
+        throw e; // openModal 側で再有効化
+      }
+    },
+  });
+}
+
+/** 選択肢編集モーダル (部門 / 問い合わせ種別 共通)。
+ *  リスト表示 + 行ごとの削除ボタン + 末尾に追加入力。並び順は保持。
+ *  保存先は SpiraSettings (全ユーザー共有)。 */
+function openOptionsModal(root: HTMLElement, kind: 'dept' | 'category'): void {
+  const title = kind === 'dept' ? '部門の選択肢' : '問い合わせ種別の選択肢';
+  const getter = kind === 'dept' ? getDepartmentOptions : getInquiryCategoryOptions;
+  const setter = kind === 'dept' ? setDepartmentOptions : setInquiryCategoryOptions;
+  const placeholder = kind === 'dept' ? '例: 営業部 / 開発部 / 管理部' : '例: 不具合・エラーの報告';
+
+  let draft: string[] = [];
+
+  const listHost = el('div', { style: 'display:flex;flex-direction:column;gap:var(--s-2);max-height:50vh;overflow-y:auto' });
+
+  const renderList = (): void => {
+    listHost.replaceChildren();
+    if (draft.length === 0) {
+      listHost.appendChild(el('div', {
+        style: 'color:var(--ink-3);font-size:var(--fs-sm);padding:var(--s-3);background:var(--paper-2);border-radius:var(--r-2);text-align:center',
+      }, ['(未設定 — 下の入力欄から追加してください)']));
+      return;
+    }
+    draft.forEach((item, i) => {
+      const row = el('div', {
+        style:
+          'display:flex;gap:var(--s-2);align-items:center;' +
+          'padding:var(--s-2) var(--s-3);background:var(--paper);' +
+          'border:1px solid var(--line);border-radius:var(--r-2)',
+      }, [
+        el('span', { style: 'flex:1;min-width:0' }, [item]),
+        el('button', {
+          type: 'button',
+          class: 'spira-btn spira-btn--ghost spira-btn--sm',
+          title: '上へ移動',
+          disabled: i === 0,
+          onclick: () => {
+            if (i === 0) return;
+            const tmp = draft[i - 1]!;
+            draft[i - 1] = draft[i]!;
+            draft[i] = tmp;
+            renderList();
+          },
+        }, ['↑']),
+        el('button', {
+          type: 'button',
+          class: 'spira-btn spira-btn--ghost spira-btn--sm',
+          title: '下へ移動',
+          disabled: i === draft.length - 1,
+          onclick: () => {
+            if (i === draft.length - 1) return;
+            const tmp = draft[i + 1]!;
+            draft[i + 1] = draft[i]!;
+            draft[i] = tmp;
+            renderList();
+          },
+        }, ['↓']),
+        el('button', {
+          type: 'button',
+          class: 'spira-btn spira-btn--ghost spira-btn--sm',
+          style: 'color:var(--danger)',
+          title: '削除',
+          onclick: () => {
+            draft.splice(i, 1);
+            renderList();
+          },
+        }, ['×']),
+      ]);
+      listHost.appendChild(row);
+    });
+  };
+
+  const addInput = el('input', {
+    type: 'text', class: 'spira-input', placeholder,
+    style: 'flex:1;min-width:0',
+  }) as HTMLInputElement;
+  const addBtn = el('button', {
+    type: 'button',
+    class: 'spira-btn spira-btn--primary spira-btn--sm',
+    onclick: () => {
+      const v = addInput.value.trim();
+      if (!v) return;
+      if (draft.includes(v)) {
+        toast(root, `「${v}」はすでに登録されています`, 'warn', 3000);
+        return;
+      }
+      draft.push(v);
+      addInput.value = '';
+      renderList();
+      addInput.focus();
+    },
+  }, ['追加']);
+  addInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); addBtn.click(); }
+  });
+
+  const body = el('div', { style: 'display:flex;flex-direction:column;gap:var(--s-3)' }, [
+    listHost,
+    el('div', { style: 'display:flex;gap:var(--s-2);align-items:center' }, [addInput, addBtn]),
+    el('div', {
+      style: 'font-size:var(--fs-xs);color:var(--ink-3);background:var(--paper-2);' +
+             'padding:var(--s-3);border-radius:var(--r-2);line-height:1.6',
+    }, [
+      '※ 設定は SpiraSettings リストに保存され、全ユーザーで共有されます。',
+      el('br'),
+      '※ 既存チケットに「削除済み」の選択肢が入っていても、その値は残ります (新規選択肢としては選べなくなるだけ)。',
+      ...(kind === 'category' ? [
+        el('br'),
+        '※ Forms 起票時、応答のカテゴリ値がここの一覧と一致すれば自動マッピング。一致しない場合は応答の値そのままが入ります。',
+      ] : []),
+    ]),
+  ]);
+
+  void getter().then((list) => {
+    draft = [...list];
+    renderList();
+  });
+  renderList(); // 初期 (ロード中)
+
+  openModal(root, {
+    title,
+    body,
+    size: 'lg',
+    primaryLabel: '保存',
+    onPrimary: async () => {
+      try {
+        await setter(draft);
+        toast(root, `${title}を保存しました (${draft.length} 件)`, 'ok', 4000);
+        setState({});
+      } catch (e) {
+        toast(root, `保存失敗: ${(e as Error).message}`, 'error');
+        throw e;
+      }
+    },
+  });
+}
+
+/** バージョン管理モーダル。
+ *  - 現在のビルド ID 表示
+ *  - 最新ビルド ID (SP の SpiraSettings に登録、編集可能)
+ *  - 更新先 URL (SpiraSettings に登録)
+ *  - 「現バージョンを最新に登録」ショートカット (dev / 管理者用)
+ *  レイアウトは履歴追加・チケットプロパティと同じ 2 列グリッド。 */
+function openVersionModal(root: HTMLElement): void {
+  const LABEL_STYLE =
+    'color:var(--ink-3);font-size:var(--fs-sm);' +
+    'align-self:center;justify-self:end;text-align:right;white-space:nowrap';
+  const LABEL_TOP_STYLE = LABEL_STYLE + ';align-self:start;padding-top:8px';
+  const CODE_STYLE =
+    'font-family:ui-monospace,Menlo,monospace;font-size:12px;' +
+    'background:var(--paper-2);padding:2px 6px;border-radius:3px;' +
+    'word-break:break-all;display:inline-block;max-width:100%';
+
+  const current = currentBuildId();
+  let urlDraft = '';
+  const latestDisplay = el('code', { style: CODE_STYLE }, ['(未登録)']);
+
+  const urlInput = el('input', {
+    type: 'url',
+    placeholder: 'https://your-server.example/spira/install.html',
+    style:
+      'width:100%;padding:var(--s-2) var(--s-3);' +
+      'border:1px solid var(--line);border-radius:var(--r-2);' +
+      'font-size:12px;font-family:ui-monospace,Menlo,monospace;' +
+      'background:var(--paper);color:var(--ink)',
+  }) as HTMLInputElement;
+  urlInput.addEventListener('input', () => { urlDraft = urlInput.value; });
+
+  const grid = el('div', {
+    style:
+      'display:grid;grid-template-columns:120px minmax(0,1fr);' +
+      'gap:var(--s-3) var(--s-4);align-items:center',
+  }, [
+    el('label', { style: LABEL_STYLE }, ['現在のビルド']),
+    el('div', { style: 'min-width:0' }, [el('code', { style: CODE_STYLE }, [current])]),
+
+    el('label', { style: LABEL_STYLE }, ['登録済み最新']),
+    el('div', { style: 'min-width:0' }, [latestDisplay]),
+
+    el('label', { style: LABEL_TOP_STYLE }, ['更新先 URL']),
+    el('div', { style: 'min-width:0' }, [urlInput]),
+
+    el('div', {
+      style:
+        'grid-column:1 / -1;' +
+        'font-size:var(--fs-xs);color:var(--ink-3);' +
+        'background:var(--paper-2);padding:var(--s-3);' +
+        'border-radius:var(--r-2);line-height:1.6;margin-top:var(--s-2)',
+    }, [
+      '※ 最新ビルド ID は Spira 起動時に自動更新されます (新しい bookmarklet を開いた人が SoT)。',
+      el('br'),
+      '※ 設定は SpiraSettings リストに保存され、全ユーザーで共有されます。',
+      el('br'),
+      '※ 古いビルドを開いたユーザーには起動時に更新バナーが表示され、更新先 URL に誘導されます。',
+    ]),
+  ]);
+
+  // 非同期ロード — 既存値を input/display に流し込む
+  void loadVersionInfo().then((info) => {
+    urlDraft = info.updateUrl ?? '';
+    urlInput.value = urlDraft;
+    latestDisplay.textContent = info.latest ?? '(未登録)';
+  });
+
+  openModal(root, {
+    title: 'バージョン管理',
+    body: grid,
+    size: 'lg',
+    primaryLabel: '保存',
+    onPrimary: async () => {
+      try {
+        await saveUpdateUrl(urlDraft.trim() || null);
+        toast(root, '更新先 URL を保存しました', 'ok', 4000);
+      } catch (e) {
+        toast(root, `保存失敗: ${(e as Error).message}`, 'error');
+        throw e;
+      }
+    },
+  });
+}
+
 function openHelpModal(root: HTMLElement): void {
-  // The PA flow ingests email into the SP `InboxMails` list. From there
-  // Spira's syncInbox auto-links replies (subject contains a ticket tag)
-  // and surfaces unprocessed mails for manual triage.
+  // The help modal covers 3 Power Automate flows that Spira relies on:
+  //   ① Inbox Ingest        — Outlook mail → SP InboxMails list
+  //   ② Teams Thread Create — SP TeamsPostRequests → Teams post → DeepLink writeback
+  //   ③ Forms Ingest        — Microsoft Forms response → SP InboxMails (forms-* convId)
+  // Each is wrapped in a <details> toggle so the modal stays scannable.
   //
   // Steps below match the column schema declared in api/sp.ts
-  // (`inboxFieldSpecs`) — keep in sync if the schema changes.
+  // (`inboxFieldSpecs` / `ticketFieldSpecs` / `teamsPostRequestFieldSpecs`)
+  // — keep in sync if the schema changes.
 
   const h = (text: string): HTMLElement =>
     el('h3', { style: 'margin:var(--s-5) 0 var(--s-2);font-size:var(--fs-md);font-weight:600;color:var(--ink)' }, [text]);
 
   const p = (text: string): HTMLElement =>
     el('p', { style: 'margin:0 0 var(--s-3);line-height:1.7;font-size:var(--fs-sm);color:var(--ink)' }, [text]);
+
+  /** Paragraph with mixed text/element children (e.g. inline <code>). */
+  const pn = (...children: (string | HTMLElement)[]): HTMLElement =>
+    el('p', { style: 'margin:0 0 var(--s-3);line-height:1.7;font-size:var(--fs-sm);color:var(--ink)' }, children);
 
   const ol = (items: (string | HTMLElement)[]): HTMLElement =>
     el('ol', {
@@ -540,6 +1122,38 @@ function openHelpModal(root: HTMLElement): void {
       style: 'background:var(--paper-2);padding:var(--s-3) var(--s-4);border:1px solid var(--line);border-radius:var(--r-2);font-family:ui-monospace,Menlo,monospace;font-size:12px;line-height:1.5;overflow-x:auto;white-space:pre;color:var(--ink);margin:var(--s-2) 0',
     }, [text]);
 
+  /** Collapsible section. `open` controls initial expansion (only the first
+   *  flow expanded by default to keep the modal compact). */
+  const toggle = (title: string, subtitle: string, contents: HTMLElement[], open = false): HTMLElement => {
+    const summary = el('summary', {
+      style:
+        'cursor:pointer;list-style:none;padding:var(--s-4) var(--s-5);' +
+        'background:var(--paper-2);border:1px solid var(--line);border-radius:var(--r-2);' +
+        'font-weight:600;font-size:var(--fs-md);color:var(--ink);' +
+        'display:flex;align-items:center;gap:var(--s-3);user-select:none',
+    }, [
+      el('span', { style: 'font-size:0.85em;color:var(--ink-3);transition:transform 0.15s', class: 'spira-toggle-marker' }, ['▶']),
+      el('span', { style: 'flex:1' }, [title]),
+      el('span', { style: 'font-size:var(--fs-xs);color:var(--ink-3);font-weight:400' }, [subtitle]),
+    ]);
+    const det = el('details', {
+      style: 'margin-bottom:var(--s-3)',
+      ...(open ? { open: '' } : {}),
+    }, [
+      summary,
+      el('div', {
+        style: 'padding:var(--s-4) var(--s-5);border:1px solid var(--line);border-top:0;' +
+               'border-radius:0 0 var(--r-2) var(--r-2);background:var(--paper)',
+      }, contents),
+    ]);
+    // 開閉時に三角マーカーを回転
+    det.addEventListener('toggle', () => {
+      const marker = summary.querySelector<HTMLElement>('.spira-toggle-marker');
+      if (marker) marker.style.transform = (det as HTMLDetailsElement).open ? 'rotate(90deg)' : 'rotate(0)';
+    });
+    return det;
+  };
+
   const row = (k: string, v: string, hint?: string): HTMLElement =>
     el('tr', {}, [
       el('td', { style: 'padding:6px 10px;border-bottom:1px solid var(--line);vertical-align:top;white-space:nowrap;font-family:ui-monospace,Menlo,monospace;font-size:12px;color:var(--ink)' }, [k]),
@@ -552,8 +1166,13 @@ function openHelpModal(root: HTMLElement): void {
   // ── Content sections ───────────────────────────────────────────────
 
   const intro = el('div', {}, [
-    p('Spira は SharePoint 上の 3 つのリスト (Tickets / Comments / InboxMails) のみで動作します。受信メールをアプリに取り込むには Power Automate (PA) フローを 1 本作成し、メールが届いたら InboxMails リストに行を追加するように設定してください。'),
-    p('PA で取り込まれたメールは画面左側の「受信メール」に表示され、件名に含まれるチケット ID タグから自動で既存チケットへ紐付けられます (タグが無いものは「新規起票」または「既存に紐付け」のボタンで手動処理)。'),
+    p('Spira は SharePoint 上のリスト (Tickets / Comments / InboxMails / TeamsPostRequests / SpiraSettings) のみで動作します。外部連携のため、Power Automate (PA) を最大 3 本作成します:'),
+    el('ul', { style: 'margin:0 0 var(--s-3);padding-left:1.2em;line-height:1.8;font-size:var(--fs-sm);color:var(--ink)' }, [
+      el('li', {}, [el('strong', {}, ['① メール取り込み']), ' — Outlook の新着メールを InboxMails リストに追加 (必須)']),
+      el('li', {}, [el('strong', {}, ['② Teams スレッド作成']), ' — チケット起票時に Teams へ自動投稿し DeepLink を書き戻す (任意)']),
+      el('li', {}, [el('strong', {}, ['③ Forms 取り込み']), ' — Microsoft Forms 応答を InboxMails に追加 (任意)']),
+    ]),
+    p('下の各セクションをクリックして手順を表示できます。'),
   ]);
 
   const prereq = el('div', {}, [
@@ -754,15 +1373,243 @@ function openHelpModal(root: HTMLElement): void {
     ]),
   ]);
 
+  // ============================================================
+  // PA フロー ② — Teams スレッド作成
+  // ============================================================
+  const teamsTable = el('table', {
+    style: 'width:100%;border-collapse:collapse;font-size:12px;margin-top:var(--s-2)',
+  }, [
+    el('thead', {}, [
+      el('tr', {}, [
+        el('th', { style: 'text-align:left;padding:6px 10px;border-bottom:2px solid var(--line);font-size:11px;color:var(--ink-3);text-transform:uppercase' }, ['列名 (SP)']),
+        el('th', { style: 'text-align:left;padding:6px 10px;border-bottom:2px solid var(--line);font-size:11px;color:var(--ink-3);text-transform:uppercase' }, ['内容']),
+      ]),
+    ]),
+    el('tbody', {}, [
+      row('TicketId', '対象チケットの Id (Number)', '完了後に DeepLink を書き戻す対象。'),
+      row('ThreadType', "'internal' または 'user'", "internal=社内議論用 / user=顧客向けチャネル。Spira 側で `IsInternal` ボタンを押した側に応じて書き分け。"),
+      row('ChannelId', 'Teams チャネル ID', 'Spira 設定の「Teams channels」で登録した値が起票時に埋め込まれる。'),
+      row('TeamId', 'Teams チーム ID (= Group Id)', '同上。'),
+      row('RequestedAt', '起票時刻 (DateTime)', '監視・タイムアウト判定用。'),
+      row('Status', "'Pending' / 'Completed' / 'Failed'", '初期は Pending。PA 完了で Completed (= 行削除) または Failed に。'),
+      row('ErrorMessage', 'Note', 'Failed 時に Teams API のエラーメッセージを記録。'),
+    ]),
+  ]);
+
+  const teamsFlow = el('div', {}, [
+    pn('Spira でチケットの「Teams スレッド起票」ボタンを押すと、SP の ', code('TeamsPostRequests'), ' リストに 1 行追加されます。PA フロー ② はその行を検知して Teams に投稿し、Tickets リストに DeepLink を書き戻します。'),
+
+    h('1. 前提'),
+    el('ul', { style: 'margin:0 0 var(--s-3);padding-left:1.2em;line-height:1.8;font-size:var(--fs-sm);color:var(--ink)' }, [
+      el('li', {}, ['Spira 設定 → ', el('em', {}, ['Teams channels']), ' で内部用/ユーザー用チャネルを登録済みであること']),
+      el('li', {}, ['Microsoft Teams コネクタの認証アカウントがチャネルに投稿権限を持つこと']),
+      el('li', {}, [code('TeamsPostRequests'), ' リストが Spira 初回起動で作成済みであること (', code('ensureLists'), ' が自動作成)']),
+    ]),
+
+    h('2. トリガー (TeamsPostRequests リスト)'),
+    pn('SharePoint コネクタの ', code('項目が作成されたとき (When an item is created)'), ' を使用。リスト行のスキーマは下表のとおり (Spira が起票時に自動で値を入れる)。'),
+    teamsTable,
+    ol([
+      el('div', {}, ['Site Address: Spira を入れた SP サイト URL']),
+      el('div', {}, ['List Name: ', code('TeamsPostRequests')]),
+    ]),
+
+    h('3. アクション構成'),
+    p('以下を順番に追加:'),
+    ol([
+      el('div', {}, [
+        el('strong', {}, ['① 条件 (Condition)']),
+        ': ', code("triggerOutputs()?['body/Status']"), ' が ', code("'Pending'"),
+        ' と等しい場合のみ続行 (再実行・誤投稿防止)。',
+      ]),
+      el('div', {}, [
+        el('strong', {}, ['② SharePoint「項目の取得」']),
+        ': List = ', code('Tickets'),
+        '、Id = ', code("triggerOutputs()?['body/TicketId']"),
+        ' — 投稿本文に件名・本文を埋め込むため。',
+      ]),
+      el('div', {}, [
+        el('strong', {}, ['③ Teams「チャネル内でメッセージを投稿する (Post a message in a channel)」']),
+        ':',
+        el('ul', { style: 'margin:6px 0;padding-left:1.2em;line-height:1.7' }, [
+          el('li', {}, ['Post As: ', code('Flow bot'), ' (またはユーザ)']),
+          el('li', {}, ['Team: ', code("triggerOutputs()?['body/TeamId']"), ' (カスタム値タブで入力)']),
+          el('li', {}, ['Channel: ', code("triggerOutputs()?['body/ChannelId']"), ' (カスタム値タブで入力)']),
+          el('li', {}, ['Message: HTML 形式で件名 + 説明 + Spira へのリンクを投稿 (下記サンプル参照)']),
+          el('li', {}, ['Subject: ', code("concat('[#', triggerOutputs()?['body/TicketId'], '] ', body('Tickets取得')?['Title'])")]),
+        ]),
+      ]),
+      el('div', {}, [
+        el('strong', {}, ['④ SharePoint「項目の更新」']),
+        ' (Tickets リスト): 投稿結果の Message Id と weblink を書き戻す。',
+        el('ul', { style: 'margin:6px 0;padding-left:1.2em;line-height:1.7' }, [
+          el('li', {}, [code('ThreadType'), " === 'internal' のとき → InternalThreadId / InternalChannelId / InternalDeepLink を更新"]),
+          el('li', {}, [code('ThreadType'), " === 'user' のとき → UserThreadId / UserChannelId / UserDeepLink を更新"]),
+          el('li', {}, ['※ Switch アクションで ThreadType を分岐させると分かりやすい']),
+        ]),
+      ]),
+      el('div', {}, [
+        el('strong', {}, ['⑤ SharePoint「項目の削除」']),
+        ' — トリガー行 (', code("triggerOutputs()?['body/ID']"),
+        ') を削除。これで Spira の「DeepLink 未設定」表示が解消され、ボタンが「スレッドを開く」に変わる。',
+      ]),
+    ]),
+
+    h('4. 投稿本文サンプル'),
+    p('Teams 投稿のメッセージ欄に貼り付け (HTML 入力モードに切り替えてから):'),
+    codeBlock(
+      '<h3>[#@{triggerOutputs()?[\'body/TicketId\']}] @{body(\'Tickets取得\')?[\'Title\']}</h3>\n' +
+      '<p><b>優先度:</b> @{body(\'Tickets取得\')?[\'Priority\']} / <b>ステータス:</b> @{body(\'Tickets取得\')?[\'Status\']}</p>\n' +
+      '<p>@{body(\'Tickets取得\')?[\'Description\']}</p>\n' +
+      '<hr><p><i>このメッセージは Spira から自動投稿されています。</i></p>'
+    ),
+
+    h('5. DeepLink の取得'),
+    p('Teams「チャネル内でメッセージを投稿する」の返り値から DeepLink を取り出す式:'),
+    codeBlock("outputs('チャネル内でメッセージを投稿する')?['body/linkToMessage']"),
+    p('Message Id を取り出す式 (InternalThreadId / UserThreadId 用):'),
+    codeBlock("outputs('チャネル内でメッセージを投稿する')?['body/messageId']"),
+
+    h('6. エラーハンドリング'),
+    p('上記アクションが失敗したときの「Configure run after」を使い、Failed 経路では TeamsPostRequests 行を更新する分岐を追加:'),
+    el('ul', { style: 'margin:0 0 var(--s-3);padding-left:1.2em;line-height:1.8;font-size:var(--fs-sm);color:var(--ink)' }, [
+      el('li', {}, [code('Status'), ' = ', code("'Failed'")]),
+      el('li', {}, [code('ErrorMessage'), ' = ', code("outputs('チャネル内でメッセージを投稿する')?['body']"), ' などのエラー本文']),
+    ]),
+    p('行は削除せず残し、管理者が原因確認後に手動削除 (or 再 Pending に戻す) する運用が安全。'),
+
+    h('7. 動作確認'),
+    ol([
+      el('div', {}, ['Spira でチケットを開き「🏢 内部スレッド起票」または「👥 ユーザースレッド起票」をクリック']),
+      el('div', {}, ['PA の実行履歴で成功を確認 → Teams チャネルに投稿が出る']),
+      el('div', {}, ['Spira のボタン表示が「スレッドを開く」に変われば DeepLink 書き戻し成功']),
+    ]),
+  ]);
+
+  // ============================================================
+  // PA フロー ③ — Microsoft Forms 取り込み
+  // ============================================================
+  const formsTable = el('table', {
+    style: 'width:100%;border-collapse:collapse;font-size:12px;margin-top:var(--s-2)',
+  }, [
+    el('thead', {}, [
+      el('tr', {}, [
+        el('th', { style: 'text-align:left;padding:6px 10px;border-bottom:2px solid var(--line);font-size:11px;color:var(--ink-3);text-transform:uppercase' }, ['列名 (InboxMails)']),
+        el('th', { style: 'text-align:left;padding:6px 10px;border-bottom:2px solid var(--line);font-size:11px;color:var(--ink-3);text-transform:uppercase' }, ['値']),
+      ]),
+    ]),
+    el('tbody', {}, [
+      row('Title', "concat('[Forms] ', <件名相当の質問への回答>)", 'SP 必須列。一覧での識別用なので件名と同じで OK。'),
+      row('Subject', "concat('[Forms] ', <件名相当の質問への回答>)", 'Spira の受信メール一覧に表示される件名。'),
+      row('BodyHtml', "Q&A を HTML 整形した文字列", '質問ラベル + 回答を <p><strong>カテゴリ:</strong> ...</p> 形式で並べる。Spira の起票モーダルが「カテゴリ:」「優先度:」ラベルを自動抽出。'),
+      row('BodyText', "Q&A を改行区切りのテキストにした文字列", 'フォールバック用。HTML が無いケースでも同じ抽出が動くようにしておくと安心。'),
+      row('FromEmail', "回答者のメールアドレス", 'Forms「応答者の Email」動的コンテンツを使用。匿名 Form の場合は空欄でも OK。'),
+      row('FromName', "回答者の表示名", 'AD ユーザ情報から取得 (Office 365 ユーザー「ユーザー プロファイル取得」アクションで補完)。'),
+      row('ReceivedAt', 'utcNow()', '受信時刻として PA 実行時を入れる。'),
+      row('SentAt', "triggerOutputs()?['body/submitDate']", '応答送信時刻。Forms 動的コンテンツ「Submit Date」から取得。'),
+      row('ConversationId', "concat('forms-', <formId>, '-', <responseId>)", '★ 必須。Spira はこの forms- プレフィクスで Forms 経由メールを判別し、起票モーダルにフォーム回答を自動展開します。'),
+      row('InternetMessageId', "concat('forms-', <responseId>, '@<tenant>')", '重複防止用の擬似 Message-Id。formId/responseId のセットでユニーク。'),
+      row('HasAttachments', 'false', 'Forms 応答に添付がある場合は別途処理が必要 (基本 false)。'),
+      row('IsProcessed', 'false', '初期値。Spira が起票時に true に更新。'),
+      row('IsHidden', 'false', '通常は false。'),
+    ]),
+  ]);
+
+  const formsFlow = el('div', {}, [
+    pn('Microsoft Forms の応答を Spira の「受信メール」に流し込むフローです。Forms はチケットタグを件名に持たないので、Spira は ', code('ConversationId'), ' が ', code('forms-'), ' で始まるかどうかで Forms 経由メールを識別し、起票モーダルでフォーム回答 (カテゴリ・優先度) を自動マッピングします。'),
+
+    h('1. 前提'),
+    el('ul', { style: 'margin:0 0 var(--s-3);padding-left:1.2em;line-height:1.8;font-size:var(--fs-sm);color:var(--ink)' }, [
+      el('li', {}, ['Forms フォームに ', el('strong', {}, ['「カテゴリ」']), ' (選択肢)・', el('strong', {}, ['「優先度」']), ' (High / Medium / Low) の質問を含めることを推奨。値を BodyHtml に含めると、Spira が起票モーダルで自動選択します。']),
+      el('li', {}, ['カテゴリの選択肢は Spira 設定 → ', el('em', {}, ['問い合わせ種別の選択肢']), ' と揃えるとマッピングが完全一致']),
+      el('li', {}, ['Forms 応答取り込みは Standard ライセンスで完結 (Graph API 不要)']),
+    ]),
+
+    h('2. トリガー'),
+    pn('Microsoft Forms コネクタの ', code('新しい応答が送信されるとき (When a new response is submitted)'), '。'),
+    ol([
+      el('div', {}, ['Form Id: 対象フォームを選択']),
+    ]),
+
+    h('3. アクション構成'),
+    ol([
+      el('div', {}, [
+        el('strong', {}, ['① Microsoft Forms「応答の詳細を取得 (Get response details)」']),
+        ' — トリガーの Response Id を渡す。各質問の回答が動的コンテンツとして取り出せるようになります。',
+      ]),
+      el('div', {}, [
+        el('strong', {}, ['② (任意) Office 365 ユーザー「ユーザー プロファイル取得」']),
+        ' — Responder Email を入力に取り、displayName を取得 (FromName 用)。',
+      ]),
+      el('div', {}, [
+        el('strong', {}, ['③ 作成 (Compose) — BodyHtml']),
+        ' — Q&A を HTML で整形。Spira が ', code('<strong>カテゴリ:</strong>'), ' を見て値を抽出するため、ラベルは ', el('strong', {}, ['日本語の「カテゴリ:」「優先度:」']), ' を使うこと:',
+      ]),
+      el('div', {}, [
+        el('strong', {}, ['④ SharePoint「項目の作成」 (List = ']), code('InboxMails'), el('strong', {}, [')']),
+        ' — 下表の通り列にマッピング。',
+      ]),
+    ]),
+
+    h('4. 列マッピング'),
+    formsTable,
+
+    h('5. BodyHtml の組み立てサンプル'),
+    p('Compose アクションの「入力」欄に貼り付け (動的コンテンツの参照部分は環境に応じて差し替え):'),
+    codeBlock(
+      '<p><strong>カテゴリ:</strong> @{outputs(\'応答の詳細を取得\')?[\'body/<カテゴリ質問の internal name>\']}</p>\n' +
+      '<p><strong>優先度:</strong> @{outputs(\'応答の詳細を取得\')?[\'body/<優先度質問の internal name>\']}</p>\n' +
+      '<p><strong>内容:</strong></p>\n' +
+      '<p>@{outputs(\'応答の詳細を取得\')?[\'body/<本文質問の internal name>\']}</p>'
+    ),
+    p('Forms 質問の internal name は「応答の詳細を取得」アクションの「Outputs」JSON を一度実行して確認するのが確実です。'),
+
+    h('6. ConversationId の生成'),
+    pn('★ 最重要 — ', code('forms-'), ' プレフィクスは Spira の判別キーなので必ず含めること。'),
+    codeBlock("concat('forms-', triggerOutputs()?['body/formsId'], '-', triggerOutputs()?['body/responseId'])"),
+    pn('テナントによって動的コンテンツ名が異なる場合は ', code("triggerOutputs()?['body/responseId']"), ' を ', code("triggerOutputs()?['body/resourceData/responseId']"), ' に置き換えて試してください。'),
+
+    h('7. 動作確認'),
+    ol([
+      el('div', {}, ['対象 Forms フォームから 1 件テスト送信']),
+      el('div', {}, ['PA の実行履歴で成功を確認 → SP の ', code('InboxMails'), ' リストに行が追加されているか確認']),
+      el('div', {}, [code('ConversationId'), ' 列が ', code('forms-...'), ' で始まっているか必ず確認 (このプレフィクスが無いと Spira がタグ無しメールと同じ扱いになり、Forms 用の特別処理が動きません)']),
+      el('div', {}, ['Spira の「受信メール」に Forms 経由のメールが表示され、件名横に ', el('strong', {}, ['Forms バッジ']), ' が付いていれば成功']),
+      el('div', {}, ['受信メールから「起票」をクリック → 起票モーダルでカテゴリ/優先度が自動選択されることを確認']),
+    ]),
+
+    h('8. トラブルシューティング'),
+    el('ul', { style: 'margin:0;padding-left:1.2em;line-height:1.8;font-size:var(--fs-sm);color:var(--ink)' }, [
+      el('li', {}, [
+        el('strong', {}, ['カテゴリ/優先度が自動選択されない']),
+        ': BodyHtml に ', code('<strong>カテゴリ:</strong> 値'), ' / ', code('<strong>優先度:</strong> High'),
+        ' のフォーマットで含まれているか確認。',
+      ]),
+      el('li', {}, [
+        el('strong', {}, ['Forms バッジが付かない']),
+        ': ', code('ConversationId'), ' が ', code('forms-'), ' で始まっていない可能性。PA で必ず ',
+        code("concat('forms-', ...)"), ' を使うこと。',
+      ]),
+      el('li', {}, [
+        el('strong', {}, ['応答の詳細が空 (動的コンテンツが拾えない)']),
+        ': トリガーの Response Id ではなく、「応答の詳細を取得」の Response Id 引数に渡しているか確認。動的コンテンツ名は ',
+        code('triggerOutputs()?[\'body/responseId\']'), ' が一般的。',
+      ]),
+    ]),
+  ]);
+
+  // ============================================================
+  // 組み立て — 3 セクションをトグルで配置
+  // ============================================================
+  const flow1 = el('div', {}, [prereq, trigger, action, verify, trouble]);
+
   const body = el('div', {
     style: 'max-width:720px;line-height:1.7',
   }, [
     intro,
-    prereq,
-    trigger,
-    action,
-    verify,
-    trouble,
+    toggle('① メール取り込み', '(必須) Outlook → InboxMails', [flow1], true),
+    toggle('② Teams スレッド作成', '(任意) チケット起票 → Teams 投稿 + DeepLink', [teamsFlow], false),
+    toggle('③ Microsoft Forms 取り込み', '(任意) Forms 応答 → InboxMails', [formsFlow], false),
   ]);
 
   openModal(root, {
@@ -823,11 +1670,32 @@ function renderSidebar(): HTMLElement {
     return node;
   };
 
+  // Tickets グループ見出しの右に虫眼鏡アイコン (検索モーダルを開く)。
+  // Cmd/Ctrl+K でも開ける。
+  const searchIconBtn = el('button', {
+    type: 'button',
+    class: 'spira-side-search-icon',
+    'aria-label': '検索 (⌘K / Ctrl+K)',
+    title: '検索 (⌘K / Ctrl+K)',
+    onclick: () => openSearchModal(),
+    style:
+      'margin-left:auto;display:inline-flex;align-items:center;justify-content:center;' +
+      'width:22px;height:22px;border:0;background:transparent;color:var(--ink-3);' +
+      'border-radius:var(--r-2);cursor:pointer;padding:0',
+    html: icon('search'),
+  });
+
   return el('aside', { class: 'spira-side', 'aria-label': 'サイドバー' }, [
     el('div', { class: 'spira-side-group' }, [
-      el('div', { class: 'spira-side-group-title' }, ['Tickets']),
+      el('div', {
+        class: 'spira-side-group-title',
+        style: 'display:flex;align-items:center',
+      }, [
+        el('span', { style: 'flex:1' }, ['Tickets']),
+        searchIconBtn,
+      ]),
       item('チケット一覧', 'tickets', 'list'),
-      item('受信メール', 'inbox', 'inbox', s.inboxCount),
+      item('受信', 'inbox', 'inbox', s.inboxCount),
     ]),
     el('div', { class: 'spira-side-group' }, [
       el('div', { class: 'spira-side-group-title' }, ['その他']),
@@ -841,6 +1709,21 @@ function renderSidebar(): HTMLElement {
       }, [
         el('span', { html: icon('plus'), style: 'display:inline-flex;width:14px;height:14px' }),
         '新規チケット',
+      ]),
+      // アプリ全体を閉じる (overlay を DOM から remove)。topbar の × と同じ動作。
+      el('button', {
+        class: 'spira-btn spira-btn--ghost',
+        style: 'width:100%;margin-top:var(--s-2);color:var(--ink-3)',
+        title: 'Spira を閉じる',
+        onclick: () => {
+          const r = document.querySelector<HTMLElement>('#spira-root');
+          r?.remove();
+          // bookmarklet の再注入用フラグもリセット
+          (window as unknown as { __SPIRA_MOUNTED__?: boolean }).__SPIRA_MOUNTED__ = false;
+        },
+      }, [
+        el('span', { html: icon('x'), style: 'display:inline-flex;width:14px;height:14px' }),
+        'アプリを閉じる',
       ]),
     ]),
   ]);

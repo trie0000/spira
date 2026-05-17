@@ -6,7 +6,9 @@ export interface CreateTicketInput {
   description?: string;
   status?: TicketStatus;
   priority?: Priority;
-  assigneeEmail?: string;
+  assigneeEmails?: string[];
+  department?: string;
+  inquiryCategory?: string;
   reporterEmail?: string;
   reporterName?: string;
   dueDate?: string;
@@ -25,6 +27,7 @@ export interface AddCommentInput {
   sourceEmailId?: number;
   hasAttachments?: boolean;
   internetMessageId?: string;
+  source?: 'mail' | 'teams' | 'other';
 }
 
 export interface SyncResult {
@@ -50,6 +53,13 @@ export interface Repository {
   // tickets
   listTickets(opts?: { includeDeleted?: boolean }): Promise<Ticket[]>;
   listDeletedTickets(): Promise<Ticket[]>;
+  /** Free-text search across tickets and comments. Returns matched
+   *  tickets paired with their matching comments. Used by the
+   *  cross-ticket search view. */
+  searchAll(query: string): Promise<{
+    tickets: Ticket[];
+    commentsByTicket: Map<number, Comment[]>;
+  }>;
   getTicket(id: number): Promise<Ticket | null>;
   createTicket(input: CreateTicketInput): Promise<Ticket>;
   updateTicket(id: number, patch: Partial<Ticket>): Promise<Ticket | null>;
@@ -61,13 +71,29 @@ export interface Repository {
   // comments
   listComments(ticketId: number): Promise<Comment[]>;
   addComment(input: AddCommentInput): Promise<Comment>;
-  /** Update a comment's content (and optionally its isHtml flag).
+  /** Update a comment in place. All fields are optional; only the
+   *  provided ones are written.
+   *
    *  Pass `isHtml: false` after migrating a legacy HTML memo to the new
    *  markdown editor — otherwise the SP row keeps `IsHtml=true` and the
    *  next reload treats the saved markdown as HTML, hiding everything
    *  past the first markdown character that looks like an HTML tag
-   *  (e.g. `>` for blockquote). */
-  updateComment(id: number, patch: { content: string; isHtml?: boolean }): Promise<void>;
+   *  (e.g. `>` for blockquote).
+   *
+   *  `fromName` / `fromEmail` / `sentAt` are used by the "対応履歴の編集"
+   *  UI in ticket detail so the user can fix a wrong speaker / time
+   *  after registration. */
+  updateComment(
+    id: number,
+    patch: {
+      content?: string;
+      isHtml?: boolean;
+      fromName?: string | null;
+      fromEmail?: string | null;
+      sentAt?: string;
+      source?: 'mail' | 'teams' | 'other';
+    },
+  ): Promise<void>;
   deleteComment(id: number): Promise<void>;
 
   // inbox
@@ -75,6 +101,8 @@ export interface Repository {
   markInboxProcessed(id: number, patch: { ticketId: number; result: InboxState }): Promise<void>;
   hideInboxItems(ids: number[]): Promise<void>;
   unhideInboxItems(ids: number[]): Promise<void>;
+  /** InboxMails リストから物理削除。auto-link 後やノイズメールの掃除で使う。 */
+  deleteInboxMail(id: number): Promise<void>;
   syncInbox(): Promise<SyncResult>;
 
   // attachments — internal-memo file attachments. The file body is stored
@@ -85,6 +113,9 @@ export interface Repository {
 
   // users (AD picker)
   listSiteUsers(): Promise<SiteUser[]>;
+  /** 現在ログインしているユーザー (SP は /_api/web/currentuser、
+   *  mock は固定のテストユーザー)。 */
+  getCurrentUser(): Promise<SiteUser | null>;
 
   // dev helper (mock only)
   injectFakeReply?(ticketId: number): void;
@@ -92,6 +123,23 @@ export interface Repository {
   // Sample data seed — useful before PA is set up.
   // Adds 5 sample InboxMails to the underlying list.
   addSampleInbox(): Promise<{ count: number }>;
+
+  // Teams 連携 (Forms → Spira → Teams 運用案)
+  // チケット詳細から「内部スレッド起票」「ユーザースレッド起票」ボタンを
+  // 押すと、TeamsPostRequests リストに 1 行 INSERT される。
+  // 実際の Teams 投稿は PA フロー 2 が SP のアイテム作成トリガーで拾って
+  // 処理する。Spira はキューに積むだけ。
+  createTeamsPostRequest(params: {
+    ticketId: number;
+    threadType: 'internal' | 'user';
+  }): Promise<{ id: number }>;
+
+  // 設定 (Spira 全体で共有)
+  //   SP では SpiraSettings リストの Key/Value 列に保存。
+  //   Mock では in-memory Map。
+  //   保存形式は文字列。複雑な値は呼び出し側で JSON.stringify する。
+  getSetting(key: string): Promise<string | null>;
+  setSetting(key: string, value: string | null): Promise<void>;
 }
 
 // ----- factory -----
@@ -108,7 +156,15 @@ export function getRepoMode(): 'mock' | 'sp' {
   return _mode;
 }
 
-export async function initRepo(): Promise<{ mode: 'mock' | 'sp'; siteUrl?: string }> {
+/** SP モードかどうかを (リポジトリ作成前に) 判定。
+ *  サイト選択モーダルを起動前に表示するために main.ts から呼ぶ。 */
+export function detectMode(): 'mock' | 'sp' {
+  return shouldUseMock() ? 'mock' : 'sp';
+}
+
+export async function initRepo(
+  opts?: { overrideSiteUrl?: string },
+): Promise<{ mode: 'mock' | 'sp'; siteUrl?: string }> {
   const useMock = shouldUseMock();
   if (useMock) {
     const { MockRepository, seedMock } = await import('./mock');
@@ -119,6 +175,7 @@ export async function initRepo(): Promise<{ mode: 'mock' | 'sp'; siteUrl?: strin
   }
   const { SpRepository, detectSpConfig } = await import('./sp');
   const cfg = detectSpConfig();
+  if (opts?.overrideSiteUrl) cfg.siteUrl = opts.overrideSiteUrl;
   _repo = new SpRepository(cfg);
   _mode = 'sp';
   return { mode: 'sp', siteUrl: cfg.siteUrl };

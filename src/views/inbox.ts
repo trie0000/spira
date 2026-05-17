@@ -7,7 +7,12 @@ import { renderMailBody } from '../utils/sanitize';
 import { openModal, confirmModal } from '../components/modal';
 import { toast } from '../components/toast';
 import { attachColumnResize, savedColWidth } from '../utils/colResize';
-import { formatTicketIdShort } from '../utils/ticketTag';
+import { formatTicketIdShort, parseTicketTag } from '../utils/ticketTag';
+import { createDateTime } from '../components/datetime';
+import { parseTeamsPaste, resolveTeamsTimeToISO, detectLeadingOrphan } from '../lib/teams-paste';
+import { parseEml, looksLikeEml } from '../lib/eml-parser';
+import { createAssigneePicker } from '../components/assigneePicker';
+import { getDepartmentOptions, getInquiryCategoryOptions } from '../utils/optionLists';
 import type { InboxMail, TicketStatus, Priority, Ticket } from '../types';
 
 /** Find an existing (non-deleted) ticket whose source mail matches this
@@ -64,7 +69,10 @@ function getRoot(): HTMLElement {
 
 export async function renderInbox(): Promise<HTMLElement> {
   const wrap = el('div', { class: 'spira-main-wrap', style: 'display:flex;flex-direction:column;height:100%;min-height:0' });
-  const allMails = await getRepo().listInbox({ unprocessedOnly: true, includeHidden: inboxFilter.includeHidden });
+  // unprocessedOnly は外す。タグ付きメールは auto-sync で processed に
+  // なるので、unprocessed フィルターを掛けると Inbox に何も残らない。
+  // タグ付き = 既存チケット関連の履歴として常に閲覧できる方が便利。
+  const allMails = await getRepo().listInbox({ includeHidden: inboxFilter.includeHidden });
   const filtered = applyInboxFilters(allMails);
 
   for (const id of Array.from(selectedInboxIds)) if (!filtered.find(m => m.id === id)) selectedInboxIds.delete(id);
@@ -75,8 +83,28 @@ export async function renderInbox(): Promise<HTMLElement> {
   return wrap;
 }
 
+/** Forms 経由で取り込まれたメールかどうかを判定。PA フロー 1 が
+ *  ConversationId を `forms-<formId>-<responseId>` 形式で埋め込む規約
+ *  に従う。Forms はチケットタグを件名に持たないので、タグ判定とは
+ *  別軸で受信ボックスに出し続ける必要がある。 */
+export function isFormsSource(m: InboxMail): boolean {
+  return !!m.conversationId && m.conversationId.startsWith('forms-');
+}
+
+/** Inbox 表示・バッジカウントで共通して使う一次フィルター。
+ *  以下のいずれかを満たすメールを表示:
+ *    - 件名にチケットタグを含む (auto-link 待ちの返信メール)
+ *    - Forms 経由 (新規問い合わせ、チケット起票判断待ち)
+ *  syncInbox 側でタグ無しメールは物理削除する運用なので、ここに
+ *  残っているタグ無しメールはほぼ Forms 経由のはず。 */
+export function inboxRowsWithTag(rows: InboxMail[]): InboxMail[] {
+  return rows.filter(m =>
+    parseTicketTag(m.subject) != null || isFormsSource(m),
+  );
+}
+
 function applyInboxFilters(rows: InboxMail[]): InboxMail[] {
-  let out = rows;
+  let out = inboxRowsWithTag(rows);
   if (inboxFilter.fromEmail) out = out.filter(m => m.fromEmail === inboxFilter.fromEmail);
   if (inboxFilter.hasAttachments === 'yes') out = out.filter(m => m.hasAttachments);
   if (inboxFilter.hasAttachments === 'no') out = out.filter(m => !m.hasAttachments);
@@ -314,8 +342,8 @@ function onBulkHide(): void {
         await getRepo().hideInboxItems(ids);
         toast(getRoot(), `${ids.length} 件を非表示にしました`, 'ok');
         selectedInboxIds.clear();
-        const fresh = await getRepo().listInbox({ unprocessedOnly: true });
-        setState({ inboxCount: fresh.length });
+        const fresh = await getRepo().listInbox({});
+        setState({ inboxCount: inboxRowsWithTag(fresh).length });
       } catch (e) {
         toast(getRoot(), `失敗: ${(e as Error).message}`, 'error');
       }
@@ -332,8 +360,8 @@ function renderList(mails: InboxMail[]): HTMLElement {
         try {
           const r = await getRepo().addSampleInbox();
           toast(getRoot(), `サンプルメール ${r.count} 件を追加しました`, 'ok');
-          const fresh = await getRepo().listInbox({ unprocessedOnly: true });
-          setState({ inboxCount: fresh.length });
+          const fresh = await getRepo().listInbox({});
+          setState({ inboxCount: inboxRowsWithTag(fresh).length });
         } catch (e) {
           toast(getRoot(), `追加失敗: ${(e as Error).message}`, 'error');
         } finally {
@@ -445,8 +473,8 @@ function renderHeaderRow(m: InboxMail): HTMLElement {
         try {
           await getRepo().unhideInboxItems([m.id]);
           toast(getRoot(), '再表示しました', 'ok');
-          const fresh = await getRepo().listInbox({ unprocessedOnly: true });
-          setState({ inboxCount: fresh.length });
+          const fresh = await getRepo().listInbox({});
+          setState({ inboxCount: inboxRowsWithTag(fresh).length });
         } catch (err) {
           toast(getRoot(), `失敗: ${(err as Error).message}`, 'error');
         }
@@ -461,8 +489,8 @@ function renderHeaderRow(m: InboxMail): HTMLElement {
         try {
           await getRepo().hideInboxItems([m.id]);
           toast(getRoot(), '非表示にしました', 'ok');
-          const fresh = await getRepo().listInbox({ unprocessedOnly: true });
-          setState({ inboxCount: fresh.length });
+          const fresh = await getRepo().listInbox({});
+          setState({ inboxCount: inboxRowsWithTag(fresh).length });
         } catch (err) {
           toast(getRoot(), `失敗: ${(err as Error).message}`, 'error');
         }
@@ -512,70 +540,411 @@ function renderExpandedRow(m: InboxMail): HTMLElement {
   return el('tr', { class: 'spira-inbox-expanded' }, [cell]);
 }
 
+/** 新規チケット起票モーダル (統一版)。
+ *  受信箱の「起票」ボタンと、サイドバーの「+新規チケット」ボタンの
+ *  両方から呼ばれる。フィールド構成は履歴を追加と揃え、ソース別の
+ *  挙動も同じ:
+ *    - mail   : Outlook の件名をタイトル欄にドラッグ&ドロップで初期値設定
+ *    - teams  : Teams チャットを本文欄にコピペ → 自動パース → 複数カード化
+ *    - other  : 単発の手入力
+ *  受信箱由来 (m.id > 0) の場合は mail ソース固定で、件名・本文・送信者
+ *  などが事前入力される。 */
 export function openNewTicketModal(m: InboxMail): void {
+  type Source = 'mail' | 'teams' | 'other';
   const users = getState().users;
+  const fromInbox = m.id > 0;
 
-  const titleInput = el('input', { type: 'text', class: 'spira-input', value: m.subject || '' }) as HTMLInputElement;
-  const statusSel = el('select', { class: 'spira-select' }, ticketStatusList().map(v => el('option', { value: v, selected: v === '新規' }, [v]))) as HTMLSelectElement;
-  const prioSel = el('select', { class: 'spira-select' }, priorityList().map(v => el('option', { value: v, selected: v === 'Medium' }, [v]))) as HTMLSelectElement;
-  const assigneeSel = el('select', { class: 'spira-select' }, [
-    el('option', { value: '' }, ['未割当']),
-    ...users.map(u => el('option', { value: u.email }, [u.displayName])),
+  // ---- 共通フィールド ---------------------------------------------------
+  // PA フローで Subject に余分な空白・タブ・改行が混入することがある
+  // (`[Forms] ` + 動的値の組立てや、HTML 入力モードでの貼付けが原因)。
+  // 連続する空白系文字は単一スペースに圧縮し、前後を trim して表示。
+  const cleanedSubject = (m.subject || '').replace(/[\s　]+/g, ' ').trim();
+  const titleInput = el('input', {
+    type: 'text', class: 'spira-input', value: cleanedSubject,
+    placeholder: 'チケットの件名',
+  }) as HTMLInputElement;
+
+  // Outlook drag&drop:
+  //   - Outlook for Mac: 件名ドラッグ時、本体は .eml ファイルとして
+  //     DataTransfer.files に乗ってくる (text/plain は空のことが多い)。
+  //   - Outlook for Windows: 状況により text/plain で件名のみ、または
+  //     .msg/.eml ファイル。
+  //   - Outlook Web (OWA): text/plain で件名行。
+  // どのケースでも反映できるよう、files を優先 → text/plain にフォールバック
+  // する handleEmlDrop を共有し、件名欄だけでなくモーダル全体 (grid) に
+  // dragover/drop を貼って受け取れる範囲を広げる。
+  const applyParsedEml = (parsed: ReturnType<typeof parseEml>): void => {
+    // .eml が落ちてきたら、現在のソース選択に関わらず "mail" 固定にする
+    // (Teams / その他 を選択中に Outlook ファイルを落とした場合の事故防止)。
+    // 受信箱由来モーダル (sourceSel.disabled=true) では既に mail なので no-op。
+    if (!sourceSel.disabled && sourceSel.value !== 'mail') {
+      sourceSel.value = 'mail';
+      sourceSel.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    if (parsed.subject) {
+      titleInput.value = parsed.subject.replace(/[\s　]+/g, ' ').trim();
+      titleInput.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    if (parsed.fromName && !authorInput.value.trim()) {
+      authorInput.value = parsed.fromName;
+      authorInput.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    if (parsed.fromEmail && !authorEmailInput.value.trim()) {
+      authorEmailInput.value = parsed.fromEmail;
+    }
+    if (parsed.dateISO) {
+      // ISO は UTC なので、ローカル時刻に変換してから yyyy-MM-ddTHH:mm
+      const d = new Date(parsed.dateISO);
+      const pad = (n: number): string => String(n).padStart(2, '0');
+      const local = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+      dateTimePicker.setValueQuiet(local);
+    }
+    if (parsed.body && !bodyArea.value.trim()) {
+      bodyArea.value = parsed.body;
+      bodyArea.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+  };
+
+  // ファイルドロップ (.eml) は target に関係なく preventDefault + 自前処理。
+  // textarea 上にドロップされた場合でも textarea の intrinsic な file 挙動
+  // (= ブラウザがファイルを開いてモーダルが閉じる) を抑止するため、必ず
+  // preventDefault を最初に呼ぶ。テキストドロップは textarea 上であれば
+  // 標準挙動 (テキスト挿入) を尊重して preventDefault しない。
+  const handleEmlDrop = async (e: DragEvent): Promise<void> => {
+    const dt = e.dataTransfer;
+    if (!dt) return;
+    const files = Array.from(dt.files ?? []);
+    const emlFile = files.find(f =>
+      /\.eml$/i.test(f.name) || f.type === 'message/rfc822',
+    );
+    if (emlFile) {
+      e.preventDefault();
+      try {
+        const text = await emlFile.text();
+        applyParsedEml(parseEml(text));
+        toast(getRoot(), `「${emlFile.name}」を取り込みました`, 'ok');
+      } catch (err) {
+        toast(getRoot(), `EML 読み取り失敗: ${(err as Error).message}`, 'error');
+      }
+      return;
+    }
+    // ファイル以外の場合、textarea 上のドロップは標準挙動 (テキスト貼付け) を尊重
+    if (e.target instanceof HTMLTextAreaElement) return;
+    e.preventDefault();
+    const txt = dt.getData('text/plain') ?? '';
+    if (!txt) return;
+    if (looksLikeEml(txt)) {
+      try { applyParsedEml(parseEml(txt)); return; } catch { /* fall through */ }
+    }
+    // text/plain が件名のみ (旧来動作)
+    const firstLine = txt.split(/\r?\n/).map(s => s.trim()).find(s => s.length > 0) ?? txt.trim();
+    titleInput.value = firstLine;
+    titleInput.dispatchEvent(new Event('input', { bubbles: true }));
+  };
+
+  // dragover は無条件で preventDefault (=「ここに drop 可能」のシグナル)。
+  // - target を限定すると、Outlook for Mac の NSFilePromise ベースの
+  //   ドラッグで `dataTransfer.types` に 'Files' が出ない / textarea
+  //   フォーカス後に target が変わる、などのケースで accept が外れる。
+  // - dragover の preventDefault は「ここに drop してよい」の合図だけで、
+  //   実際の drop 時の標準挙動 (textarea へのテキスト挿入) には影響しない
+  //   (それは drop イベントの preventDefault で個別に判断)。
+  const handleDragOver = (e: DragEvent): void => {
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+  };
+
+  // ソース選択 (受信箱由来は mail に強制)
+  const sourceSel = el('select', { class: 'spira-input', style: 'width:200px;min-width:0' }, [
+    el('option', { value: 'mail',  selected: true }, ['メール']),
+    el('option', { value: 'teams' }, ['Teams']),
+    el('option', { value: 'other' }, ['その他']),
   ]) as HTMLSelectElement;
-  const dueInput = el('input', { type: 'date', class: 'spira-input' }) as HTMLInputElement;
+  if (fromInbox) sourceSel.disabled = true;
 
+  // 送信者
+  const authorInput = el('input', {
+    type: 'text', class: 'spira-input',
+    value: m.fromName ?? '',
+    placeholder: '送信者名 (任意)',
+    autocomplete: 'off',
+  }) as HTMLInputElement;
+  const authorEmailInput = el('input', {
+    type: 'email', class: 'spira-input',
+    value: m.fromEmail ?? '',
+    placeholder: 'メールアドレス (任意)',
+    autocomplete: 'off',
+  }) as HTMLInputElement;
+
+  // 送信時間
+  const todayISO = new Date().toISOString().slice(0, 10);
+  const sentInitial = m.sentAt ?? m.receivedAt;
+  const initialDT = sentInitial ? sentInitial.slice(0, 16) : `${todayISO}T${new Date().toISOString().slice(11, 16)}`;
+  const dateTimePicker = createDateTime({ initial: initialDT });
+
+  // 本文 textarea (Teams/mail/other 共通)
+  const bodyArea = el('textarea', {
+    class: 'spira-input',
+    rows: '10',
+    style: 'width:100%;font:13px/1.55 ui-monospace,Menlo,monospace;resize:vertical',
+    placeholder: 'メール本文 / Teams コピペ / 手入力',
+  }) as HTMLTextAreaElement;
+  if (fromInbox) bodyArea.value = m.bodyText || '';
+
+  // Teams ソース時のパース結果プレビュー
+  const previewLine = el('div', {
+    style: 'font-size:var(--fs-xs);color:var(--ink-3);min-height:1.4em',
+  });
+  const alertBanner = el('div', {
+    style: [
+      'display:none', 'background:#fef3c7', 'border:1px solid #f59e0b',
+      'color:#78350f', 'border-radius:var(--r-2)', 'padding:var(--s-2) var(--s-3)',
+      'font-size:var(--fs-sm)', 'line-height:1.6', 'white-space:pre-line',
+    ].join(';'),
+  });
+  const showAlert = (s: string): void => { alertBanner.textContent = s; alertBanner.style.display = 'block'; };
+  const hideAlert = (): void => { alertBanner.textContent = ''; alertBanner.style.display = 'none'; };
+
+  const currentBaseDate = (): Date => {
+    const v = dateTimePicker.getValue();
+    const mm = v.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (mm) return new Date(Number(mm[1]), Number(mm[2]!) - 1, Number(mm[3]!), 0, 0, 0);
+    return new Date();
+  };
+  const currentLeadingTime = (): string => {
+    const v = dateTimePicker.getValue();
+    const mm = v.match(/T(\d{2}):(\d{2})$/);
+    return mm ? `${mm[1]}:${mm[2]}` : '';
+  };
+
+  const updatePreview = (): void => {
+    const src = sourceSel.value as Source;
+    if (src !== 'teams') { previewLine.textContent = ''; hideAlert(); return; }
+    const raw = bodyArea.value.trim();
+    if (!raw) { previewLine.textContent = ''; hideAlert(); return; }
+    const leadingAuthor = authorInput.value.trim();
+    const orphan = detectLeadingOrphan(bodyArea.value);
+    const msgs = parseTeamsPaste(bodyArea.value, {
+      leadingAuthor: orphan ? (leadingAuthor || '(不明)') : leadingAuthor,
+      leadingTime: currentLeadingTime(),
+    });
+    if (msgs.length === 0) {
+      previewLine.textContent = '';
+      showAlert('送信者を検出できませんでした。\nコピー範囲に送信者名・時刻ヘッダが含まれているか確認してください。');
+      return;
+    }
+    hideAlert();
+    previewLine.textContent = `抽出: ${msgs.length} 件 (起票時に履歴として登録されます)`;
+  };
+
+  bodyArea.addEventListener('input', updatePreview);
+  authorInput.addEventListener('input', updatePreview);
+  sourceSel.addEventListener('change', () => {
+    const src = sourceSel.value as Source;
+    if (src === 'teams') {
+      authorInput.placeholder = '先頭メッセージの送信者 (Teams の仕様で取得できないため手入力)';
+      bodyArea.placeholder = 'Teams で右クリック→コピーしたチャットを貼り付け';
+    } else {
+      authorInput.placeholder = '送信者名 (任意)';
+      bodyArea.placeholder = src === 'mail' ? 'メール本文' : '本文 / メモ';
+    }
+    updatePreview();
+  });
+
+  // ---- メタデータ -------------------------------------------------------
+  const statusSel = el('select', { class: 'spira-input', style: 'width:100%' },
+    ticketStatusList().map(v => el('option', { value: v, selected: v === '新規' }, [v]))) as HTMLSelectElement;
+  // 優先度の初期値: Forms 経由なら応答値から抽出、それ以外は Medium。
+  // (このセレクト要素の生成タイミングでは initialFormsPriority がまだ
+  //  宣言されていないので、生成後に setTimeout で反映する流れにせず、
+  //  Medium をデフォルトにしておき、後段で値を上書きする。)
+  const prioSel = el('select', { class: 'spira-input', style: 'width:100%' },
+    priorityList().map(v => el('option', { value: v, selected: v === 'Medium' }, [v]))) as HTMLSelectElement;
+  const assigneePicker = createAssigneePicker({ users, initial: [] });
+  const dueInput = el('input', { type: 'date', class: 'spira-input', style: 'width:100%' }) as HTMLInputElement;
+
+  // 部門 / 問い合わせ種別の <select>。初期は空、非同期で選択肢を流し込む。
+  // Forms 経由の場合は BodyHtml から「カテゴリ:」値を抽出して初期選択。
+  const deptSel = el('select', { class: 'spira-input', style: 'width:100%' }, [
+    el('option', { value: '' }, ['(未設定)']),
+  ]) as HTMLSelectElement;
+  const categorySel = el('select', { class: 'spira-input', style: 'width:100%' }, [
+    el('option', { value: '' }, ['(未設定)']),
+  ]) as HTMLSelectElement;
+
+  // Forms 経由のメール本文から特定ラベル (カテゴリ / 優先度 等) の値を抽出。
+  // BodyHtml の `<strong>カテゴリ:</strong> <value></p>` 形式と
+  // BodyText の `カテゴリ: <value>` 形式の両方に対応。
+  const extractFormsField = (mm: InboxMail, label: string): string | undefined => {
+    if (!mm.conversationId?.startsWith('forms-')) return undefined;
+    const candidates: string[] = [];
+    if (mm.bodyText) candidates.push(mm.bodyText);
+    if (mm.bodyHtml) {
+      const stripped = mm.bodyHtml.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+      candidates.push(stripped);
+    }
+    const re = new RegExp(`${label}\\s*[::]\\s*([^\\n<]+?)(?:\\s{2,}|<|\\n|$)`);
+    for (const txt of candidates) {
+      const mm2 = txt.match(re);
+      if (mm2 && mm2[1]) return mm2[1].trim();
+    }
+    return undefined;
+  };
+  const initialFormsCategory = extractFormsField(m, 'カテゴリ');
+
+  // 優先度の自動マッピング:
+  //   Forms 応答は "High（業務が停止している / 緊急対応が必要）" のような
+  //   長い文字列で返ってくる場合がある。先頭の High / Medium / Low を
+  //   切り出して Spira の Priority enum に揃える。
+  const extractFormsPriority = (mm: InboxMail): Priority | undefined => {
+    const raw = extractFormsField(mm, '優先度');
+    if (!raw) return undefined;
+    const head = raw.match(/^\s*(High|Medium|Low)/i);
+    if (!head) return undefined;
+    const norm = head[1]!.charAt(0).toUpperCase() + head[1]!.slice(1).toLowerCase();
+    if (norm === 'High' || norm === 'Medium' || norm === 'Low') return norm as Priority;
+    return undefined;
+  };
+  const initialFormsPriority = extractFormsPriority(m);
+  if (initialFormsPriority) prioSel.value = initialFormsPriority;
+
+  // 非同期で選択肢を取得 → select に追加
+  void Promise.all([getDepartmentOptions(), getInquiryCategoryOptions()])
+    .then(([depts, cats]) => {
+      for (const d of depts) deptSel.appendChild(el('option', { value: d }, [d]));
+      for (const c of cats) categorySel.appendChild(el('option', { value: c }, [c]));
+      // Forms カテゴリ自動マッピング
+      if (initialFormsCategory) {
+        if (cats.includes(initialFormsCategory)) {
+          categorySel.value = initialFormsCategory;
+        } else {
+          // 一致しない場合は応答値をそのまま追加して選択
+          categorySel.appendChild(el('option', { value: initialFormsCategory, selected: true }, [`${initialFormsCategory} (フォーム値)`]));
+          categorySel.value = initialFormsCategory;
+        }
+      }
+    });
+
+  // 受信箱由来 → メール HTML プレビューを参考表示 (textarea とは独立)
   const previewBody = el('div', { class: 'spira-th-card-body' });
-  renderMailBody(previewBody, m.bodyHtml, m.bodyText);
+  if (fromInbox) renderMailBody(previewBody, m.bodyHtml, m.bodyText);
 
-  const preview = m.id > 0
-    ? el('div', { class: 'spira-th-card spira-th-card--received', style: 'max-height:240px;overflow:auto' }, [
-        el('div', { class: 'spira-th-card-head' }, [
-          el('span', { html: icon('mail') }),
-          el('span', { class: 'spira-th-card-from' }, [m.fromName ?? m.fromEmail]),
-          el('span', { style: 'margin-left:auto;color:var(--ink-3);font-size:var(--fs-sm)' }, [fmtDate(m.receivedAt)]),
-        ]),
-        previewBody,
-      ])
-    : null;
+  // ---- 2 列グリッドレイアウト (履歴追加と同形式) -----------------------
+  const LABEL_STYLE =
+    'color:var(--ink-3);font-size:var(--fs-sm);' +
+    'align-self:center;justify-self:end;text-align:right;white-space:nowrap';
+  const LABEL_TOP_STYLE = LABEL_STYLE + ';align-self:start;padding-top:8px';
 
-  const body = el('div', {}, [
-    ...(preview ? [el('div', { class: 'spira-field' }, [el('label', { class: 'spira-field-label' }, ['メールプレビュー']), preview])] : []),
-    el('div', { class: 'spira-field' }, [el('label', { class: 'spira-field-label' }, ['タイトル']), titleInput]),
-    el('div', { style: 'display:grid;grid-template-columns:1fr 1fr;gap:var(--s-5)' }, [
-      el('div', { class: 'spira-field' }, [el('label', { class: 'spira-field-label' }, ['ステータス']), statusSel]),
-      el('div', { class: 'spira-field' }, [el('label', { class: 'spira-field-label' }, ['優先度']), prioSel]),
-      el('div', { class: 'spira-field' }, [el('label', { class: 'spira-field-label' }, ['担当者']), assigneeSel]),
-      el('div', { class: 'spira-field' }, [el('label', { class: 'spira-field-label' }, ['期限']), dueInput]),
+  const bodyCell = el('div', { style: 'display:flex;flex-direction:column;gap:var(--s-2)' }, [
+    alertBanner,
+    bodyArea,
+    previewLine,
+  ]);
+
+  const authorCell = el('div', { style: 'display:grid;grid-template-columns:1fr 1fr;gap:var(--s-3)' }, [
+    authorInput,
+    authorEmailInput,
+  ]);
+
+  const grid = el('div', {
+    style:
+      'display:grid;grid-template-columns:96px minmax(0,1fr);' +
+      'gap:var(--s-3) var(--s-4);align-items:center;max-height:70vh;overflow-y:auto',
+  }, [
+    // 件名
+    el('label', { style: LABEL_STYLE }, ['件名']),
+    titleInput,
+    // ソース
+    el('label', { style: LABEL_STYLE }, ['ソース']),
+    sourceSel,
+    // 送信時間
+    el('label', { style: LABEL_STYLE }, ['送信時間']),
+    dateTimePicker.el,
+    // 送信者 (名前 + メール)
+    el('label', { style: LABEL_STYLE }, ['送信者']),
+    authorCell,
+    // 本文
+    el('label', { style: LABEL_TOP_STYLE }, ['本文']),
+    bodyCell,
+    // メタ情報セクション区切り
+    el('div', {
+      style: 'grid-column:1 / -1;font-size:var(--fs-sm);font-weight:600;color:var(--ink);' +
+             'border-top:1px solid var(--line);padding-top:var(--s-3);margin-top:var(--s-2)',
+    }, ['チケット属性']),
+    el('label', { style: LABEL_STYLE }, ['ステータス']), statusSel,
+    el('label', { style: LABEL_STYLE }, ['優先度']),    prioSel,
+    el('label', { style: LABEL_STYLE }, ['担当者']),    assigneePicker.el,
+    el('label', { style: LABEL_STYLE }, ['期限']),      dueInput,
+    el('label', { style: LABEL_STYLE }, ['部門']),      deptSel,
+    el('label', { style: LABEL_STYLE }, ['種別']),      categorySel,
+    // プレビュー (受信箱由来の HTML 本文)
+    ...(fromInbox ? [
+      el('div', {
+        style: 'grid-column:1 / -1;font-size:var(--fs-sm);font-weight:600;color:var(--ink);' +
+               'border-top:1px solid var(--line);padding-top:var(--s-3);margin-top:var(--s-2)',
+      }, ['メールプレビュー (HTML 本文)']),
+      el('div', {
+        style: 'grid-column:1 / -1;max-height:200px;overflow:auto;border:1px solid var(--line);' +
+               'border-radius:var(--r-2);padding:var(--s-3);background:var(--paper)',
+      }, [previewBody]),
+    ] : []),
+    // フッターヒント (ソース別)
+    el('div', {
+      style: 'grid-column:1 / -1;font-size:var(--fs-xs);color:var(--ink-3);' +
+             'background:var(--paper-2);padding:var(--s-3);border-radius:var(--r-2);' +
+             'line-height:1.6;margin-top:var(--s-2)',
+    }, [
+      '※ ',
+      el('b', {}, ['メール']),
+      ': Outlook のメールをこのモーダルにドラッグ&ドロップすると、件名・送信者・送信日時・本文を自動取り込みします (.eml ファイル / 件名行のどちらも対応)。',
+      el('br'),
+      '※ ',
+      el('b', {}, ['Teams']),
+      ': チャット範囲選択 → 右クリック → コピー → 本文欄に貼り付けで複数メッセージを履歴として一括登録。',
+      el('br'),
+      '※ 起票後、本文は「履歴」カードとしてチケットに紐付きます。',
     ]),
   ]);
 
+  // モーダル全体で .eml ファイル / 件名テキストのドロップを受け取れるよう、
+  // grid レベルに dragover/drop を貼る。capture フェーズで登録して、textarea
+  // など子要素の intrinsic な処理より先に preventDefault できるようにする。
+  grid.addEventListener('dragover', handleDragOver, { capture: true });
+  grid.addEventListener('drop', (e) => { void handleEmlDrop(e); }, { capture: true });
+
+  // 初期 placeholder
+  sourceSel.dispatchEvent(new Event('change'));
+
   openModal(getRoot(), {
     title: '新規チケットを起票',
-    body,
+    body: grid,
+    size: 'lg',
     primaryLabel: '起票',
     primaryVariant: 'primary',
     onPrimary: async () => {
+      const repo = getRepo();
+      const src = sourceSel.value as Source;
       const title = titleInput.value.trim() || m.subject || '(無題)';
+      const fromName = authorInput.value.trim() || undefined;
+      const fromEmail = authorEmailInput.value.trim() || undefined;
+      const baseDate = currentBaseDate();
+      const baseISO = (() => {
+        const v = dateTimePicker.getValue();
+        if (v.match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/)) return new Date(v).toISOString();
+        return new Date().toISOString();
+      })();
+
       try {
-        const repo = getRepo();
-        // Pre-flight: refuse to create a duplicate ticket for the same
-        // source mail. Same sender + same sent time (or matching
-        // internetMessageId) → jump to the existing ticket instead.
-        if (m.id > 0) {
+        // 受信箱由来の重複検知 (同じ送信者・送信時刻の既存チケット)
+        if (fromInbox) {
           const dup = await findDuplicateTicketForMail(m);
           if (dup) {
             const idShort = formatTicketIdShort(dup.id);
-            toast(
-              getRoot(),
-              `${idShort} 「${dup.title}」 が同じメール (送信者・送信時刻一致) ですでに起票済みです。そのチケットを開きます`,
-              'warn',
-              7000,
-            );
-            // Optionally also flag this inbox row processed against the
-            // existing ticket so it stops appearing as un-triaged.
-            try {
-              await repo.markInboxProcessed(m.id, { ticketId: dup.id, result: 'auto-linked' });
-            } catch { /* non-fatal */ }
+            toast(getRoot(),
+              `${idShort} 「${dup.title}」 が同じメール (送信者・送信時刻一致) ですでに起票済みです。`,
+              'warn', 7000);
+            try { await repo.markInboxProcessed(m.id, { ticketId: dup.id, result: 'auto-linked' }); }
+            catch { /* non-fatal */ }
             const open = getState().openTicketIds;
             setState({
               view: 'tickets',
@@ -586,32 +955,81 @@ export function openNewTicketModal(m: InboxMail): void {
             return;
           }
         }
+
+        // チケット作成
         const t = await repo.createTicket({
           title,
           status: statusSel.value as TicketStatus,
           priority: prioSel.value as Priority,
-          assigneeEmail: assigneeSel.value || undefined,
-          reporterEmail: m.fromEmail || undefined,
-          reporterName: m.fromName,
+          assigneeEmails: assigneePicker.getValue().emails.length > 0 ? assigneePicker.getValue().emails : undefined,
+          department: deptSel.value || undefined,
+          inquiryCategory: categorySel.value || undefined,
+          reporterEmail: fromEmail,
+          reporterName: fromName,
           dueDate: dueInput.value ? new Date(dueInput.value).toISOString() : undefined,
           rawSubject: m.subject || undefined,
           initialConversationId: m.conversationId,
         });
-        if (m.id > 0) {
-          await repo.addComment({
-            ticketId: t.id, type: 'received',
-            fromEmail: m.fromEmail, fromName: m.fromName,
-            content: m.bodyHtml || m.bodyText, isHtml: !!m.bodyHtml,
-            // Sender's "send" time. The dedup pass in findDuplicateTicket
-            // also keys on this — keep the two in sync.
-            sentAt: m.sentAt ?? m.receivedAt, sourceEmailId: m.id,
-            hasAttachments: m.hasAttachments,
-            internetMessageId: m.internetMessageId,
+
+        // ソース別: 初期履歴コメントを追加
+        if (src === 'teams') {
+          const leadingAuthor = authorInput.value.trim();
+          const leadingTime = currentLeadingTime();
+          const orphan = detectLeadingOrphan(bodyArea.value);
+          const msgs = parseTeamsPaste(bodyArea.value, {
+            leadingAuthor: orphan ? (leadingAuthor || ' UNKNOWN') : leadingAuthor,
+            leadingTime,
           });
+          for (const mm of msgs) if (mm.author === ' UNKNOWN') mm.author = '';
+          for (let i = 0; i < msgs.length; i++) {
+            const mm = msgs[i]!;
+            try {
+              await repo.addComment({
+                ticketId: t.id, type: 'received',
+                fromName: mm.author,
+                content: mm.body, isHtml: false,
+                sentAt: resolveTeamsTimeToISO(mm.time, baseDate, i),
+                source: 'teams',
+              });
+            } catch (e) {
+              console.warn('[spira] addComment failed for teams message:', e);
+            }
+          }
+        } else if (src === 'mail') {
+          // 受信箱由来は HTML 本文をそのまま使う。手動入力時は textarea を採用。
+          const content = fromInbox ? (m.bodyHtml || m.bodyText) : bodyArea.value;
+          const isHtml = fromInbox ? !!m.bodyHtml : false;
+          if (content.trim()) {
+            await repo.addComment({
+              ticketId: t.id, type: 'received',
+              fromEmail, fromName,
+              content, isHtml,
+              sentAt: fromInbox ? (m.sentAt ?? m.receivedAt) : baseISO,
+              sourceEmailId: fromInbox ? m.id : undefined,
+              hasAttachments: fromInbox ? m.hasAttachments : undefined,
+              internetMessageId: fromInbox ? m.internetMessageId : undefined,
+              source: 'mail',
+            });
+          }
+        } else {
+          // other: 本文があれば 1 件登録
+          const content = bodyArea.value.trim();
+          if (content) {
+            await repo.addComment({
+              ticketId: t.id, type: 'received',
+              fromEmail, fromName: fromName ?? '(履歴)',
+              content, isHtml: false,
+              sentAt: baseISO,
+              source: 'other',
+            });
+          }
+        }
+
+        if (fromInbox) {
           await repo.markInboxProcessed(m.id, { ticketId: t.id, result: 'created' });
         }
         toast(getRoot(), `${formatTicketIdShort(t.id)} を起票しました`, 'ok');
-        const inboxCount = m.id > 0 ? Math.max(0, getState().inboxCount - 1) : getState().inboxCount;
+        const inboxCount = fromInbox ? Math.max(0, getState().inboxCount - 1) : getState().inboxCount;
         const open = getState().openTicketIds;
         setState({
           view: 'tickets',

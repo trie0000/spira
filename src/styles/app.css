@@ -391,6 +391,52 @@
   color: var(--danger) !important;
 }
 #spira-root .spira-btn--danger { border-color: var(--danger) !important; }
+
+/* Inline icon-only action buttons used on each card / row.
+ * Borderless + transparent so they blend into the card surface.
+ * --icon-action: neutral (OWA で検索, 編集) — grey, gets accented on hover
+ * --icon-trash:  destructive — solid red even at rest
+ *
+ * Padding is applied only to the button (not its descendants) so the
+ * SVG icon span keeps its 14×14 footprint and stays visible. */
+/* --icon-action: neutral (OWA で検索, 編集) — visible frame.
+ * --icon-trash:  destructive — solid red frame.
+ * Padding scoped to the button so SVG icons keep their 14×14 size. */
+#spira-root .spira-btn--icon-action {
+  background: var(--paper) !important;
+  color: var(--ink-3) !important;
+  border: 1px solid var(--line) !important;
+  padding: 0 var(--s-3) !important;
+}
+#spira-root .spira-btn--icon-action * {
+  background: transparent !important;
+  color: var(--ink-3) !important;
+}
+#spira-root .spira-btn--icon-action:hover,
+#spira-root .spira-btn--icon-action:hover * {
+  background: var(--paper-2) !important;
+  border-color: var(--line-strong) !important;
+  color: var(--ink) !important;
+  filter: none !important;
+}
+
+#spira-root .spira-btn--icon-trash {
+  background: var(--paper) !important;
+  color: #c0392b !important;
+  border: 1px solid rgba(192, 57, 43, 0.4) !important;
+  padding: 0 var(--s-3) !important;
+}
+#spira-root .spira-btn--icon-trash * {
+  background: transparent !important;
+  color: #c0392b !important;
+}
+#spira-root .spira-btn--icon-trash:hover,
+#spira-root .spira-btn--icon-trash:hover * {
+  background: rgba(192, 57, 43, 0.08) !important;
+  border-color: #c0392b !important;
+  color: #c0392b !important;
+  filter: none !important;
+}
 #spira-root .spira-btn--danger:hover {
   background: var(--danger-soft) !important;
   color: var(--danger) !important;
@@ -414,7 +460,8 @@
 #spira-root .spira-iconbtn:focus-visible { outline: 2px solid var(--accent-soft) !important; outline-offset: 1px !important; }
 #spira-root .spira-iconbtn svg { width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-width: 1.7; }
 
-/* Input */
+/* Input — borders are always visible so form fields read as "boxes"
+ * even when not focused. Focus state just darkens the border slightly. */
 .spira-input,
 .spira-textarea,
 .spira-select {
@@ -422,24 +469,48 @@
   font-family: inherit;
   font-size: var(--fs-md);
   color: var(--ink);
-  background: transparent;
-  border: 1px solid transparent;
+  background: var(--paper);
+  border: 1px solid var(--line);
   border-radius: var(--r-2);
   padding: 6px var(--s-3);
   line-height: var(--lh-tight);
 }
 .spira-input:hover,
 .spira-textarea:hover,
-.spira-select:hover { background: var(--paper-2); }
+.spira-select:hover { border-color: var(--line-strong); }
 .spira-input:focus,
 .spira-textarea:focus,
 .spira-select:focus {
   outline: none;
-  background: var(--paper);
   border-color: var(--line-strong);
+  box-shadow: 0 0 0 2px var(--accent-soft);
 }
 .spira-input::placeholder,
 .spira-textarea::placeholder { color: var(--ink-4); }
+
+/* Datetime widget (createDateTime) — same chrome as .spira-input:
+ * solid border at rest, darker border on focus-within. Padding matches
+ * .spira-input so the YYYY segment's left edge lines up with the value
+ * column of adjacent fields. */
+.spira-dt-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  padding: 6px var(--s-3);
+  background: var(--paper);
+  min-width: 0;
+  position: relative;
+  line-height: 1;
+  cursor: text;
+  transition: border-color 0.1s, box-shadow 0.1s;
+}
+.spira-dt-wrap:hover { border-color: var(--line-strong); }
+.spira-dt-wrap:focus-within {
+  border-color: var(--line-strong);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
 
 .spira-textarea {
   min-height: 72px;
@@ -500,6 +571,16 @@
 .spira-badge--warn   { background: var(--warn-soft); border-color: var(--warn); color: #5d3d0c; }
 .spira-badge--danger { background: var(--danger-soft); border-color: var(--danger); color: var(--danger); }
 .spira-badge--muted  { background: var(--paper-2); border-color: var(--paper-3); color: var(--ink-3); }
+/* NEW badge — 前回表示時以降の新規。青系で「新規受信」の意味合い。 */
+.spira-badge--new {
+  background: #3b82f6;   /* blue-500 */
+  border-color: #3b82f6;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  padding: 1px 6px;
+}
 
 /* Priority label — colored text instead of a dot */
 .spira-prio {
@@ -1188,7 +1269,15 @@
   margin-right: 0;
   border-color: rgba(122, 138, 120, 0.3);
 }
-.spira-th-card--note { background: var(--paper); border-left: 3px solid var(--warn); }
+#spira-root .spira-th-card--note {
+  background: var(--paper);
+  border-left: 3px solid var(--warn);
+  /* 左 padding を従来 (31px) の 2/3 に圧縮 → 21px。
+     ハンドルは card.left+5〜+23 に出るので、文字 (card.left+21〜) と
+     僅かに重なる場合があるが、ハンドルは hover 表示の薄いアイコンで
+     視認性に影響ないバランス。 */
+  padding-left: 21px !important;
+}
 .spira-th-card-head {
   display: flex;
   align-items: center;
@@ -1276,7 +1365,7 @@
 /* Pane title: solid background so cards don't bleed through when scrolling */
 .spira-pane-title {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: var(--s-3);
   margin: 0 0 var(--s-4);
   padding: var(--s-3) 0;
@@ -1306,6 +1395,235 @@
 .spira-inbox-from    { color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .spira-inbox-date    { color: var(--ink-3); font-size: var(--fs-sm); }
 .spira-inbox-actions { display: inline-flex; gap: var(--s-2); }
+
+/* Card flash — used when a search result navigates to a specific
+ * comment. The card briefly glows the accent color so the user can
+ * spot the target after scroll. */
+@keyframes spira-card-flash {
+  0%   { box-shadow: 0 0 0 3px var(--accent); background-color: var(--accent-soft); }
+  60%  { box-shadow: 0 0 0 3px var(--accent); background-color: var(--accent-soft); }
+  100% { box-shadow: 0 0 0 0   transparent;   background-color: transparent; }
+}
+.spira-card-flash {
+  animation: spira-card-flash 1.6s ease-out;
+}
+
+/* Search modal — Notion-style: centered + backdrop blur, scrollable
+ * results, no buttons (Escape / outside-click to dismiss). */
+.spira-search-modal-backdrop {
+  align-items: flex-start;          /* anchor near top, not vertically centered */
+  padding-top: 10vh;
+}
+.spira-search-modal {
+  width: 720px !important;
+  max-width: 92vw !important;
+  max-height: 75vh !important;
+  display: flex !important;
+  flex-direction: column !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+}
+.spira-search-modal-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: var(--s-4) var(--s-5);
+  border-bottom: 1px solid var(--line);
+}
+#spira-root .spira-search-modal-icon {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 20px !important;
+  height: 20px !important;
+  color: var(--ink-3);
+  flex-shrink: 0 !important;
+}
+#spira-root .spira-search-modal-icon svg,
+#spira-root .spira-search-modal-close svg {
+  width: 100% !important;
+  height: 100% !important;
+  display: block !important;
+}
+.spira-search-modal-input {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-h3);
+  font-weight: 500;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--ink);
+  padding: 4px 0;
+}
+.spira-search-modal-input::placeholder { color: var(--ink-4); font-weight: 400; }
+.spira-search-modal-close {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink-3);
+  background: transparent;
+  border: none;
+  border-radius: var(--r-2);
+  cursor: pointer;
+}
+.spira-search-modal-close:hover { background: var(--paper-2); color: var(--ink); }
+.spira-search-modal-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--s-3) var(--s-5);
+}
+.spira-search-modal-foot {
+  padding: var(--s-2) var(--s-5);
+  border-top: 1px solid var(--line);
+  color: var(--ink-3);
+  font-size: var(--fs-xs);
+  min-height: 28px;
+  display: flex;
+  align-items: center;
+}
+.spira-search-modal-summary { flex: 1; }
+
+/* Result groups & cards (used inside the modal) */
+.spira-search-group {
+  /* チケット 1 件を囲む外枠。カードと明確に区別するため少し濃い背景。 */
+  margin-bottom: var(--s-4);
+  background: var(--paper-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  overflow: hidden;
+}
+.spira-search-group-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  width: 100%;
+  padding: var(--s-3) var(--s-4);
+  background: var(--paper-2);
+  border: none;
+  border-radius: 0;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  transition: background 0.1s;
+  font-weight: 500;
+}
+.spira-search-group-head:hover {
+  background: var(--paper-2-strong, var(--paper-2));
+}
+.spira-search-chevron {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+  color: var(--ink-3);
+  transition: transform 0.15s;
+  flex-shrink: 0;
+}
+.spira-search-chevron.open { transform: rotate(180deg); }
+.spira-search-group-body {
+  padding: var(--s-3) var(--s-4) var(--s-4);
+  background: var(--paper);   /* カードを置く面はチケット枠より明るく */
+  border-top: 1px solid var(--line);
+}
+.spira-search-group-meta {
+  color: var(--ink-3);
+  font-size: var(--fs-sm);
+  margin-bottom: var(--s-3);
+}
+.spira-search-group-matchhdr {
+  font-size: var(--fs-sm);
+  color: var(--ink-3);
+  margin-bottom: var(--s-2);
+}
+.spira-search-card-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+.spira-search-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  padding: var(--s-3) var(--s-4);
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-left-width: 4px;       /* ソース別カラー帯の土台 */
+  border-radius: var(--r-2);
+  cursor: pointer;
+  transition: border-color 0.1s, background 0.1s, box-shadow 0.1s;
+}
+.spira-search-card:hover {
+  box-shadow: 0 1px 4px rgba(0,0,0,0.05);
+}
+/* ソース別の左ボーダー色 + ヘッダのソースラベル色を差し色に。
+   内部メモ = 黄系 / メール = 青系 / Teams = 紫系 / その他 = グレー系。
+   ライト/ダーク両対応で十分なコントラストを確保。 */
+.spira-search-card--note   { border-left-color: #f59e0b; background: rgba(245, 158, 11, 0.04); }
+.spira-search-card--note .spira-search-card-src   { color: #b45309; font-weight: 600; }
+.spira-search-card--mail   { border-left-color: #3b82f6; }
+.spira-search-card--mail   .spira-search-card-src { color: #1d4ed8; font-weight: 600; }
+.spira-search-card--teams  { border-left-color: #8b5cf6; }
+.spira-search-card--teams  .spira-search-card-src { color: #6d28d9; font-weight: 600; }
+.spira-search-card--other  { border-left-color: #9ca3af; }
+.spira-search-card--other  .spira-search-card-src { color: #4b5563; font-weight: 600; }
+/* ダークテーマでは少し明るめに */
+#spira-root[data-theme='dark'] .spira-search-card--note  { background: rgba(245, 158, 11, 0.10); }
+#spira-root[data-theme='dark'] .spira-search-card--note  .spira-search-card-src { color: #fbbf24; }
+#spira-root[data-theme='dark'] .spira-search-card--mail  .spira-search-card-src { color: #60a5fa; }
+#spira-root[data-theme='dark'] .spira-search-card--teams .spira-search-card-src { color: #a78bfa; }
+#spira-root[data-theme='dark'] .spira-search-card--other .spira-search-card-src { color: #9ca3af; }
+.spira-search-card-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  font-size: var(--fs-sm);
+}
+.spira-search-card-icon {
+  display: inline-flex;
+  width: 14px;
+  height: 14px;
+  color: var(--ink-3);
+}
+.spira-search-card-src { color: var(--ink-3); }
+.spira-search-card-from { font-weight: 500; }
+.spira-search-card-time {
+  color: var(--ink-3);
+  margin-left: auto;
+}
+.spira-search-snippet {
+  line-height: 1.6;
+  color: var(--ink);
+}
+.spira-search-match {
+  margin-bottom: var(--s-3);
+  line-height: 1.6;
+}
+.spira-search-snippet mark,
+.spira-search-match mark {
+  background: rgba(255, 235, 130, 0.6);
+  color: inherit;
+  padding: 0 2px;
+  border-radius: 2px;
+  font-weight: 600;
+}
+.spira-search-empty {
+  padding: var(--s-7) var(--s-3);
+  color: var(--ink-3);
+  text-align: center;
+}
+.spira-search-empty-title {
+  font-size: var(--fs-md);
+  margin-bottom: var(--s-2);
+}
+.spira-search-empty-hint {
+  font-size: var(--fs-sm);
+  white-space: pre-line;
+  line-height: 1.6;
+}
 
 /* Trash */
 .spira-trash-toolbar {
@@ -1446,4 +1764,213 @@
 #spira-root .spira-th-card--note .ne-content.ne-empty::before {
   top: 0;
   left: 0;
+}
+
+/* ============================================================
+   Ticket properties modal
+   ============================================================ */
+#spira-root .spira-prop-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-5);
+  max-height: 70vh;
+  overflow-y: auto;
+}
+#spira-root .spira-prop-section {
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  padding: var(--s-4);
+  background: var(--paper);
+}
+#spira-root .spira-prop-section-title {
+  margin: 0 0 var(--s-3);
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--ink);
+}
+#spira-root .spira-prop-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--s-2) var(--s-4);
+}
+#spira-root .spira-prop-grid > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+#spira-root .spira-prop-label {
+  font-size: var(--fs-sm);
+  color: var(--ink-3);
+  font-weight: 500;
+}
+#spira-root .spira-prop-hint {
+  margin-top: var(--s-3);
+  font-size: var(--fs-sm);
+  color: var(--ink-3);
+}
+#spira-root .spira-prop-thread-state {
+  margin-bottom: var(--s-3);
+}
+#spira-root .spira-prop-thread-status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-1) var(--s-2);
+  border-radius: var(--r-1);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  margin-bottom: var(--s-2);
+}
+#spira-root .spira-prop-thread-status--linked {
+  background: rgba(34, 197, 94, 0.1);
+  color: rgb(34, 197, 94);
+}
+#spira-root .spira-prop-thread-status--unlinked {
+  background: var(--paper-2);
+  color: var(--ink-3);
+}
+#spira-root .spira-prop-thread-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ink-4);
+}
+#spira-root .spira-prop-thread-dot--ok {
+  background: rgb(34, 197, 94);
+}
+#spira-root .spira-prop-thread-meta {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+  padding: var(--s-2) var(--s-3);
+  background: var(--paper-2);
+  border-radius: var(--r-1);
+  font-size: var(--fs-sm);
+}
+#spira-root .spira-prop-thread-meta > div {
+  display: flex;
+  gap: var(--s-2);
+  align-items: baseline;
+  min-width: 0;
+}
+#spira-root .spira-prop-thread-meta > div > .spira-prop-label {
+  flex-shrink: 0;
+  width: 92px;
+}
+#spira-root .spira-prop-thread-meta a,
+#spira-root .spira-prop-thread-meta code {
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 12px;
+  word-break: break-all;
+  min-width: 0;
+}
+#spira-root .spira-prop-thread-meta a {
+  color: var(--accent);
+  text-decoration: none;
+}
+#spira-root .spira-prop-thread-meta a:hover {
+  text-decoration: underline;
+}
+#spira-root .spira-prop-thread-actions {
+  display: flex;
+  gap: var(--s-2);
+  margin-bottom: var(--s-3);
+}
+#spira-root .spira-prop-manual {
+  border-top: 1px dashed var(--line);
+  padding-top: var(--s-3);
+  margin-top: var(--s-3);
+}
+#spira-root .spira-prop-manual-label {
+  display: block;
+  margin-bottom: var(--s-2);
+  font-size: var(--fs-sm);
+  color: var(--ink-2);
+}
+#spira-root .spira-prop-url-input {
+  width: 100%;
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 12px;
+}
+#spira-root .spira-prop-parse-info {
+  margin-top: var(--s-2);
+  font-size: var(--fs-sm);
+}
+#spira-root .spira-prop-parse-ok {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+  padding: var(--s-2) var(--s-3);
+  background: rgba(34, 197, 94, 0.05);
+  border: 1px solid rgba(34, 197, 94, 0.3);
+  border-radius: var(--r-1);
+}
+#spira-root .spira-prop-parse-ok > div {
+  display: flex;
+  gap: var(--s-2);
+}
+#spira-root .spira-prop-parse-ok > div > .spira-prop-label {
+  width: 80px;
+  flex-shrink: 0;
+}
+#spira-root .spira-prop-parse-ok code {
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 12px;
+  word-break: break-all;
+}
+#spira-root .spira-prop-parse-err {
+  padding: var(--s-2) var(--s-3);
+  background: rgba(239, 68, 68, 0.05);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: var(--r-1);
+  color: rgb(239, 68, 68);
+}
+#spira-root .spira-prop-manual-hint {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--ink-4);
+}
+#spira-root .spira-prop-parse-applying {
+  margin-top: 4px;
+  font-size: var(--fs-sm);
+  color: rgb(34, 197, 94);
+  font-weight: 500;
+}
+
+/* ============================================================
+   Update banner (バージョン更新案内)
+   ============================================================ */
+#spira-root .spira-update-banner {
+  background: #fef3c7;          /* amber-50 */
+  border-bottom: 1px solid #f59e0b;
+  color: #92400e;
+  padding: var(--s-3) var(--gutter);
+  font-size: var(--fs-sm);
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+}
+#spira-root[data-theme='dark'] .spira-update-banner {
+  background: rgba(245, 158, 11, 0.15);
+  border-bottom-color: rgba(245, 158, 11, 0.5);
+  color: #fbbf24;
+}
+
+/* ============================================================
+   外部更新バッジ (他のユーザーが更新したカードに付く「更新」ラベル)
+   ============================================================ */
+/* 更新 badge — 他のユーザーが更新したカードに付く。
+   オレンジ系で「変更あり、確認すべき」の意味合い (NEW の青と区別)。 */
+#spira-root .spira-card-updated-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  background: #f59e0b;   /* amber-500 */
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  border-radius: var(--r-1);
+  flex-shrink: 0;
 }

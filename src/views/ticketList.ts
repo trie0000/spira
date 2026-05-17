@@ -7,7 +7,8 @@ import { confirmModal } from '../components/modal';
 import { toast } from '../components/toast';
 import { attachColumnResize, savedColWidth } from '../utils/colResize';
 import { formatTicketIdShort } from '../utils/ticketTag';
-import { isInternalMember } from '../utils/members';
+import { isInternalAuthor } from '../utils/members';
+import { getLastSeen, hasNewSince } from '../utils/seenState';
 import type { Ticket, TicketStatus, Priority, Comment } from '../types';
 
 // multi-select state — module-level, persists across re-renders.
@@ -29,6 +30,9 @@ interface TicketMeta {
    *                 customer responded last; caller decides meaning)
    *    null      — no received mail yet */
   lastReplyDirection: 'internal' | 'external' | null;
+  /** True when at least one comment is newer than the current user's
+   *  last visit to this ticket — drives the row-level NEW indicator. */
+  hasNew: boolean;
 }
 
 function daysSince(iso: string | null | undefined): number | null {
@@ -43,12 +47,14 @@ function deriveTicketMeta(comments: Comment[], ticket: Ticket): TicketMeta {
     .filter(c => c.type === 'received')
     .sort((a, b) => new Date(a.sentAt ?? '').getTime() - new Date(b.sentAt ?? '').getTime());
   const last = received[received.length - 1];
+  const lastSeen = getLastSeen(ticket.id);
   return {
     elapsedDays: daysSince(ticket.createdAt),
     stagnantDays: last ? daysSince(last.sentAt ?? null) : null,
     lastReplyDirection: last
-      ? (isInternalMember(last.fromEmail ?? null) ? 'internal' : 'external')
+      ? (isInternalAuthor(last, getState().users) ? 'internal' : 'external')
       : null,
+    hasNew: hasNewSince(comments, lastSeen),
   };
 }
 
@@ -67,7 +73,7 @@ export async function renderTicketList(): Promise<HTMLElement> {
       const cs = await repo.listComments(t.id);
       return [t.id, deriveTicketMeta(cs, t)] as const;
     } catch {
-      return [t.id, { elapsedDays: daysSince(t.createdAt), stagnantDays: null, lastReplyDirection: null }] as const;
+      return [t.id, { elapsedDays: daysSince(t.createdAt), stagnantDays: null, lastReplyDirection: null, hasNew: false }] as const;
     }
   }));
   const metaMap = new Map<number, TicketMeta>(metaArr);
@@ -134,8 +140,8 @@ function applyFilters(rows: Ticket[]): Ticket[] {
   const s = getState();
   let out = rows;
   if (s.filter.status) out = out.filter(r => r.status === (s.filter.status as TicketStatus));
-  if (s.filter.assignee === '__unset__') out = out.filter(r => !r.assigneeEmail);
-  else if (s.filter.assignee) out = out.filter(r => r.assigneeEmail === s.filter.assignee);
+  if (s.filter.assignee === '__unset__') out = out.filter(r => !r.assigneeEmails || r.assigneeEmails.length === 0);
+  else if (s.filter.assignee) out = out.filter(r => (r.assigneeEmails ?? []).includes(s.filter.assignee));
   if (s.filter.priority) out = out.filter(r => r.priority === (s.filter.priority as Priority));
   if (s.filter.query) {
     const q = s.filter.query.toLowerCase();
@@ -155,7 +161,13 @@ function applySort(rows: Ticket[]): Ticket[] {
       case 'id':       cmp = a.id - b.id; break;
       case 'title':    cmp = a.title.localeCompare(b.title, 'ja'); break;
       case 'status':   cmp = statusOrder[a.status] - statusOrder[b.status]; break;
-      case 'assignee': cmp = (a.assigneeName ?? a.assigneeEmail ?? '').localeCompare(b.assigneeName ?? b.assigneeEmail ?? '', 'ja'); break;
+      case 'assignee': {
+        // 複数担当者は最初の名前で比較。空配列なら空文字。
+        const an = (a.assigneeNames ?? a.assigneeEmails ?? [])[0] ?? '';
+        const bn = (b.assigneeNames ?? b.assigneeEmails ?? [])[0] ?? '';
+        cmp = an.localeCompare(bn, 'ja');
+        break;
+      }
       case 'priority': cmp = prioOrder[a.priority] - prioOrder[b.priority]; break;
       case 'due': {
         const da = a.dueDate ? Date.parse(a.dueDate) : Number.MAX_SAFE_INTEGER;
@@ -375,15 +387,16 @@ function renderTable(rows: Ticket[], metaMap: Map<number, TicketMeta>): HTMLElem
   }
 
   const tableKey = 'tickets';
-  // Column order: ☐ / # / Title / Status / 担当 / 優先度 / 期限 /
-  //                最終返信 / 滞留日 / 経過日 / 更新
+  // 列順 (renderHeaderRow と renderRow と必ず一致させること):
+  //   ☐ / # / 件名 / ステータス / 担当 / 優先度 / 種別 / 部門 / 期限 /
+  //   内部スレ / 外部スレ / 最終返信 / 滞留日 / 経過日 / 更新
   const colKeys: (string | null)[] = [
-    null, 'id', 'title', 'status', 'assignee', 'priority', 'due',
-    'lastDir', 'stagnant', 'elapsed', null,
+    null, 'id', 'title', 'status', 'assignee', 'priority', 'category', 'dept',
+    'due', 'internal', 'external', 'lastDir', 'stagnant', 'elapsed', null,
   ];
   const defaults = [
-    '36px', '64px', '320px', '96px', '120px', '80px', '110px',
-    '100px', '80px', '80px', '140px',
+    '36px', '64px', '280px', '96px', '120px', '80px', '140px', '120px',
+    '110px', '70px', '70px', '100px', '80px', '80px', '140px',
   ];
   const widths = colKeys.map((k, i) => savedColWidth(tableKey, k, defaults[i]!));
 
@@ -408,16 +421,20 @@ interface HeaderSpec {
 
 function renderHeaderRow(visibleRows: Ticket[]): HTMLElement {
   const cols: HeaderSpec[] = [
-    { label: '#',         sortKey: 'id' },
-    { label: 'Title',     sortKey: 'title' },
-    { label: 'Status',    sortKey: 'status' },
-    { label: '担当',      sortKey: 'assignee' },
-    { label: '優先度',    sortKey: 'priority' },
-    { label: '期限',      sortKey: 'due' },
+    { label: '#',           sortKey: 'id' },
+    { label: '件名',        sortKey: 'title' },
+    { label: 'ステータス',  sortKey: 'status' },
+    { label: '担当',        sortKey: 'assignee' },
+    { label: '優先度',      sortKey: 'priority' },
+    { label: '種別' },                                // 問い合わせ種別 (優先度の隣)
+    { label: '部門' },
+    { label: '期限',        sortKey: 'due' },
+    { label: '内部スレ' },                             // 内部スレッド DeepLink
+    { label: '外部スレ' },                             // 外部スレッド DeepLink
     { label: '最終返信' },
     { label: '滞留日' },
     { label: '経過日' },
-    { label: '更新',      sortKey: 'updated' },
+    { label: '更新',        sortKey: 'updated' },
   ];
   const s = getState();
   const allChecked = visibleRows.length > 0 && visibleRows.every(t => selectedIds.has(t.id));
@@ -458,9 +475,128 @@ function renderHeaderRow(visibleRows: Ticket[]): HTMLElement {
   return el('tr', {}, headerCells);
 }
 
+/** インライン編集用: アンカー要素の下にメニューを表示し、選択させる。 */
+function openInlineSelectMenu<T extends string>(
+  anchor: HTMLElement,
+  options: T[],
+  current: T | undefined,
+  onSelect: (v: T) => void,
+): void {
+  document.querySelectorAll('.spira-inline-menu').forEach(n => n.remove());
+  const menu = el('div', {
+    class: 'spira-menu spira-inline-menu',
+    style: 'position:fixed;z-index:2147483700;min-width:140px',
+  }, options.map(opt => el('div', {
+    class: 'spira-menu-item' + (opt === current ? ' spira-menu-item--current' : ''),
+    onclick: (e: Event) => {
+      e.stopPropagation();
+      menu.remove();
+      onSelect(opt);
+    },
+  }, [opt])));
+  const rect = anchor.getBoundingClientRect();
+  menu.style.top = `${rect.bottom + 4}px`;
+  menu.style.left = `${rect.left}px`;
+  root().appendChild(menu);
+  setTimeout(() => {
+    const closer = (e: Event) => {
+      if (menu.contains(e.target as Node)) return;
+      menu.remove();
+      document.removeEventListener('click', closer);
+    };
+    document.addEventListener('click', closer);
+  }, 0);
+}
+
+/** 担当者マルチ選択メニュー (チェックボックス式)。
+ *  チケット一覧のインライン編集と詳細画面ヘッダで共有。 */
+export function openInlineAssigneeMenu(
+  anchor: HTMLElement,
+  currentEmails: string[],
+  onChange: (emails: string[], names: string[]) => void,
+): void {
+  document.querySelectorAll('.spira-inline-menu').forEach(n => n.remove());
+  const users = getState().users;
+  const selected = new Set(currentEmails);
+
+  const list = el('div', { style: 'max-height:280px;overflow-y:auto' });
+  const renderList = (filter: string): void => {
+    list.replaceChildren();
+    const q = filter.trim().toLowerCase();
+    const candidates = q
+      ? users.filter(u => u.displayName.toLowerCase().includes(q) || u.email.toLowerCase().includes(q))
+      : users;
+    for (const u of candidates) {
+      const cb = el('input', {
+        type: 'checkbox',
+        style: 'margin-right:6px',
+      }) as HTMLInputElement;
+      cb.checked = selected.has(u.email);
+      const row = el('label', {
+        style: 'display:flex;align-items:center;padding:4px 10px;cursor:pointer;font-size:var(--fs-sm)',
+      }, [
+        cb,
+        el('span', { style: 'flex:1' }, [
+          el('div', {}, [u.displayName]),
+          el('div', { style: 'font-size:11px;color:var(--ink-3)' }, [u.email]),
+        ]),
+      ]);
+      cb.addEventListener('change', () => {
+        if (cb.checked) selected.add(u.email);
+        else selected.delete(u.email);
+        const emails = Array.from(selected);
+        const names = emails.map(e => users.find(u2 => u2.email === e)?.displayName ?? e);
+        onChange(emails, names);
+      });
+      list.appendChild(row);
+    }
+    if (candidates.length === 0) {
+      list.appendChild(el('div', { style: 'padding:8px;color:var(--ink-3);font-size:var(--fs-sm)' }, ['候補なし']));
+    }
+  };
+
+  const filterInput = el('input', {
+    type: 'text', placeholder: 'ユーザー検索',
+    style: 'width:100%;padding:4px 8px;border:1px solid var(--line);border-radius:var(--r-2);font-size:var(--fs-sm);background:var(--paper);color:var(--ink)',
+  }) as HTMLInputElement;
+  filterInput.addEventListener('input', () => renderList(filterInput.value));
+
+  const menu = el('div', {
+    class: 'spira-menu spira-inline-menu',
+    style: 'position:fixed;z-index:2147483700;min-width:240px;padding:8px;background:var(--paper);border:1px solid var(--line);border-radius:var(--r-2);box-shadow:0 4px 12px rgba(0,0,0,0.12)',
+    onclick: (e: Event) => e.stopPropagation(),
+  }, [filterInput, list]);
+
+  renderList('');
+
+  const rect = anchor.getBoundingClientRect();
+  menu.style.top = `${rect.bottom + 4}px`;
+  menu.style.left = `${rect.left}px`;
+  root().appendChild(menu);
+  setTimeout(() => filterInput.focus(), 0);
+  setTimeout(() => {
+    const closer = (e: Event) => {
+      if (menu.contains(e.target as Node)) return;
+      menu.remove();
+      document.removeEventListener('click', closer);
+    };
+    document.addEventListener('click', closer);
+  }, 0);
+}
+
+/** インライン編集用: チケットを更新してトーストを出す。 */
+async function inlineUpdate(t: Ticket, patch: Partial<Ticket>, fieldLabel: string): Promise<void> {
+  try {
+    await getRepo().updateTicket(t.id, patch);
+    toast(root(), `${fieldLabel}を更新しました`, 'ok', 2000);
+    setState({});
+  } catch (e) {
+    toast(root(), `${fieldLabel}の更新に失敗: ${(e as Error).message}`, 'error');
+  }
+}
+
 function renderRow(t: Ticket, meta?: TicketMeta): HTMLElement {
   const overdue = t.dueDate ? isOverdue(t.dueDate) && t.status !== '完了' : false;
-  const dueCell = el('td', { class: overdue ? 'spira-tk-due--overdue' : '' }, [t.dueDate ? fmtDate(t.dueDate, false) : '—']);
 
   const dayLabel = (n: number | null | undefined): string => (n == null ? '—' : `${n}日`);
   // Elapsed gets coloured warm if the ticket has been around a while AND
@@ -498,10 +634,92 @@ function renderRow(t: Ticket, meta?: TicketMeta): HTMLElement {
     setState({});
   });
 
+  // インライン編集セル: ラッパー td でクリックを止めて、内側で値表示 +
+  // クリック時に編集メニューを開く。
+  const statusCell = (() => {
+    const badge = renderStatusBadge(t.status);
+    badge.style.cursor = 'pointer';
+    const td = el('td', {
+      onclick: (e: Event) => {
+        e.stopPropagation();
+        openInlineSelectMenu<TicketStatus>(badge, ticketStatusList(), t.status, async (v) => {
+          await inlineUpdate(t, { status: v }, 'ステータス');
+        });
+      },
+    }, [badge]);
+    return td;
+  })();
+
+  const assigneeCell = (() => {
+    const view = renderAssignee(t.assigneeNames, t.assigneeEmails);
+    view.style.cursor = 'pointer';
+    return el('td', {
+      onclick: (e: Event) => {
+        e.stopPropagation();
+        openInlineAssigneeMenu(view, t.assigneeEmails ?? [], async (emails, names) => {
+          await inlineUpdate(t, {
+            assigneeEmails: emails.length > 0 ? emails : undefined,
+            assigneeNames: names.length > 0 ? names : undefined,
+          }, '担当者');
+        });
+      },
+    }, [view]);
+  })();
+
+  const priorityCell = (() => {
+    const prio = renderPriorityDot(t.priority);
+    prio.style.cursor = 'pointer';
+    return el('td', {
+      onclick: (e: Event) => {
+        e.stopPropagation();
+        openInlineSelectMenu<Priority>(prio, priorityList(), t.priority, async (v) => {
+          await inlineUpdate(t, { priority: v }, '優先度');
+        });
+      },
+    }, [prio]);
+  })();
+
+  // 期限はネイティブの <input type=date> でインライン編集
+  const dueCellEditable = (() => {
+    const input = el('input', {
+      type: 'date',
+      value: t.dueDate ? t.dueDate.slice(0, 10) : '',
+      style: 'width:120px;padding:2px 4px;border:1px solid transparent;background:transparent;color:inherit;font:inherit',
+    }) as HTMLInputElement;
+    input.addEventListener('click', (e: Event) => e.stopPropagation());
+    input.addEventListener('change', () => {
+      const v = input.value ? new Date(input.value).toISOString() : undefined;
+      void inlineUpdate(t, { dueDate: v }, '期限');
+    });
+    return el('td', { class: overdue ? 'spira-tk-due--overdue' : '' }, [input]);
+  })();
+
+  // Teams スレッド DeepLink セル (内部 / 外部)
+  const threadLinkCell = (deepLink: string | undefined, emoji: string, label: string): HTMLElement => {
+    if (!deepLink) return el('td', { style: 'color:var(--ink-4);text-align:center' }, ['—']);
+    return el('td', { style: 'text-align:center' }, [
+      el('a', {
+        href: deepLink, target: '_blank', rel: 'noopener',
+        title: label,
+        style: 'text-decoration:none;font-size:16px',
+        onclick: (e: Event) => e.stopPropagation(),
+      }, [emoji]),
+    ]);
+  };
+  const internalCell = threadLinkCell(t.internalDeepLink, '🏢', '内部スレッドを開く');
+  const userCell = threadLinkCell(t.userDeepLink, '👥', 'ユーザースレッドを開く');
+
+  // 部門 / 種別 セル (テキスト表示、未設定は灰色)
+  const textCell = (val: string | undefined): HTMLElement =>
+    val
+      ? el('td', { style: 'font-size:var(--fs-sm);white-space:nowrap;max-width:140px;overflow:hidden;text-overflow:ellipsis' }, [val])
+      : el('td', { style: 'color:var(--ink-4);text-align:center' }, ['—']);
+  const categoryCell = textCell(t.inquiryCategory);
+  const deptCell = textCell(t.department);
+
   return el('tr', {
     class: 'spira-tk-row' + (selectedIds.has(t.id) ? ' selected' : ''),
     onclick: (e: Event) => {
-      // ignore clicks originating from the checkbox cell
       const target = e.target as HTMLElement;
       if (target.closest('.spira-tk-checkbox-cell')) return;
       const open = getState().openTicketIds;
@@ -510,12 +728,25 @@ function renderRow(t: Ticket, meta?: TicketMeta): HTMLElement {
     },
   }, [
     el('td', { class: 'spira-tk-checkbox-cell', onclick: (e: Event) => e.stopPropagation() }, [checkbox]),
-    el('td', { class: 'spira-tk-id' }, [formatTicketIdShort(t.id)]),
+    el('td', { class: 'spira-tk-id' }, [
+      formatTicketIdShort(t.id),
+      ...(meta?.hasNew
+        ? [el('span', {
+            class: 'spira-badge spira-badge--new',
+            style: 'margin-left:var(--s-2)',
+            title: '前回表示時以降の新着あり',
+          }, ['NEW'])]
+        : []),
+    ]),
     el('td', { class: 'spira-tk-title' }, [t.title]),
-    el('td', {}, [renderStatusBadge(t.status)]),
-    el('td', {}, [renderAssignee(t.assigneeName, t.assigneeEmail)]),
-    el('td', {}, [renderPriorityDot(t.priority)]),
-    dueCell,
+    statusCell,
+    assigneeCell,
+    priorityCell,
+    categoryCell,
+    deptCell,
+    dueCellEditable,
+    internalCell,
+    userCell,
     el('td', {}, [lastDirCell]),
     el('td', { class: stagnantCls }, [dayLabel(meta?.stagnantDays)]),
     el('td', { class: elapsedCls }, [dayLabel(meta?.elapsedDays)]),
@@ -542,10 +773,38 @@ export function renderPriorityLabel(p: Priority): HTMLElement {
   return el('span', { class: `spira-prio ${cls}`, title: `Priority: ${p}` }, [p]);
 }
 
-export function renderAssignee(name?: string, email?: string): HTMLElement {
-  if (!email) return el('span', { class: 'spira-avatar spira-avatar--unset', title: '未割当' }, ['?']);
-  return el('span', {
-    class: 'spira-avatar',
-    title: name ? `${name} <${email}>` : email,
-  }, [initials(name ?? email)]);
+export function renderAssignee(names?: string[], emails?: string[]): HTMLElement {
+  const list = (emails ?? []).filter(Boolean);
+  if (list.length === 0) {
+    return el('span', { class: 'spira-avatar spira-avatar--unset', title: '未割当' }, ['?']);
+  }
+  // 1〜2 名はアバター並べ、3 名以上は「先頭 +N」表示でスペース節約。
+  const MAX = 2;
+  const visible = list.slice(0, MAX);
+  const overflow = list.length - visible.length;
+  const tooltip = list
+    .map((email, i) => {
+      const nm = (names ?? [])[i];
+      return nm ? `${nm} <${email}>` : email;
+    })
+    .join('\n');
+  const wrap = el('span', {
+    class: 'spira-avatar-stack',
+    title: tooltip,
+    style: 'display:inline-flex;align-items:center;gap:-4px',
+  });
+  visible.forEach((email, i) => {
+    const nm = (names ?? [])[i];
+    wrap.appendChild(el('span', {
+      class: 'spira-avatar',
+      style: i > 0 ? 'margin-left:-6px' : '',
+    }, [initials(nm ?? email)]));
+  });
+  if (overflow > 0) {
+    wrap.appendChild(el('span', {
+      class: 'spira-avatar spira-avatar--more',
+      style: 'margin-left:-6px;background:var(--paper-2);color:var(--ink-3);font-size:10px',
+    }, [`+${overflow}`]));
+  }
+  return wrap;
 }

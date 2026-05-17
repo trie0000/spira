@@ -1,9 +1,12 @@
 // Spira — bookmarklet entry. Renders overlay onto <body>.
 import css from './styles/app.css';
 import noteEditorCss from './lib/note-editor/editor.css';
-import { initRepo, getRepo, getRepoMode } from './api/repo';
+import { initRepo, getRepo, getRepoMode, detectMode } from './api/repo';
+import { openSiteSelectionModal } from './views/siteSelectionModal';
 import { renderShell } from './views/shell';
-import { openNewTicketModal } from './views/inbox';
+import { openNewTicketModal, inboxRowsWithTag } from './views/inbox';
+import { loadVersionInfo, isOutdated, isCurrentNewer, saveLatestBuildId } from './utils/versionCheck';
+import { openSearchModal } from './views/search';
 import { toast } from './components/toast';
 import { setState, getState } from './state';
 import type { InboxMail } from './types';
@@ -46,9 +49,26 @@ export async function mount(): Promise<void> {
     if (action === 'new-ticket') doNewTicket();
   });
 
+  // Cmd/Ctrl+K opens the search modal from anywhere. We capture early
+  // so it works even when focus is inside an editable element. The
+  // search modal itself handles Escape close.
+  document.addEventListener('keydown', (e) => {
+    if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) {
+      e.preventDefault();
+      openSearchModal();
+    }
+  });
+
   // Initialize repo (mock or SP) → bootstrap lists → load counts/users.
   try {
-    const initRes = await initRepo();
+    // SP モードの場合、起動時にサイト選択モーダルを表示。前回選択サイトが
+    // localStorage にあれば初期選択。決定後に repo を作成する。
+    let overrideSiteUrl: string | undefined;
+    if (detectMode() === 'sp') {
+      const sel = await openSiteSelectionModal();
+      overrideSiteUrl = sel.siteUrl;
+    }
+    const initRes = await initRepo({ overrideSiteUrl });
     const repo = getRepo();
 
     if (initRes.mode === 'sp') {
@@ -59,21 +79,45 @@ export async function mount(): Promise<void> {
       if (msgs.length > 0) toast(root, `初期セットアップ完了 — ${msgs.join(' / ')}`, 'ok', 8000);
     }
 
-    // load counts & users
-    const [inbox, trash, users] = await Promise.all([
-      repo.listInbox({ unprocessedOnly: true }),
+    // load counts & users & current user
+    const [inbox, trash, users, currentUser] = await Promise.all([
+      repo.listInbox({}),
       repo.listDeletedTickets(),
       repo.listSiteUsers(),
+      repo.getCurrentUser(),
     ]);
     setState({
-      inboxCount: inbox.length,
+      inboxCount: inboxRowsWithTag(inbox).length,
       trashCount: trash.length,
       users,
+      currentUser,
       ready: true,
     });
 
     // first-load auto sync
     setTimeout(() => doSync(root, /* silent */ true), 100);
+
+    // バージョンチェック — SP の SpiraSettings に登録された latest と比較:
+    //   - current のビルド日時 > latest なら自動で latest を current に更新
+    //     (新版を開いたユーザーが SoT になる)
+    //   - current < latest なら更新バナー表示 (ユーザーが古い)
+    //   - 同じなら何もしない
+    // 失敗はサイレントに無視 (バージョン情報未登録の環境では何も起きない)。
+    void loadVersionInfo().then(async (info) => {
+      if (isCurrentNewer(info)) {
+        try { await saveLatestBuildId(info.current); }
+        catch { /* noop */ }
+        return;
+      }
+      if (isOutdated(info)) {
+        setState({
+          updateBanner: {
+            message: `新しいバージョン (${info.latest}) があります。現在のビルド: ${info.current}`,
+            url: info.updateUrl,
+          },
+        });
+      }
+    }).catch(() => { /* noop */ });
   } catch (e) {
     const msg = (e as Error).message;
     setState({ errorBanner: `初期化に失敗しました: ${msg}` });
@@ -95,8 +139,8 @@ async function doSync(root: HTMLElement, silent = false): Promise<void> {
   syncBtn?.classList.add('spira-spin');
   try {
     const r = await repo.syncInbox();
-    const inbox = await repo.listInbox({ unprocessedOnly: true });
-    setState({ inboxCount: inbox.length });
+    const inbox = await repo.listInbox({});
+    setState({ inboxCount: inboxRowsWithTag(inbox).length });
     if (!silent) {
       const errs = r.errors.length ? ` · エラー ${r.errors.length}件` : '';
       toast(root, `同期完了 · 自動紐付け ${r.autoLinked} 件 / 未処理 ${r.remaining} 件${errs}`, r.errors.length ? 'warn' : 'ok');

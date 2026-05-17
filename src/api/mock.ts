@@ -3,19 +3,21 @@ import type { Ticket, Comment, InboxMail, SiteUser, InboxState } from '../types'
 import type { Repository, CreateTicketInput, AddCommentInput, SyncResult, ResetResult } from './repo';
 import { sampleInboxInputs, toMockInbox } from './sampleInbox';
 import { formatTicketTag, parseTicketTag } from '../utils/ticketTag';
+import { normalizeForSearch } from '../utils/search';
 
 interface DataStore {
   tickets: Ticket[];
   comments: Comment[];
   inbox: InboxMail[];
   users: SiteUser[];
+  settings: Map<string, string>;
   nextTicketId: number;
   nextCommentId: number;
   nextInboxId: number;
 }
 
 const store: DataStore = {
-  tickets: [], comments: [], inbox: [], users: [],
+  tickets: [], comments: [], inbox: [], users: [], settings: new Map(),
   nextTicketId: 1, nextCommentId: 1, nextInboxId: 1,
 };
 
@@ -38,7 +40,7 @@ export function seedMock(): void {
       id: 1, title: 'ログインできません',
       description: 'ID とパスワードを入力するとエラーが出ます',
       status: '対応中', priority: 'High',
-      assigneeEmail: 'tanaka@example.com', assigneeName: '田中 太郎',
+      assigneeEmails: ['tanaka@example.com'], assigneeNames: ['田中 太郎'],
       reporterEmail: 'customer@external.example', reporterName: '取引先 山田',
       dueDate: plus(6), rawSubject: 'ログインできません',
       initialConversationId: 'cv-001',
@@ -56,7 +58,8 @@ export function seedMock(): void {
       id: 3, title: '【至急】サーバ応答なし',
       description: '本日 10:00 ごろから応答が断続的に消失',
       status: '確認待ち', priority: 'High',
-      assigneeEmail: 'sato@example.com', assigneeName: '佐藤 花子',
+      assigneeEmails: ['sato@example.com', 'tanaka@example.com'],
+      assigneeNames: ['佐藤 花子', '田中 太郎'],
       reporterEmail: 'ops@external.example', reporterName: '運用',
       dueDate: minus(2),
       createdAt: minus(30), updatedAt: minus(1),
@@ -65,7 +68,7 @@ export function seedMock(): void {
       id: 4, title: '機能要望: CSV エクスポート',
       description: '一覧から CSV で出力したい',
       status: '完了', priority: 'Low',
-      assigneeEmail: 'suzuki@example.com', assigneeName: '鈴木 一郎',
+      assigneeEmails: ['suzuki@example.com'], assigneeNames: ['鈴木 一郎'],
       reporterEmail: 'pm@example.com', reporterName: 'PM',
       createdAt: minus(120), updatedAt: minus(48),
     },
@@ -109,6 +112,7 @@ export function seedMock(): void {
   store.nextCommentId = 6;
 
   store.inbox = [
+    // タグ無し (タグフィルター ON 時は Inbox に表示されない — 新規問い合わせ想定)
     {
       id: 11, subject: '見積もりのご依頼',
       bodyHtml: '<p>はじめまして、株式会社 ABC の高橋と申します。貴社サービスについて見積もりをお願いしたく、ご連絡いたしました。</p>',
@@ -136,8 +140,38 @@ export function seedMock(): void {
       conversationId: 'cv-024', owaLink: '#',
       isProcessed: false,
     },
+    // Forms 経由 (タグ無しだが受信に表示される — 管理者の起票判断待ち)
+    // bodyHtml 内の「カテゴリ:」「優先度:」が自動マッピングに使われる。
+    {
+      id: 10, subject: '[Forms] パスワードリセットができない',
+      bodyHtml: '<div><b>お名前と所属:</b> 山田太郎 / 営業部</div><div><b>カテゴリ:</b> アカウント・権限の問題</div><div><b>優先度:</b> High（業務が停止している / 緊急対応が必要）</div><div><b>詳細:</b> ログイン画面で「パスワードを忘れた」を押しても再設定メールが届きません。</div>',
+      bodyText: 'お名前と所属: 山田太郎 / 営業部\nカテゴリ: アカウント・権限の問題\n優先度: High（業務が停止している / 緊急対応が必要）\n詳細: パスワードリセット問い合わせ',
+      fromEmail: 'yamada@partner.example', fromName: '山田 太郎',
+      receivedAt: minus(1), hasAttachments: false,
+      conversationId: 'forms-aBcDeFgH-12345', owaLink: '#',
+      isProcessed: false,
+    },
+    // タグ付き (既存チケットへの返信扱い — Inbox に表示される)
+    {
+      id: 14, subject: 'RE: [CASE#00001] ログインできません',
+      bodyHtml: '<p>ご連絡ありがとうございます。サーバ側で対応中です、もう少々お待ちください。</p>',
+      bodyText: '対応中の連絡',
+      fromEmail: 'support@partner.example', fromName: 'サポート 鈴木',
+      receivedAt: minus(1), hasAttachments: false,
+      conversationId: 'cv-025', owaLink: '#',
+      isProcessed: false,
+    },
+    {
+      id: 15, subject: 'Re: [CASE#00003] 【至急】サーバ応答なし',
+      bodyHtml: '<p>再起動で復旧しました。原因切り分けの詳細は別途共有します。</p>',
+      bodyText: '復旧報告',
+      fromEmail: 'ops@external.example', fromName: '運用',
+      receivedAt: minus(2), hasAttachments: false,
+      conversationId: 'cv-026', owaLink: '#',
+      isProcessed: false,
+    },
   ];
-  store.nextInboxId = 14;
+  store.nextInboxId = 16;
 }
 
 export class MockRepository implements Repository {
@@ -167,6 +201,37 @@ export class MockRepository implements Repository {
   async listDeletedTickets(): Promise<Ticket[]> {
     return store.tickets.filter(t => t.isDeleted);
   }
+  async searchAll(query: string): Promise<{ tickets: Ticket[]; commentsByTicket: Map<number, Comment[]> }> {
+    const q = normalizeForSearch(query);
+    if (!q) return { tickets: [], commentsByTicket: new Map() };
+    const tickets = store.tickets.filter(t => !t.isDeleted && (
+      normalizeForSearch(t.title).includes(q) ||
+      normalizeForSearch(t.description ?? '').includes(q) ||
+      normalizeForSearch(t.reporterName ?? '').includes(q) ||
+      normalizeForSearch(t.reporterEmail ?? '').includes(q)
+    ));
+    const matchedTicketIds = new Set(tickets.map(t => t.id));
+    const commentMatches = store.comments.filter(c =>
+      normalizeForSearch(c.content).includes(q) ||
+      normalizeForSearch(c.fromName ?? '').includes(q) ||
+      normalizeForSearch(c.fromEmail ?? '').includes(q),
+    );
+    const commentsByTicket = new Map<number, Comment[]>();
+    for (const c of commentMatches) {
+      const arr = commentsByTicket.get(c.ticketId) ?? [];
+      arr.push(c);
+      commentsByTicket.set(c.ticketId, arr);
+      // Pull in the ticket if not already in the title match set.
+      if (!matchedTicketIds.has(c.ticketId)) {
+        const t = store.tickets.find(x => x.id === c.ticketId && !x.isDeleted);
+        if (t) {
+          tickets.push(t);
+          matchedTicketIds.add(t.id);
+        }
+      }
+    }
+    return { tickets, commentsByTicket };
+  }
   async getTicket(id: number): Promise<Ticket | null> {
     return store.tickets.find(t => t.id === id) ?? null;
   }
@@ -178,8 +243,12 @@ export class MockRepository implements Repository {
       description: input.description,
       status: input.status ?? '新規',
       priority: input.priority ?? 'Medium',
-      assigneeEmail: input.assigneeEmail,
-      assigneeName: store.users.find(u => u.email === input.assigneeEmail)?.displayName,
+      assigneeEmails: input.assigneeEmails && input.assigneeEmails.length > 0 ? input.assigneeEmails : undefined,
+      assigneeNames: input.assigneeEmails && input.assigneeEmails.length > 0
+        ? input.assigneeEmails.map(e => store.users.find(u => u.email === e)?.displayName ?? e)
+        : undefined,
+      department: input.department,
+      inquiryCategory: input.inquiryCategory,
       reporterEmail: input.reporterEmail,
       reporterName: input.reporterName,
       dueDate: input.dueDate,
@@ -195,8 +264,14 @@ export class MockRepository implements Repository {
     const t = store.tickets.find(x => x.id === id);
     if (!t) return null;
     Object.assign(t, patch);
-    if (patch.assigneeEmail !== undefined) {
-      t.assigneeName = store.users.find(u => u.email === patch.assigneeEmail)?.displayName;
+    // assigneeEmails が更新されたら、displayName を AD から引いて
+    // assigneeNames も同期する。両方一括 patch しているケースは
+    // (patch.assigneeNames が指定されていれば) そちらを優先。
+    if (patch.assigneeEmails !== undefined && patch.assigneeNames === undefined) {
+      const emails = patch.assigneeEmails ?? [];
+      t.assigneeNames = emails.length > 0
+        ? emails.map(e => store.users.find(u => u.email === e)?.displayName ?? e)
+        : undefined;
     }
     t.updatedAt = now();
     return t;
@@ -230,13 +305,30 @@ export class MockRepository implements Repository {
       .filter(c => c.ticketId === ticketId)
       .sort((a, b) => a.sentAt.localeCompare(b.sentAt));
   }
-  async updateComment(id: number, patch: { content: string; isHtml?: boolean }): Promise<void> {
+  async updateComment(
+    id: number,
+    patch: {
+      content?: string;
+      isHtml?: boolean;
+      fromName?: string | null;
+      fromEmail?: string | null;
+      sentAt?: string;
+      source?: 'mail' | 'teams' | 'other';
+    },
+  ): Promise<void> {
     const c = store.comments.find(x => x.id === id);
     if (!c) return;
-    c.content = patch.content;
+    if (patch.content !== undefined) c.content = patch.content;
     if (patch.isHtml !== undefined) c.isHtml = patch.isHtml;
+    if (patch.fromName !== undefined) c.fromName = patch.fromName ?? undefined;
+    if (patch.fromEmail !== undefined) c.fromEmail = patch.fromEmail ?? undefined;
+    if (patch.sentAt !== undefined) c.sentAt = patch.sentAt;
+    if (patch.source !== undefined) c.source = patch.source;
+    const nowIso = now();
+    c.updatedAt = nowIso;
+    c.updatedBy = store.users[0]?.displayName ?? c.updatedBy;
     const t = store.tickets.find(x => x.id === c.ticketId);
-    if (t) t.updatedAt = now();
+    if (t) t.updatedAt = nowIso;
   }
 
   async deleteComment(id: number): Promise<void> {
@@ -250,6 +342,8 @@ export class MockRepository implements Repository {
 
   async addComment(input: AddCommentInput): Promise<Comment> {
     const id = store.nextCommentId++;
+    const nowIso = now();
+    const me = store.users[0];
     const c: Comment = {
       id,
       ticketId: input.ticketId,
@@ -258,14 +352,19 @@ export class MockRepository implements Repository {
       fromName: input.fromName,
       content: input.content,
       isHtml: input.isHtml,
-      sentAt: input.sentAt ?? now(),
+      sentAt: input.sentAt ?? nowIso,
       sourceEmailId: input.sourceEmailId,
       hasAttachments: input.hasAttachments,
       internetMessageId: input.internetMessageId,
+      source: input.source,
+      createdBy: me?.displayName ?? input.fromName,
+      updatedBy: me?.displayName ?? input.fromName,
+      createdAt: nowIso,
+      updatedAt: nowIso,
     };
     store.comments.push(c);
     const t = store.tickets.find(x => x.id === input.ticketId);
-    if (t) t.updatedAt = now();
+    if (t) t.updatedAt = nowIso;
     return c;
   }
 
@@ -284,6 +383,10 @@ export class MockRepository implements Repository {
       if (ids.includes(m.id)) m.isHidden = false;
     }
   }
+  async deleteInboxMail(id: number): Promise<void> {
+    const i = store.inbox.findIndex(m => m.id === id);
+    if (i >= 0) store.inbox.splice(i, 1);
+  }
   async markInboxProcessed(id: number, patch: { ticketId: number; result: InboxState }): Promise<void> {
     const m = store.inbox.find(x => x.id === id);
     if (!m) return;
@@ -295,11 +398,22 @@ export class MockRepository implements Repository {
   async syncInbox(): Promise<SyncResult> {
     let autoLinked = 0;
     const errors: string[] = [];
-    for (const m of store.inbox.filter(x => !x.isProcessed)) {
+    // 走査対象を先にコピー (削除しながら回ると iteration がズレるため)
+    const targets = store.inbox.filter(x => !x.isProcessed).slice();
+    for (const m of targets) {
       try {
         const tid = parseTicketTag(m.subject);
+        const isForms = !!m.conversationId && m.conversationId.startsWith('forms-');
         if (tid == null) {
-          console.warn(`[spira/sync] inbox #${m.id}: no ticket tag in subject "${m.subject?.slice(0, 80)}"`);
+          if (isForms) {
+            // Forms 経由はタグ無しが正常。受信箱に残して管理者の手動
+            // 起票判断を待つ。
+            console.warn(`[spira/sync] inbox #${m.id}: Forms entry kept for manual triage`);
+          } else {
+            // メールでタグ無し = 無関係メール。物理削除して受信箱を綺麗に。
+            console.warn(`[spira/sync] inbox #${m.id}: no tag mail → delete`);
+            await this.deleteInboxMail(m.id);
+          }
           continue;
         }
         const ticket = store.tickets.find(t => t.id === tid && !t.isDeleted);
@@ -307,16 +421,14 @@ export class MockRepository implements Repository {
           console.warn(`[spira/sync] inbox #${m.id}: tag parsed as #${tid} but ticket not found / deleted`);
           continue;
         }
-        // Idempotency: skip if a received comment with the same
-        // internetMessageId already exists on this ticket (left over
-        // from a previous half-finished sync, or a PA duplicate row).
+        // Idempotency: 既存コメントを重複追加しない
         if (m.internetMessageId) {
           const dup = store.comments.some(
             (c) => c.ticketId === tid && c.type === 'received' &&
               c.internetMessageId === m.internetMessageId,
           );
           if (dup) {
-            await this.markInboxProcessed(m.id, { ticketId: tid, result: 'auto-linked' });
+            await this.deleteInboxMail(m.id);
             autoLinked++;
             continue;
           }
@@ -328,8 +440,10 @@ export class MockRepository implements Repository {
           sentAt: m.sentAt ?? m.receivedAt, sourceEmailId: m.id,
           hasAttachments: m.hasAttachments,
           internetMessageId: m.internetMessageId,
+          source: 'mail',
         });
-        await this.markInboxProcessed(m.id, { ticketId: tid, result: 'auto-linked' });
+        // auto-link 後は物理削除 (受信箱には auto-link 待ち or Forms のみ残る運用)
+        await this.deleteInboxMail(m.id);
         autoLinked++;
       } catch (e) {
         errors.push(`#${m.id}: ${(e as Error).message}`);
@@ -341,6 +455,11 @@ export class MockRepository implements Repository {
 
   async listSiteUsers(): Promise<SiteUser[]> {
     return store.users.slice();
+  }
+
+  async getCurrentUser(): Promise<SiteUser | null> {
+    // mock 環境では最初のユーザーを「現在ユーザー」として返す。
+    return store.users[0] ?? { id: 0, email: 'me@example.com', displayName: '自分 (mock)' };
   }
 
   /** Mock: encode the file as a base64 data URL and return it. The
@@ -363,6 +482,55 @@ export class MockRepository implements Repository {
       store.inbox.push(toMockInbox(inp, id));
     }
     return { count: inputs.length };
+  }
+
+  // ---- 設定 (key-value)
+
+  async getSetting(key: string): Promise<string | null> {
+    return store.settings.get(key) ?? null;
+  }
+
+  async setSetting(key: string, value: string | null): Promise<void> {
+    if (value == null) store.settings.delete(key);
+    else store.settings.set(key, value);
+  }
+
+  /** Mock: simulate the queue insert. We also fake the eventual PA
+   *  callback by updating the ticket with a deepLink so the UI flips
+   *  to "open thread" state on next render.
+   *  SpiraSettings からチャネル設定を引いて、未設定なら mock 値で埋める。 */
+  async createTeamsPostRequest(params: {
+    ticketId: number;
+    threadType: 'internal' | 'user';
+  }): Promise<{ id: number }> {
+    const settingKey = params.threadType === 'internal'
+      ? 'teams-channel:internal'
+      : 'teams-channel:external';
+    let channelId = `mock-channel-${params.threadType}`;
+    try {
+      const raw = store.settings.get(settingKey);
+      if (raw) {
+        const cfg = JSON.parse(raw) as { channelId?: string };
+        if (cfg.channelId) channelId = cfg.channelId;
+      }
+    } catch { /* keep default */ }
+
+    const t = store.tickets.find((x) => x.id === params.ticketId);
+    if (t) {
+      const fakeId = `mock-msg-${Date.now()}`;
+      const fakeLink = `https://teams.microsoft.com/l/message/${channelId}/${fakeId}`;
+      if (params.threadType === 'internal') {
+        t.internalThreadId = fakeId;
+        t.internalChannelId = channelId;
+        t.internalDeepLink = fakeLink;
+      } else {
+        t.userThreadId = fakeId;
+        t.userChannelId = channelId;
+        t.userDeepLink = fakeLink;
+      }
+      t.updatedAt = now();
+    }
+    return { id: Math.floor(Math.random() * 100000) };
   }
 
   // dev helper: simulate a tagged reply landing in the inbox

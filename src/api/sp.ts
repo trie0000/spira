@@ -4,18 +4,23 @@ import type { Ticket, Comment, InboxMail, SiteUser, InboxState, TicketStatus, Pr
 import type { Repository, CreateTicketInput, AddCommentInput, SyncResult, ResetResult } from './repo';
 import { sampleInboxInputs } from './sampleInbox';
 import { parseTicketTag } from '../utils/ticketTag';
+import { normalizeForSearch } from '../utils/search';
 
 export interface SpConfig {
   siteUrl: string;        // absolute, e.g. https://contoso.sharepoint.com/sites/spira
   listTickets: string;
   listComments: string;
   listInbox: string;
+  listTeamsPostRequests: string;
+  listSettings: string;
 }
 
 const DEFAULT_LISTS = {
-  listTickets:  'Tickets',
-  listComments: 'Comments',
-  listInbox:    'InboxMails',
+  listTickets:           'Tickets',
+  listComments:          'Comments',
+  listInbox:             'InboxMails',
+  listTeamsPostRequests: 'TeamsPostRequests',
+  listSettings:          'SpiraSettings',
 };
 
 /** Document library used for internal-memo attachments. Auto-created by
@@ -53,23 +58,52 @@ class SpTransport {
    */
   async req<T = unknown>(path: string, init: RequestInit & { odata?: 'nometadata' | 'verbose' } = {}): Promise<T> {
     const url = path.startsWith('http') ? path : `${this.siteUrl}${path}`;
-    const headers = new Headers(init.headers);
     const odata = init.odata ?? 'nometadata';
-    if (!headers.has('Accept')) headers.set('Accept', `application/json;odata=${odata}`);
-    if (init.body && !headers.has('Content-Type')) {
-      headers.set('Content-Type', `application/json;odata=${odata}`);
-    }
     const method = (init.method ?? 'GET').toUpperCase();
     const isWrite = method !== 'GET' && method !== 'HEAD';
-    if (isWrite) headers.set('X-RequestDigest', await this.formDigest());
-    const res = await fetch(url, { ...init, headers, credentials: 'include' });
+
+    const doFetch = async (digest: string | null): Promise<Response> => {
+      const headers = new Headers(init.headers);
+      if (!headers.has('Accept')) headers.set('Accept', `application/json;odata=${odata}`);
+      if (init.body && !headers.has('Content-Type')) {
+        headers.set('Content-Type', `application/json;odata=${odata}`);
+      }
+      if (isWrite && digest) headers.set('X-RequestDigest', digest);
+      return fetch(url, { ...init, headers, credentials: 'include' });
+    };
+
+    let res: Response;
+    if (isWrite) {
+      let digest = await this.formDigest();
+      res = await doFetch(digest);
+      // FormDigest が失効していると 403 (-2130575251 "security validation
+      // for this page is invalid") が返る。キャッシュをクリアして新規取得 →
+      // 最大 2 回までリトライ (digest fetch 自体が古いセッションで返ってきて
+      // 即時 invalidate されるケースの保険)。
+      let retries = 0;
+      while (res.status === 403 && retries < 2) {
+        const errText = await res.text();
+        const isSecurityValidation =
+          /2130575251|security validation|セキュリティ検証|FormDigest|SecurityValidation/i.test(errText);
+        if (!isSecurityValidation) {
+          throw new SpError(res.status, errText, url);
+        }
+        // eslint-disable-next-line no-console
+        console.warn(`[spira/sp] form digest 403 — retry ${retries + 1}/2`);
+        this.digest = undefined;
+        digest = await this.formDigest();
+        res = await doFetch(digest);
+        retries++;
+      }
+    } else {
+      res = await doFetch(null);
+    }
     if (!res.ok) throw new SpError(res.status, await res.text(), url);
     if (res.status === 204) return undefined as T;
     const text = await res.text();
     if (!text) return undefined as T;
     try {
       const parsed = JSON.parse(text);
-      // verbose responses wrap in { d: ... } — unwrap.
       if (odata === 'verbose' && parsed && typeof parsed === 'object' && 'd' in parsed) {
         return (parsed as { d: T }).d;
       }
@@ -89,7 +123,10 @@ class SpTransport {
     const data = await res.json() as { FormDigestValue: string; FormDigestTimeoutSeconds: number };
     this.digest = {
       value: data.FormDigestValue,
-      expires: Date.now() + (data.FormDigestTimeoutSeconds - 60) * 1000,
+      // 300 秒 (5 分) のバッファを取って早めに refresh。SP 側で digest が
+      // 早期 invalidate されるケース (別タブで活動・セッション切替等) も
+      // あるので、req() で 403 を受けた場合はもう一段の retry をする。
+      expires: Date.now() + (data.FormDigestTimeoutSeconds - 300) * 1000,
     };
     return data.FormDigestValue;
   }
@@ -120,6 +157,14 @@ interface SpListItem {
   [k: string]: unknown;
 }
 
+/** カンマ区切り文字列を配列に。空文字は空配列、undefined はそのまま undefined。 */
+function parseCsvField(v: unknown): string[] | undefined {
+  if (v == null) return undefined;
+  const s = String(v).trim();
+  if (!s) return undefined;
+  return s.split(/[,;、]/).map(p => p.trim()).filter(Boolean);
+}
+
 function asTicket(it: SpListItem): Ticket {
   return {
     id: it.Id,
@@ -127,8 +172,12 @@ function asTicket(it: SpListItem): Ticket {
     description: it.Description ? String(it.Description) : undefined,
     status: (it.Status as TicketStatus) || '新規',
     priority: (it.Priority as Priority) || 'Medium',
-    assigneeEmail: it.AssigneeEmail ? String(it.AssigneeEmail) : undefined,
-    assigneeName: it.AssigneeName ? String(it.AssigneeName) : undefined,
+    // 複数担当者対応: カンマ区切りで保存されたメール/名前を配列化。
+    // 旧形式 (単一値) も自然に 1 要素配列になる。
+    assigneeEmails: parseCsvField(it.AssigneeEmail),
+    assigneeNames: parseCsvField(it.AssigneeName),
+    department: it.Department ? String(it.Department) : undefined,
+    inquiryCategory: it.InquiryCategory ? String(it.InquiryCategory) : undefined,
     reporterEmail: it.ReporterEmail ? String(it.ReporterEmail) : undefined,
     reporterName: it.ReporterName ? String(it.ReporterName) : undefined,
     dueDate: it.DueDate ? String(it.DueDate) : undefined,
@@ -138,6 +187,13 @@ function asTicket(it: SpListItem): Ticket {
     deletedAt: it.DeletedAt ? String(it.DeletedAt) : undefined,
     createdAt: it.Created,
     updatedAt: it.Modified,
+    customerTeam: it.CustomerTeam ? String(it.CustomerTeam) : undefined,
+    internalThreadId: it.InternalThreadId ? String(it.InternalThreadId) : undefined,
+    internalChannelId: it.InternalChannelId ? String(it.InternalChannelId) : undefined,
+    internalDeepLink: it.InternalDeepLink ? String(it.InternalDeepLink) : undefined,
+    userThreadId: it.UserThreadId ? String(it.UserThreadId) : undefined,
+    userChannelId: it.UserChannelId ? String(it.UserChannelId) : undefined,
+    userDeepLink: it.UserDeepLink ? String(it.UserDeepLink) : undefined,
   };
 }
 
@@ -149,19 +205,51 @@ function asTicket(it: SpListItem): Ticket {
  *
  *  We only call this on memos saved as MARKDOWN. Comments stored as
  *  HTML (legacy mail) get parsed via innerHTML downstream, which
- *  decodes entities natively. */
+ *  decodes entities natively.
+ *
+ *  ⚠ Important: HTML コメント (`<!--...-->`) は textarea パーサで剥がれて
+ *  しまうので、一旦プレースホルダーに退避してデコード後に戻す。これを
+ *  しないと note editor の sidecar コメント (`<!--ne-cols:...-->` で列幅、
+ *  `<!--ne-thead-->` でヘッダ行) が消失して round-trip が壊れる。 */
 function decodeSpEntities(s: string): string {
-  // The <textarea>-innerHTML trick handles every named/numeric/hex
-  // entity HTML5 knows about without parsing tags (textareas don't
-  // create child elements from their innerHTML).
+  // 1) Spira メタデータ markers (`[[NEM:base64]]`) を実際の HTML comment
+  //    に戻す。SP の HTML サニタイザが <!--...--> を削除する環境への対策で、
+  //    保存前に encodeSpContent で `[[NEM:...]]` に変換しているため。
+  let pre = s.replace(/\[\[NEM:([A-Za-z0-9+/=]+)\]\]/g, (_, b64) => {
+    try { return decodeURIComponent(escape(atob(b64))); }
+    catch { return ''; }
+  });
+  // 2) HTML コメント (`<!--...-->`) は textarea パーサで剥がれてしまうので、
+  //    一旦プレースホルダーに退避してデコード後に戻す。
+  const comments: string[] = [];
+  const masked = pre.replace(/<!--[\s\S]*?-->/g, (m) => {
+    comments.push(m);
+    return `NEC${comments.length - 1}`;
+  });
   const t = document.createElement('textarea');
-  t.innerHTML = s;
-  return t.value;
+  t.innerHTML = masked;
+  let out = t.value;
+  out = out.replace(/NEC(\d+)/g, (_, i) => comments[parseInt(i, 10)] ?? '');
+  return out;
+}
+
+/** SP に書き込む直前に呼び、HTML コメントを `[[NEM:base64]]` 形式に
+ *  エンコードする。SP の HTML サニタイザは `[`/`]` を加工しないので
+ *  reliable に round-trip できる。 */
+function encodeSpContent(s: string): string {
+  return s.replace(/<!--[\s\S]*?-->/g, (m) => {
+    const b64 = btoa(unescape(encodeURIComponent(m)));
+    return `[[NEM:${b64}]]`;
+  });
 }
 
 function asComment(it: SpListItem): Comment {
   const isHtml = Boolean(it.IsHtml);
   const rawContent = String(it.Content ?? '');
+  // Author / Editor は $expand で取得した場合 { Title: '...' } 構造で来る。
+  // 取得していない場合は undefined。
+  const author = (it as { Author?: { Title?: string } }).Author;
+  const editor = (it as { Editor?: { Title?: string } }).Editor;
   return {
     id: it.Id,
     ticketId: Number(it.TicketId ?? 0),
@@ -174,7 +262,17 @@ function asComment(it: SpListItem): Comment {
     sourceEmailId: it.SourceEmailId != null ? Number(it.SourceEmailId) : undefined,
     hasAttachments: it.HasAttachments != null ? Boolean(it.HasAttachments) : undefined,
     internetMessageId: it.InternetMessageId ? String(it.InternetMessageId) : undefined,
+    source: normalizeSource(it.Source),
+    createdBy: author?.Title,
+    updatedBy: editor?.Title,
+    createdAt: it.Created ? String(it.Created) : undefined,
+    updatedAt: it.Modified ? String(it.Modified) : undefined,
   };
+}
+
+function normalizeSource(v: unknown): 'mail' | 'teams' | 'other' | undefined {
+  if (v === 'mail' || v === 'teams' || v === 'other') return v;
+  return undefined;
 }
 
 function asInbox(it: SpListItem): InboxMail {
@@ -207,8 +305,16 @@ function ticketBody(input: Partial<Ticket> | CreateTicketInput): Record<string, 
   if ('description' in input) b.Description = input.description ?? null;
   if ('status' in input) b.Status = input.status;
   if ('priority' in input) b.Priority = input.priority;
-  if ('assigneeEmail' in input) b.AssigneeEmail = input.assigneeEmail ?? null;
-  if ('assigneeName' in input) b.AssigneeName = input.assigneeName ?? null;
+  if ('assigneeEmails' in input) {
+    const arr = (input as { assigneeEmails?: string[] }).assigneeEmails ?? [];
+    b.AssigneeEmail = arr.length > 0 ? arr.join(', ') : null;
+  }
+  if ('assigneeNames' in input) {
+    const arr = (input as { assigneeNames?: string[] }).assigneeNames ?? [];
+    b.AssigneeName = arr.length > 0 ? arr.join(', ') : null;
+  }
+  if ('department' in input) b.Department = (input as { department?: string }).department ?? null;
+  if ('inquiryCategory' in input) b.InquiryCategory = (input as { inquiryCategory?: string }).inquiryCategory ?? null;
   if ('reporterEmail' in input) b.ReporterEmail = input.reporterEmail ?? null;
   if ('reporterName' in input) b.ReporterName = input.reporterName ?? null;
   if ('dueDate' in input) b.DueDate = input.dueDate ?? null;
@@ -216,6 +322,13 @@ function ticketBody(input: Partial<Ticket> | CreateTicketInput): Record<string, 
   if ('initialConversationId' in input) b.InitialConversationId = input.initialConversationId ?? null;
   if ('isDeleted' in input) b.IsDeleted = input.isDeleted ?? false;
   if ('deletedAt' in input) b.DeletedAt = input.deletedAt ?? null;
+  if ('customerTeam' in input) b.CustomerTeam = input.customerTeam ?? null;
+  if ('internalThreadId' in input) b.InternalThreadId = input.internalThreadId ?? null;
+  if ('internalChannelId' in input) b.InternalChannelId = input.internalChannelId ?? null;
+  if ('internalDeepLink' in input) b.InternalDeepLink = input.internalDeepLink ?? null;
+  if ('userThreadId' in input) b.UserThreadId = input.userThreadId ?? null;
+  if ('userChannelId' in input) b.UserChannelId = input.userChannelId ?? null;
+  if ('userDeepLink' in input) b.UserDeepLink = input.userDeepLink ?? null;
   return b;
 }
 
@@ -244,6 +357,11 @@ export class SpRepository implements Repository {
         await this.createListBare(title);
         created.push(title);
       }
+      // Schema drift: フィールドが旧型 (Text) で作られていて、現在の
+      // 定義が Note などに変わっている場合は、互換性を保つために
+      // 古い列を DELETE してから ensureFields で再作成する。
+      // 影響: 旧列にあったデータは失われる (Teams DeepLink のみ該当)。
+      await this.migrateFieldTypeMismatches(title, fields);
       const added = await this.ensureFields(title, fields);
       for (const a of added) addedFields.push(`${title}.${a}`);
     };
@@ -251,6 +369,8 @@ export class SpRepository implements Repository {
     await ensure(this.cfg.listTickets, ticketFieldSpecs());
     await ensure(this.cfg.listComments, commentFieldSpecs());
     await ensure(this.cfg.listInbox, inboxFieldSpecs());
+    await ensure(this.cfg.listTeamsPostRequests, teamsPostRequestFieldSpecs());
+    await ensure(this.cfg.listSettings, settingsFieldSpecs());
 
     // Attachment library — a single document library shared across all
     // tickets. Per-ticket sub-folders are created on first upload.
@@ -453,6 +573,42 @@ export class SpRepository implements Repository {
     });
   }
 
+  /** スキーマドリフト対策: 既存列の TypeAsString が現在の定義と
+   *  違う場合、古い列を DELETE する。次の ensureFields でほしい型で
+   *  作り直される。旧データは消えるが、Spira では DeepLink (Text→Note)
+   *  くらいしか該当しないので影響範囲は限定的。 */
+  private async migrateFieldTypeMismatches(title: string, fields: FieldSpec[]): Promise<void> {
+    const url = `${this.listPath(title)}/fields?$select=InternalName,Title,StaticName,TypeAsString&$top=500`;
+    let res: { value: { InternalName: string; Title: string; StaticName: string; TypeAsString: string }[] };
+    try { res = await this.tx.req(url); }
+    catch { return; }
+    const byName = new Map<string, string>();
+    for (const f of res.value ?? []) {
+      const t = f.TypeAsString;
+      if (f.InternalName) byName.set(f.InternalName, t);
+      if (f.StaticName) byName.set(f.StaticName, t);
+      if (f.Title) byName.set(f.Title, t);
+    }
+    for (const spec of fields) {
+      const cur = byName.get(spec.name);
+      if (!cur) continue;
+      const want = spFieldTypeString(spec.type);
+      if (cur === want) continue;
+      // 型が違う列だけ削除。例: Text → Note への移行。
+      try {
+        await this.tx.req(
+          `${this.listPath(title)}/fields/getbyinternalnameortitle('${encodeURIComponent(spec.name)}')`,
+          { method: 'POST', headers: { 'X-HTTP-Method': 'DELETE', 'IF-MATCH': '*' } },
+        );
+        console.log(`[spira] field migrated: ${title}.${spec.name} (${cur} → ${want})`);
+      } catch (e) {
+        // 削除権限なし or 必須列 → スキップ。次の ensureFields は既存列を
+        // そのまま残すので、書き込み時に再度エラーになる (ユーザー対処要)。
+        console.warn(`[spira] field migrate failed: ${title}.${spec.name}`, e);
+      }
+    }
+  }
+
   /** Idempotent: adds only missing fields. Returns names added. */
   private async ensureFields(title: string, fields: FieldSpec[]): Promise<string[]> {
     let existing = await this.listFieldNames(title);
@@ -503,6 +659,53 @@ export class SpRepository implements Repository {
     const url = `${this.listPath(this.cfg.listTickets)}/items?$top=500&$orderby=DeletedAt desc&$filter=IsDeleted eq 1`;
     const res = await this.tx.req<ListItemsResp<SpListItem>>(url);
     return (res.value ?? []).map(asTicket);
+  }
+
+  async searchAll(query: string): Promise<{ tickets: Ticket[]; commentsByTicket: Map<number, Comment[]> }> {
+    if (!query.trim()) return { tickets: [], commentsByTicket: new Map() };
+    // SP の substringof は Note 系列で HTML エンティティ越しに検索する
+    // ので、ユーザーが見ている文字列ではマッチしないことがある (例:
+    // 「ログイン」と打っても Content には `&#12525;...` で入っている)。
+    // したがって server-side フィルターは使わず、リスト全件を取得して
+    // クライアント側で normalizeForSearch を通して照合する。
+    // データセットがそこまで大きくないという前提 (Tickets <= 数百, Comments <= 数千)。
+    const ticketUrl = `${this.listPath(this.cfg.listTickets)}/items?$top=500&$filter=IsDeleted eq 0&$orderby=Modified desc`;
+    const commentUrl = `${this.listPath(this.cfg.listComments)}/items?$top=2000&$orderby=SentAt desc`;
+
+    const [ticketsRes, commentsRes] = await Promise.all([
+      this.tx.req<ListItemsResp<SpListItem>>(ticketUrl).catch(() => ({ value: [] as SpListItem[] })),
+      this.tx.req<ListItemsResp<SpListItem>>(commentUrl).catch(() => ({ value: [] as SpListItem[] })),
+    ]);
+    const allTickets: Ticket[] = (ticketsRes.value ?? []).map(asTicket);
+    const allComments: Comment[] = (commentsRes.value ?? []).map(asComment);
+
+    const qNorm = normalizeForSearch(query);
+    const hit = (s: string | undefined): boolean =>
+      !!s && normalizeForSearch(s).includes(qNorm);
+
+    // Tickets: タイトル / 説明 / 起票元
+    const matchedTickets = allTickets.filter(t =>
+      hit(t.title) || hit(t.description) || hit(t.reporterName) || hit(t.reporterEmail),
+    );
+    const ticketIds = new Set(matchedTickets.map(t => t.id));
+
+    // Comments: 本文 / 送信者
+    const commentsByTicket = new Map<number, Comment[]>();
+    for (const c of allComments) {
+      if (!hit(c.content) && !hit(c.fromName) && !hit(c.fromEmail)) continue;
+      const arr = commentsByTicket.get(c.ticketId) ?? [];
+      arr.push(c);
+      commentsByTicket.set(c.ticketId, arr);
+    }
+
+    // コメントだけでヒットしたチケットも結果に含める
+    const tickets: Ticket[] = [...matchedTickets];
+    for (const id of commentsByTicket.keys()) {
+      if (ticketIds.has(id)) continue;
+      const found = allTickets.find(t => t.id === id);
+      if (found) tickets.push(found);
+    }
+    return { tickets, commentsByTicket };
   }
 
   async getTicket(id: number): Promise<Ticket | null> {
@@ -565,14 +768,38 @@ export class SpRepository implements Repository {
   // ---- comments
 
   async listComments(ticketId: number): Promise<Comment[]> {
-    const url = `${this.listPath(this.cfg.listComments)}/items?$top=500&$orderby=SentAt asc&$filter=TicketId eq ${ticketId}`;
+    // Author / Editor を expand して登録者・最終更新者の表示名も取得。
+    const url = `${this.listPath(this.cfg.listComments)}/items` +
+      `?$top=500&$orderby=SentAt asc&$filter=TicketId eq ${ticketId}` +
+      `&$expand=Author,Editor&$select=*,Author/Title,Editor/Title`;
     const res = await this.tx.req<ListItemsResp<SpListItem>>(url);
     return (res.value ?? []).map(asComment);
   }
 
-  async updateComment(id: number, patch: { content: string; isHtml?: boolean }): Promise<void> {
-    const body: Record<string, unknown> = { Content: patch.content };
+  async updateComment(
+    id: number,
+    patch: {
+      content?: string;
+      isHtml?: boolean;
+      fromName?: string | null;
+      fromEmail?: string | null;
+      sentAt?: string;
+      source?: 'mail' | 'teams' | 'other';
+    },
+  ): Promise<void> {
+    const body: Record<string, unknown> = {};
+    if (patch.content !== undefined) {
+      // HTML コメント (sidecar メタデータ: 列幅 / ヘッダ行 / 空段落) を SP の
+      // HTML サニタイザに削除されない形式 (`[[NEM:base64]]`) にエンコード。
+      // 読み出し時は decodeSpEntities が逆変換する。
+      body.Content = patch.isHtml ? patch.content : encodeSpContent(patch.content);
+    }
     if (patch.isHtml !== undefined) body.IsHtml = patch.isHtml;
+    if (patch.fromName !== undefined) body.FromName = patch.fromName || null;
+    if (patch.fromEmail !== undefined) body.FromEmail = patch.fromEmail || null;
+    if (patch.sentAt !== undefined) body.SentAt = patch.sentAt;
+    if (patch.source !== undefined) body.Source = patch.source;
+    if (Object.keys(body).length === 0) return;
     await this.tx.update(this.listPath(this.cfg.listComments), id, body);
   }
 
@@ -587,12 +814,13 @@ export class SpRepository implements Repository {
       Type: input.type,
       FromEmail: input.fromEmail ?? null,
       FromName: input.fromName ?? null,
-      Content: input.content,
+      Content: input.isHtml ? input.content : encodeSpContent(input.content),
       IsHtml: input.isHtml,
       SentAt: input.sentAt ?? new Date().toISOString(),
       SourceEmailId: input.sourceEmailId ?? null,
       HasAttachments: input.hasAttachments ?? false,
       InternetMessageId: input.internetMessageId ?? null,
+      Source: input.source ?? null,
     };
     const created = await this.tx.req<SpListItem>(`${this.listPath(this.cfg.listComments)}/items`, {
       method: 'POST',
@@ -625,6 +853,10 @@ export class SpRepository implements Repository {
     }
   }
 
+  async deleteInboxMail(id: number): Promise<void> {
+    await this.tx.remove(this.listPath(this.cfg.listInbox), id);
+  }
+
   async markInboxProcessed(id: number, patch: { ticketId: number; result: InboxState }): Promise<void> {
     await this.tx.update(this.listPath(this.cfg.listInbox), id, {
       IsProcessed: true,
@@ -643,11 +875,17 @@ export class SpRepository implements Repository {
     for (const m of unprocessed) {
       try {
         const tid = parseTicketTag(m.subject);
+        const isForms = !!m.conversationId && m.conversationId.startsWith('forms-');
         if (tid == null) {
-          // Visible diagnostic — DevTools console shows exactly why a
-          // reply didn't auto-link. Most common cause is the PA mapping
-          // not populating Subject, or an unrecognized tag format.
-          console.warn(`[spira/sync] inbox #${m.id}: no ticket tag in subject "${m.subject?.slice(0, 80)}"`);
+          if (isForms) {
+            // Forms 経由はタグ無しが正常。受信箱に残して管理者の手動
+            // 起票判断を待つ。
+            console.warn(`[spira/sync] inbox #${m.id}: Forms entry kept for manual triage`);
+          } else {
+            // メールでタグ無し = 無関係メール。物理削除して受信箱を綺麗に。
+            console.warn(`[spira/sync] inbox #${m.id}: no tag mail → delete`);
+            await this.deleteInboxMail(m.id);
+          }
           continue;
         }
         const ticket = byId.get(tid);
@@ -655,19 +893,15 @@ export class SpRepository implements Repository {
           console.warn(`[spira/sync] inbox #${m.id}: tag parsed as #${tid} but ticket ${ticket ? 'is deleted' : 'not found'}`);
           continue;
         }
-        // Idempotency: if a previous syncInbox pass added the comment
-        // but then crashed before markInboxProcessed could fire (or PA
-        // delivered the same mail in two inbox rows), don't re-append
-        // the same body. Match by internetMessageId — that's globally
-        // unique per email and is the only signal that survives the
-        // server-side encoding round-trip.
+        // Idempotency: PA が同じメールを 2 回投入したり、前回 sync が
+        // 途中で落ちた場合の保険。internetMessageId 一致で重複検知。
         if (m.internetMessageId) {
           const existing = await this.listComments(tid);
           const dup = existing.some(
             (c) => c.type === 'received' && c.internetMessageId === m.internetMessageId,
           );
           if (dup) {
-            await this.markInboxProcessed(m.id, { ticketId: tid, result: 'auto-linked' });
+            await this.deleteInboxMail(m.id);
             autoLinked++;
             continue;
           }
@@ -676,13 +910,13 @@ export class SpRepository implements Repository {
           ticketId: tid, type: 'received',
           fromEmail: m.fromEmail, fromName: m.fromName,
           content: m.bodyHtml || m.bodyText, isHtml: !!m.bodyHtml,
-          // Sender's send time — falls back to receivedAt for legacy rows
-          // imported before the SentAt column existed.
           sentAt: m.sentAt ?? m.receivedAt, sourceEmailId: m.id,
           hasAttachments: m.hasAttachments,
           internetMessageId: m.internetMessageId,
+          source: 'mail',
         });
-        await this.markInboxProcessed(m.id, { ticketId: tid, result: 'auto-linked' });
+        // auto-link 完了したら受信箱から物理削除
+        await this.deleteInboxMail(m.id);
         autoLinked++;
       } catch (e) {
         errors.push(`#${m.id}: ${(e as Error).message}`);
@@ -719,6 +953,90 @@ export class SpRepository implements Repository {
     return { count: inputs.length };
   }
 
+  // ---- Teams 連携キュー
+
+  /** TeamsPostRequests に 1 行 INSERT する。PA フロー 2 が SP トリガーで
+   *  拾い、Teams にメッセージを投稿 → Tickets リストへ DeepLink を書き
+   *  戻し → この行を削除する流れ。
+   *  ChannelId / TeamId は Spira 側で SpiraSettings から解決して埋め込む
+   *  ので、PA は行から直接取り出すだけで OK。 */
+  async createTeamsPostRequest(params: {
+    ticketId: number;
+    threadType: 'internal' | 'user';
+  }): Promise<{ id: number }> {
+    // 起票時点でチャネル設定を解決。未設定でも行は作る (PA 側で空文字で
+    // 失敗 → エラー通知という流れに乗せる方がデバッグしやすい)。
+    const settingKey = params.threadType === 'internal'
+      ? 'teams-channel:internal'
+      : 'teams-channel:external';
+    let channelId = '';
+    let teamId = '';
+    try {
+      const raw = await this.getSetting(settingKey);
+      if (raw) {
+        const cfg = JSON.parse(raw) as { channelId?: string; teamId?: string };
+        channelId = cfg.channelId ?? '';
+        teamId = cfg.teamId ?? '';
+      }
+    } catch { /* fall through with empty ids */ }
+
+    const body: Record<string, unknown> = {
+      Title: `teams-post-${params.ticketId}-${params.threadType}-${Date.now()}`,
+      TicketId: params.ticketId,
+      ThreadType: params.threadType,
+      ChannelId: channelId,
+      TeamId: teamId,
+      RequestedAt: new Date().toISOString(),
+      Status: 'Pending',
+    };
+    const created = await this.tx.req<SpListItem>(
+      `${this.listPath(this.cfg.listTeamsPostRequests)}/items`,
+      { method: 'POST', body: JSON.stringify(body) },
+    );
+    return { id: created.Id };
+  }
+
+  // ---- 設定 (Key/Value 共通設定)
+
+  /** SpiraSettings リストから SettingKey 一致のアイテムを 1 件取得。
+   *  見つからなければ null。 */
+  async getSetting(key: string): Promise<string | null> {
+    const url =
+      `${this.listPath(this.cfg.listSettings)}/items?$select=Id,SettingKey,SettingValue` +
+      `&$filter=SettingKey eq '${encodeURIComponent(key)}'&$top=1`;
+    const res = await this.tx.req<ListItemsResp<{ Id: number; SettingKey: string; SettingValue: string }>>(url);
+    const row = res.value?.[0];
+    return row?.SettingValue ?? null;
+  }
+
+  /** SpiraSettings に upsert (キーが既にあれば更新、無ければ作成)。
+   *  value=null で削除。 */
+  async setSetting(key: string, value: string | null): Promise<void> {
+    const url =
+      `${this.listPath(this.cfg.listSettings)}/items?$select=Id&` +
+      `$filter=SettingKey eq '${encodeURIComponent(key)}'&$top=1`;
+    const res = await this.tx.req<ListItemsResp<{ Id: number }>>(url);
+    const existing = res.value?.[0];
+    if (value == null) {
+      if (existing) await this.tx.remove(this.listPath(this.cfg.listSettings), existing.Id);
+      return;
+    }
+    if (existing) {
+      await this.tx.update(this.listPath(this.cfg.listSettings), existing.Id, {
+        SettingValue: value,
+      });
+    } else {
+      await this.tx.req(`${this.listPath(this.cfg.listSettings)}/items`, {
+        method: 'POST',
+        body: JSON.stringify({
+          Title: key,           // Title も Key と同じにして可視性を上げる
+          SettingKey: key,
+          SettingValue: value,
+        }),
+      });
+    }
+  }
+
   // ---- users
 
   async listSiteUsers(): Promise<SiteUser[]> {
@@ -729,12 +1047,36 @@ export class SpRepository implements Repository {
       .filter(u => u.Email)
       .map(u => ({ id: u.Id, email: u.Email, displayName: u.Title }));
   }
+
+  async getCurrentUser(): Promise<SiteUser | null> {
+    try {
+      const res = await this.tx.req<{ Id: number; Title: string; Email: string; LoginName?: string }>(
+        '/_api/web/currentuser?$select=Id,Title,Email,LoginName',
+      );
+      const email = res.Email || (res.LoginName ?? '').replace(/^.*\|/, '');
+      return { id: res.Id, email, displayName: res.Title || email };
+    } catch { return null; }
+  }
 }
 
 // ---------------------------------------------------------------- field specs
 
 type FieldType = 'Text' | 'Note' | 'NoteRich' | 'Number' | 'DateTime' | 'Boolean' | 'Choice';
 interface FieldSpec { name: string; type: FieldType; choices?: string[] }
+
+/** FieldSpec の type を SP の TypeAsString (REST `Fields` の値) にマップ。
+ *  schema migration の比較に使用。 */
+function spFieldTypeString(t: FieldType): string {
+  switch (t) {
+    case 'Text': return 'Text';
+    case 'Note': return 'Note';
+    case 'NoteRich': return 'Note';      // Note + RichText フラグだが TypeAsString は同じ
+    case 'Number': return 'Number';
+    case 'DateTime': return 'DateTime';
+    case 'Boolean': return 'Boolean';
+    case 'Choice': return 'Choice';
+  }
+}
 
 function toFieldSchema(f: FieldSpec): unknown {
   // SP REST `/_api/web/lists/.../fields` POST requires odata=verbose payload
@@ -765,6 +1107,8 @@ function ticketFieldSpecs(): FieldSpec[] {
     { name: 'Priority', type: 'Choice', choices: ['High', 'Medium', 'Low'] },
     { name: 'AssigneeEmail', type: 'Text' },
     { name: 'AssigneeName', type: 'Text' },
+    { name: 'Department', type: 'Text' },
+    { name: 'InquiryCategory', type: 'Text' },
     { name: 'ReporterEmail', type: 'Text' },
     { name: 'ReporterName', type: 'Text' },
     { name: 'DueDate', type: 'DateTime' },
@@ -772,6 +1116,16 @@ function ticketFieldSpecs(): FieldSpec[] {
     { name: 'InitialConversationId', type: 'Text' },
     { name: 'IsDeleted', type: 'Boolean' },
     { name: 'DeletedAt', type: 'DateTime' },
+    // Teams 連携 (Forms → Spira → Teams 運用案)
+    // DeepLink は Teams URL が 255 文字を超える場合があるので Note 型。
+    // ChannelId / ThreadId は短いので Text で十分。
+    { name: 'CustomerTeam', type: 'Text' },
+    { name: 'InternalThreadId', type: 'Text' },
+    { name: 'InternalChannelId', type: 'Text' },
+    { name: 'InternalDeepLink', type: 'Note' },
+    { name: 'UserThreadId', type: 'Text' },
+    { name: 'UserChannelId', type: 'Text' },
+    { name: 'UserDeepLink', type: 'Note' },
   ];
 }
 
@@ -787,6 +1141,10 @@ function commentFieldSpecs(): FieldSpec[] {
     { name: 'SourceEmailId', type: 'Number' },
     { name: 'HasAttachments', type: 'Boolean' },
     { name: 'InternetMessageId', type: 'Text' },
+    // Origin of this comment ('mail' / 'teams' / 'other'). Drives the
+    // card icon. Optional — legacy rows without this field default to
+    // 'mail' in the renderer.
+    { name: 'Source', type: 'Text' },
   ];
 }
 
@@ -808,6 +1166,34 @@ function inboxFieldSpecs(): FieldSpec[] {
     { name: 'ProcessResult', type: 'Choice', choices: ['auto-linked', 'manual-linked', 'created'] },
     { name: 'IsHidden', type: 'Boolean' },
     { name: 'InternetMessageId', type: 'Text' },
+  ];
+}
+
+/** Spira の共通設定 (Key/Value)。
+ *  例: Key="teams-channel:internal", Value=URL JSON
+ *  PA フロー側からも参照可能 (Get item by Key)。 */
+function settingsFieldSpecs(): FieldSpec[] {
+  return [
+    // Title 列を Key として流用 (SP の Title は必須・一意性を取りやすい)
+    { name: 'SettingKey', type: 'Text' },
+    { name: 'SettingValue', type: 'Note' },
+  ];
+}
+
+/** Spira → Teams スレッド起票キュー。SP の「項目が作成されたとき」
+ *  トリガーで PA フロー 2 が拾い、Teams にメッセージを投稿後、
+ *  Tickets リストに DeepLink を書き戻して、この行を削除する。
+ *  ChannelId / TeamId は SpiraSettings から起票時に解決して埋め込む
+ *  ので、PA 側で SpiraSettings を再取得する必要がない。 */
+function teamsPostRequestFieldSpecs(): FieldSpec[] {
+  return [
+    { name: 'TicketId', type: 'Number' },
+    { name: 'ThreadType', type: 'Choice', choices: ['internal', 'user'] },
+    { name: 'ChannelId', type: 'Text' },
+    { name: 'TeamId', type: 'Text' },
+    { name: 'RequestedAt', type: 'DateTime' },
+    { name: 'Status', type: 'Choice', choices: ['Pending', 'Completed', 'Failed'] },
+    { name: 'ErrorMessage', type: 'Note' },
   ];
 }
 

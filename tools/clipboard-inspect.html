@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>Clipboard Inspector</title>
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --panel: #ffffff;
+    --border: #d0d4dc;
+    --text: #1f2330;
+    --muted: #5f6678;
+    --accent: #2563eb;
+    --accent-soft: #eef2ff;
+    --code-bg: #0f172a;
+    --code-text: #e2e8f0;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 24px;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  h1 {
+    font-size: 20px;
+    margin: 0 0 4px;
+  }
+  .lead {
+    color: var(--muted);
+    margin: 0 0 20px;
+  }
+  .drop {
+    border: 2px dashed var(--border);
+    border-radius: 12px;
+    background: var(--panel);
+    min-height: 140px;
+    padding: 18px;
+    transition: border-color 0.15s, background 0.15s;
+    cursor: text;
+  }
+  .drop:focus {
+    outline: none;
+    border-color: var(--accent);
+    background: var(--accent-soft);
+  }
+  .drop:empty::before {
+    content: "ここに Teams からコピーしたチャットを貼り付け (Cmd+V)";
+    color: var(--muted);
+  }
+  .controls {
+    display: flex;
+    gap: 8px;
+    margin: 12px 0 20px;
+    flex-wrap: wrap;
+  }
+  button {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 6px 14px;
+    font: inherit;
+    cursor: pointer;
+    transition: background 0.1s;
+  }
+  button:hover { background: var(--accent-soft); }
+  button.primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: white;
+  }
+  button.primary:hover { background: #1d4ed8; }
+  .summary {
+    color: var(--muted);
+    font-size: 13px;
+    margin-bottom: 16px;
+  }
+  .format {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    margin-bottom: 16px;
+    overflow: hidden;
+  }
+  .format-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 16px;
+    background: #fafbfc;
+    border-bottom: 1px solid var(--border);
+    font-weight: 600;
+  }
+  .format-head .meta {
+    font-weight: 400;
+    color: var(--muted);
+    font-size: 12px;
+  }
+  .format-body {
+    padding: 0;
+  }
+  .format-tabs {
+    display: flex;
+    border-bottom: 1px solid var(--border);
+    background: #fafbfc;
+  }
+  .format-tabs button {
+    border: none;
+    border-radius: 0;
+    background: transparent;
+    padding: 8px 14px;
+    color: var(--muted);
+    border-bottom: 2px solid transparent;
+  }
+  .format-tabs button.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+    background: white;
+  }
+  .pane { display: none; }
+  .pane.active { display: block; }
+  pre.raw {
+    margin: 0;
+    padding: 14px 16px;
+    background: var(--code-bg);
+    color: var(--code-text);
+    font: 12px/1.5 ui-monospace, "SF Mono", Menlo, monospace;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 480px;
+    overflow: auto;
+  }
+  .rendered {
+    padding: 14px 16px;
+    max-height: 480px;
+    overflow: auto;
+  }
+  .rendered img { max-width: 100%; }
+  .empty {
+    padding: 24px;
+    text-align: center;
+    color: var(--muted);
+  }
+  .hint {
+    background: #fff7ed;
+    border: 1px solid #fdba74;
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin-bottom: 20px;
+    font-size: 13px;
+  }
+  .hint code {
+    background: rgba(0,0,0,0.06);
+    padding: 1px 5px;
+    border-radius: 4px;
+  }
+</style>
+</head>
+<body>
+
+<h1>Clipboard Inspector</h1>
+<p class="lead">クリップボードに入っている全フォーマット (<code>text/plain</code>, <code>text/html</code>, <code>text/rtf</code>, …) を表示します。Teams のコピー挙動の検査用。</p>
+
+<div class="hint">
+  <strong>使い方:</strong> Teams デスクトップアプリ等で複数メッセージを範囲選択 → コピー → このページの下のボックスをクリック → <code>Cmd+V</code> で貼り付け。
+</div>
+
+<div id="drop" class="drop" contenteditable="true" tabindex="0"></div>
+
+<div class="controls">
+  <button id="clear">クリア</button>
+  <button id="copy-summary">サマリーをコピー</button>
+  <button class="primary" id="poll-clipboard">Clipboard API で読む</button>
+</div>
+
+<div id="summary" class="summary"></div>
+<div id="formats"></div>
+
+<script>
+  const drop = document.getElementById('drop');
+  const formatsEl = document.getElementById('formats');
+  const summaryEl = document.getElementById('summary');
+
+  function render(entries) {
+    formatsEl.innerHTML = '';
+    if (!entries.length) {
+      formatsEl.innerHTML = '<div class="empty">(クリップボードに何もありません)</div>';
+      summaryEl.textContent = '';
+      return;
+    }
+    const total = entries.reduce((s, e) => s + e.data.length, 0);
+    summaryEl.textContent = `${entries.length} 形式 / 合計 ${total.toLocaleString()} 文字`;
+
+    for (const { type, data } of entries) {
+      const isHtml = type === 'text/html';
+      const card = document.createElement('div');
+      card.className = 'format';
+      const escapedData = data.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+      card.innerHTML = `
+        <div class="format-head">
+          <span>${type}</span>
+          <span class="meta">${data.length.toLocaleString()} chars</span>
+        </div>
+        ${isHtml ? `
+          <div class="format-tabs">
+            <button class="active" data-pane="raw">Raw</button>
+            <button data-pane="rendered">Rendered</button>
+          </div>
+          <div class="pane active" data-pane="raw"><pre class="raw">${escapedData}</pre></div>
+          <div class="pane" data-pane="rendered"><div class="rendered">${data}</div></div>
+        ` : `
+          <pre class="raw">${escapedData}</pre>
+        `}
+      `;
+      formatsEl.appendChild(card);
+
+      if (isHtml) {
+        card.querySelectorAll('.format-tabs button').forEach(b => {
+          b.addEventListener('click', () => {
+            card.querySelectorAll('.format-tabs button').forEach(x => x.classList.toggle('active', x === b));
+            card.querySelectorAll('.pane').forEach(p => p.classList.toggle('active', p.dataset.pane === b.dataset.pane));
+          });
+        });
+      }
+    }
+  }
+
+  drop.addEventListener('paste', (e) => {
+    e.preventDefault();
+    const cd = e.clipboardData;
+    const entries = [];
+    for (const t of cd.types) {
+      entries.push({ type: t, data: cd.getData(t) });
+    }
+    render(entries);
+    drop.innerHTML = '';
+    drop.blur();
+  });
+
+  document.getElementById('clear').addEventListener('click', () => {
+    drop.innerHTML = '';
+    render([]);
+  });
+
+  document.getElementById('copy-summary').addEventListener('click', async () => {
+    const lines = [];
+    formatsEl.querySelectorAll('.format').forEach(card => {
+      const head = card.querySelector('.format-head span:first-child').textContent;
+      const raw = card.querySelector('pre.raw').textContent;
+      lines.push(`=== ${head} ===`);
+      lines.push(raw);
+      lines.push('');
+    });
+    try {
+      await navigator.clipboard.writeText(lines.join('\n'));
+      alert('サマリーをクリップボードにコピーしました');
+    } catch (err) {
+      alert('コピー失敗: ' + err.message);
+    }
+  });
+
+  document.getElementById('poll-clipboard').addEventListener('click', async () => {
+    try {
+      const items = await navigator.clipboard.read();
+      const entries = [];
+      for (const it of items) {
+        for (const t of it.types) {
+          const blob = await it.getType(t);
+          const data = await blob.text();
+          entries.push({ type: t, data });
+        }
+      }
+      render(entries);
+    } catch (err) {
+      alert('Clipboard API 失敗: ' + err.message + '\n\nブラウザがクリップボード読み取り権限を要求します。許可してから再度押してください。\nまたは、貼り付けボックスに Cmd+V で貼り付ける方が確実です。');
+    }
+  });
+
+  render([]);
+</script>
+</body>
+</html>

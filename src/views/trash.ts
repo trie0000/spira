@@ -1,4 +1,5 @@
 import { el, fmtDate } from '../utils/dom';
+import { icon } from '../icons';
 import { getRepo } from '../api/repo';
 import { setState, getState } from '../state';
 import { confirmModal } from '../components/modal';
@@ -85,7 +86,9 @@ function renderRow(t: Ticket): HTMLElement {
       }, ['復元']),
       ' ',
       el('button', {
-        class: 'spira-btn spira-btn--danger spira-btn--sm',
+        class: 'spira-btn spira-btn--sm spira-btn--icon-trash',
+        title: '物理削除 (完全に削除)',
+        'aria-label': '物理削除',
         onclick: () => {
           confirmModal(getRoot(), {
             title: '物理削除',
@@ -103,7 +106,7 @@ function renderRow(t: Ticket): HTMLElement {
             },
           });
         },
-      }, ['物理削除']),
+      }, [el('span', { html: icon('trash'), style: 'display:inline-flex;width:14px;height:14px' })]),
     ]),
   ]);
 }
