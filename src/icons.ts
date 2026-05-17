@@ -36,6 +36,10 @@ export const ICONS: Record<string, string> = {
   chat:        SVG(`<path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>`),
   // その他ソース用: 吹き出し + 三点 (electronic / notes)
   bookmark:    SVG(`<path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>`),
+  // AI / sparkle 系 — チャット起動ボタン & AI トーン用
+  sparkles:    SVG(`<path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/><circle cx="12" cy="12" r="2.5"/>`),
+  send:        SVG(`<path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4z"/>`),
+  stop:        SVG(`<rect x="6" y="6" width="12" height="12" rx="1"/>`),
 };
 
 export function icon(name: keyof typeof ICONS | string, className = ''): string {

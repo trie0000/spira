@@ -442,24 +442,68 @@ export function markdownToHtml(md: string): string {
       }
       continue;
     }
-    // ul
-    if (/^[-*]\s+/.test(line)) {
-      const items: string[] = [];
-      while (i < lines.length && /^[-*]\s+/.test(lines[i] ?? '')) {
-        items.push(lines[i]!.replace(/^[-*]\s+/, ''));
+    // ul / ol — ネスト対応。インデント (スペース 2 or 4、またはタブ 1) で
+    // 子リストになる。`- foo` / `* foo` / `1. foo` を統一的に扱い、
+    // インデント幅から階層を求め、適切に <ul>/<ol> をネストさせる。
+    // CommonMark の厳密仕様ではなく、AI が出力しがちな形式を吸収する程度の
+    // 緩いネスト判定。
+    const bulletRe = /^([ \t]*)([-*]|\d+\.)\s+(.*)$/;
+    if (bulletRe.test(line)) {
+      // インデント幅 → 階層 (0, 1, 2…) に正規化
+      const indentOf = (l: string): number => {
+        const m = l.match(/^([ \t]*)/);
+        const ws = m ? m[1]! : '';
+        // タブ 1 = スペース 4 として、2 スペース毎に 1 階層
+        const cols = ws.replace(/\t/g, '    ').length;
+        return Math.floor(cols / 2);
+      };
+      interface Item { level: number; ordered: boolean; text: string }
+      const items: Item[] = [];
+      while (i < lines.length) {
+        const cur = lines[i] ?? '';
+        const m = bulletRe.exec(cur);
+        if (!m) break;
+        const marker = m[2]!;
+        items.push({
+          level: indentOf(cur),
+          ordered: /^\d+\./.test(marker),
+          text: m[3] ?? '',
+        });
         i++;
       }
-      out.push('<ul>' + items.map((it) => `<li>${inlineMdToHtml(it)}</li>`).join('') + '</ul>');
-      continue;
-    }
-    // ol
-    if (/^\d+\.\s+/.test(line)) {
-      const items: string[] = [];
-      while (i < lines.length && /^\d+\.\s+/.test(lines[i] ?? '')) {
-        items.push(lines[i]!.replace(/^\d+\.\s+/, ''));
-        i++;
+      // 最も浅い level を 0 に正規化
+      const minLevel = Math.min(...items.map(it => it.level));
+      for (const it of items) it.level -= minLevel;
+      // スタックベースで <ul>/<ol> をネスト構築
+      const html: string[] = [];
+      const stack: Array<'ul' | 'ol'> = [];
+      const openList = (kind: 'ul' | 'ol'): void => { html.push(`<${kind}>`); stack.push(kind); };
+      const closeList = (): void => { const k = stack.pop(); if (k) html.push(`</${k}>`); };
+      let lastLevel = -1;
+      for (const it of items) {
+        const desiredKind: 'ul' | 'ol' = it.ordered ? 'ol' : 'ul';
+        if (it.level > lastLevel) {
+          for (let l = lastLevel + 1; l <= it.level; l++) openList(desiredKind);
+        } else if (it.level < lastLevel) {
+          // 同階層に戻るときは、その階層分まで </li></ul> で閉じる。最後の
+          // <li> を閉じ切ってから次の <li> を開けるため、stack 深さで管理。
+          while (stack.length - 1 > it.level) {
+            html.push('</li>');
+            closeList();
+          }
+          html.push('</li>');
+        } else {
+          html.push('</li>');
+        }
+        html.push(`<li>${inlineMdToHtml(it.text)}`);
+        lastLevel = it.level;
       }
-      out.push('<ol>' + items.map((it) => `<li>${inlineMdToHtml(it)}</li>`).join('') + '</ol>');
+      // 残った <li> + リストを全部閉じる
+      while (stack.length > 0) {
+        html.push('</li>');
+        closeList();
+      }
+      out.push(html.join(''));
       continue;
     }
     // paragraph

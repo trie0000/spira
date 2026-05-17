@@ -1974,3 +1974,320 @@
   border-radius: var(--r-1);
   flex-shrink: 0;
 }
+
+/* ====================================================================
+ * AI チャットペイン (右ペイン) — shapion `#shapion-ai-panel` 互換レイアウト
+ * チケット詳細の split-pane 内に並ぶ第 3 のペインとして flex で並置。
+ * `!important` を多用してるのは他のグローバル CSS リセット (.spira-root *
+ * の全 margin:0 など) の影響を排除するため。 */
+
+#spira-root .spira-ai-pane {
+  /* 既定 360px。リサイザがインライン style.width で動的に上書きするので
+     CSS 側は !important を付けない (付けるとドラッグが効かなくなる)。 */
+  width: 360px;
+  flex: 0 0 360px;
+  flex-shrink: 0 !important;
+  background: var(--paper-2) !important;
+  border-left: 1px solid var(--paper-3) !important;
+  display: flex !important;
+  flex-direction: column !important;
+  overflow: hidden !important;
+  font-family: inherit !important;
+  min-width: 0 !important;
+}
+
+/* ── Header ───────────────────────────────────────────────── */
+#spira-root .spira-ai-hd {
+  display: flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  padding: 12px 14px !important;
+  border-bottom: 1px solid var(--paper-3) !important;
+  flex-shrink: 0 !important;
+  min-height: 44px !important;
+  box-sizing: border-box !important;
+}
+#spira-root .spira-ai-title {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  font-size: var(--fs-md) !important;
+  font-weight: 600 !important;
+  color: var(--ink) !important;
+}
+#spira-root .spira-ai-iconbtn {
+  border: none !important;
+  background: transparent !important;
+  cursor: pointer !important;
+  color: var(--ink) !important;
+  padding: 4px !important;
+  border-radius: 4px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  opacity: 0.5 !important;
+  transition: background 0.1s, opacity 0.1s !important;
+  line-height: 0 !important;
+}
+#spira-root .spira-ai-iconbtn:hover {
+  background: rgba(55, 53, 47, 0.08) !important;
+  opacity: 1 !important;
+}
+
+/* ── History dropdown row ─────────────────────────────────── */
+#spira-root .spira-ai-hist-row {
+  padding: 8px 14px 10px !important;
+  border-bottom: 1px solid var(--paper-3) !important;
+  flex-shrink: 0 !important;
+  box-sizing: border-box !important;
+}
+#spira-root .spira-ai-hist {
+  width: 100% !important;
+  box-sizing: border-box !important;
+  border: 1px solid var(--paper-3) !important;
+  border-radius: var(--r-2) !important;
+  background: var(--paper) !important;
+  padding: 7px 12px !important;
+  font-size: var(--fs-sm) !important;
+  font-family: inherit !important;
+  color: var(--ink) !important;
+  cursor: pointer !important;
+  outline: none !important;
+}
+#spira-root .spira-ai-hist:hover { border-color: var(--ink-4) !important; }
+#spira-root .spira-ai-hist:focus { border-color: var(--accent) !important; }
+
+/* ── Messages list ────────────────────────────────────────── */
+#spira-root .spira-ai-messages {
+  flex: 1 1 auto !important;
+  overflow-y: auto !important;
+  padding: 14px 14px !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 12px !important;
+  min-height: 0 !important;
+  box-sizing: border-box !important;
+}
+#spira-root .spira-ai-empty {
+  text-align: center !important;
+  color: var(--ink-3) !important;
+  padding: 24px 12px !important;
+  align-self: center !important;
+}
+#spira-root .spira-ai-empty-title {
+  font-size: var(--fs-md) !important;
+  font-weight: 500 !important;
+  margin-bottom: 6px !important;
+  color: var(--ink) !important;
+}
+#spira-root .spira-ai-empty-sub {
+  font-size: var(--fs-sm) !important;
+  line-height: 1.6 !important;
+}
+#spira-root .spira-ai-row {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 4px !important;
+  width: 100% !important;
+}
+#spira-root .spira-ai-label {
+  font-size: 10px !important;
+  color: var(--ink-3) !important;
+  font-weight: 500 !important;
+  letter-spacing: 0.02em !important;
+}
+#spira-root .spira-ai-msg {
+  display: block !important;
+  width: 100% !important;
+  padding: 10px 12px !important;
+  border-radius: var(--r-2) !important;
+  font-size: var(--fs-sm) !important;
+  line-height: 1.65 !important;
+  white-space: pre-wrap !important;
+  word-break: break-word !important;
+  box-sizing: border-box !important;
+}
+/* 全幅カード — shapion 同様、左右寄せはしない */
+#spira-root .spira-ai-user {
+  background: rgba(122, 138, 120, 0.10) !important;  /* accent-soft 弱め */
+  border: 1px solid rgba(122, 138, 120, 0.2) !important;
+  color: var(--ink) !important;
+}
+#spira-root .spira-ai-assistant {
+  background: var(--paper) !important;
+  border: 1px solid var(--paper-3) !important;
+  color: var(--ink) !important;
+}
+#spira-root .spira-ai-msg code {
+  background: rgba(135, 131, 120, 0.2) !important;
+  padding: 1px 4px !important;
+  border-radius: 3px !important;
+  font-family: ui-monospace, Menlo, Consolas, monospace !important;
+  font-size: 0.9em !important;
+}
+#spira-root .spira-ai-codeblock {
+  background: var(--paper-2) !important;
+  border: 1px solid var(--paper-3) !important;
+  border-radius: var(--r-2) !important;
+  padding: 8px 10px !important;
+  margin: 6px 0 !important;
+  font-family: ui-monospace, Menlo, Consolas, monospace !important;
+  font-size: 12px !important;
+  line-height: 1.5 !important;
+  overflow-x: auto !important;
+  white-space: pre !important;
+  color: var(--ink) !important;
+}
+#spira-root .spira-ai-loading { opacity: 0.55 !important; font-style: italic !important; }
+
+/* ── Action buttons under AI msgs (📌 メモとして保存 / コピー) ── */
+#spira-root .spira-ai-actions {
+  display: flex !important;
+  gap: 6px !important;
+  flex-wrap: wrap !important;
+  margin-top: 6px !important;
+}
+#spira-root .spira-ai-action-btn {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 4px !important;
+  padding: 4px 10px !important;
+  background: var(--paper) !important;
+  border: 1px solid var(--line) !important;
+  border-radius: 12px !important;
+  font-size: var(--fs-xs) !important;
+  color: var(--ink-3) !important;
+  cursor: pointer !important;
+  font-family: inherit !important;
+  line-height: 1 !important;
+  height: 24px !important;
+  transition: background 0.1s, border-color 0.1s, color 0.1s !important;
+}
+#spira-root .spira-ai-action-btn:hover {
+  background: var(--accent-soft) !important;
+  border-color: var(--accent) !important;
+  color: var(--ink) !important;
+}
+
+/* ── Quick prompt chips ────────────────────────────────────── */
+#spira-root .spira-ai-chips {
+  display: flex !important;
+  gap: 6px !important;
+  padding: 10px 14px 0 !important;
+  flex-wrap: wrap !important;
+  flex-shrink: 0 !important;
+  box-sizing: border-box !important;
+}
+#spira-root .spira-ai-chip {
+  border: 1px solid var(--line) !important;
+  background: var(--paper) !important;
+  padding: 5px 12px !important;
+  border-radius: 14px !important;
+  cursor: pointer !important;
+  font-size: var(--fs-xs) !important;
+  color: var(--ink-3) !important;
+  font-family: inherit !important;
+  height: 26px !important;
+  line-height: 1 !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  transition: background 0.1s, border-color 0.1s, color 0.1s !important;
+}
+#spira-root .spira-ai-chip:hover {
+  background: var(--accent-soft) !important;
+  border-color: var(--accent) !important;
+  color: var(--ink) !important;
+}
+
+/* ── Input area ────────────────────────────────────────────── */
+#spira-root .spira-ai-inputarea {
+  padding: 10px 14px 14px !important;
+  border-top: 1px solid var(--paper-3) !important;
+  flex-shrink: 0 !important;
+  box-sizing: border-box !important;
+  background: var(--paper-2) !important;
+}
+#spira-root .spira-ai-model-pick {
+  display: block !important;
+  margin: 0 0 6px !important;
+  padding: 3px 8px !important;
+  font-size: 11px !important;
+  font-family: inherit !important;
+  background: transparent !important;
+  color: var(--ink-3) !important;
+  border: 1px solid var(--paper-3) !important;
+  border-radius: var(--r-2) !important;
+  outline: none !important;
+  cursor: pointer !important;
+  max-width: 220px !important;
+}
+#spira-root .spira-ai-model-pick:hover {
+  color: var(--ink) !important;
+  border-color: var(--ink-4) !important;
+}
+#spira-root .spira-ai-input-wrap {
+  position: relative !important;
+}
+#spira-root .spira-ai-input {
+  width: 100% !important;
+  min-height: 60px !important;
+  max-height: 220px !important;
+  padding: 10px 44px 10px 14px !important;
+  border: 1px solid var(--paper-3) !important;
+  border-radius: var(--r-2) !important;
+  font-size: var(--fs-sm) !important;
+  font-family: inherit !important;
+  resize: none !important;
+  outline: none !important;
+  color: var(--ink) !important;
+  background: var(--paper) !important;
+  line-height: 1.5 !important;
+  box-sizing: border-box !important;
+  overflow-y: auto !important;
+  margin: 0 !important;
+}
+#spira-root .spira-ai-input:focus {
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 1px var(--accent-soft) !important;
+}
+#spira-root .spira-ai-input::placeholder {
+  color: var(--ink-4) !important;
+}
+#spira-root .spira-ai-send {
+  position: absolute !important;
+  right: 8px !important;
+  bottom: 8px !important;
+  background: transparent !important;
+  color: var(--ink-3) !important;
+  border: none !important;
+  width: 28px !important;
+  height: 24px !important;
+  border-radius: var(--r-2) !important;
+  cursor: pointer !important;
+  padding: 0 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  opacity: 0.6 !important;
+  transition: background 0.1s, color 0.1s, opacity 0.1s !important;
+}
+#spira-root .spira-ai-send:hover {
+  background: var(--accent) !important;
+  color: #fff !important;
+  opacity: 1 !important;
+}
+#spira-root .spira-ai-send--stop {
+  background: var(--accent) !important;
+  color: #fff !important;
+  opacity: 1 !important;
+}
+#spira-root .spira-ai-send--stop:hover {
+  background: var(--accent-strong) !important;
+}
+
+/* ヘッダの AI ボタン: トグル状態を accent でハイライト */
+#spira-root .spira-btn--active {
+  background: var(--accent-soft) !important;
+  border-color: var(--accent) !important;
+  color: var(--accent-strong) !important;
+}

@@ -23,6 +23,7 @@ import { getDepartmentOptions, getInquiryCategoryOptions } from '../utils/option
 import { createDateTime } from '../components/datetime';
 import { parseTeamsPaste, resolveTeamsTimeToISO, normalizeForDedup, detectLeadingOrphan } from '../lib/teams-paste';
 import { parseEml, looksLikeEml } from '../lib/eml-parser';
+import { createAiChatPane, isAiPanelOpen, toggleAiPanel } from './aiChat';
 import type { Ticket, Comment } from '../types';
 
 // Module-level "next mount, scroll to this comment" request. Set by
@@ -595,7 +596,17 @@ function buildTicketActions(activeT: Ticket, latestReceived: Comment | undefined
     'プロパティ',
   ]);
 
-  return [copySubjectBtn, replyBtn, internalThreadBtn, userThreadBtn, propertiesBtn, deleteBtn];
+  // AI チャット トグル — チケット詳細画面のみで表示。右ペインの開閉切り替え。
+  const aiBtn = el('button', {
+    class: 'spira-btn spira-btn--ghost spira-btn--sm' + (isAiPanelOpen() ? ' spira-btn--active' : ''),
+    title: 'AI チャット (右ペイン) を開閉',
+    onclick: () => toggleAiPanel(),
+  }, [
+    el('span', { html: icon('sparkles'), style: 'display:inline-flex;width:14px;height:14px' }),
+    'AI',
+  ]);
+
+  return [aiBtn, copySubjectBtn, replyBtn, internalThreadBtn, userThreadBtn, propertiesBtn, deleteBtn];
 }
 
 /** 内部/ユーザースレッド起票・遷移ボタン。状態に応じて表記が変わる:
@@ -917,12 +928,85 @@ function renderSplitPanes(t: Ticket, comments: Comment[], lastSeen: number | nul
     }
   } catch { /* ignore */ }
 
+  // ── AI chat right-pane (slide-out) ──────────────────────────────────
+  // 右ペインに付随する形で、トグル可能な AI チャットペインを配置する。
+  // 内部メモ ↔ AI ペインの境にもリサイザを置いて、ユーザが幅を調整可能。
+  const splitChildren: HTMLElement[] = [leftPane, resizer, rightPane];
+  if (isAiPanelOpen()) {
+    const aiPane = createAiChatPane({ ticket: t, comments });
+    // 保存幅 (px) を復元。CSS の width:360px をインラインで上書きする。
+    try {
+      const savedAi = parseFloat(localStorage.getItem(AI_PANE_WIDTH_KEY) ?? '');
+      if (Number.isFinite(savedAi) && savedAi >= AI_PANE_MIN_PX && savedAi <= AI_PANE_MAX_PX) {
+        aiPane.style.width = `${savedAi}px`;
+        aiPane.style.flex = `0 0 ${savedAi}px`;
+      }
+    } catch { /* ignore */ }
+    const aiResizer = el('div', {
+      class: 'spira-split-resizer spira-ai-resizer',
+      'aria-label': 'AI ペインの幅を変更',
+      style: 'flex:0 0 6px;cursor:col-resize;background:var(--paper-3);transition:background 0.1s',
+    });
+    attachAiResizer(aiResizer, aiPane);
+    splitChildren.push(aiResizer, aiPane);
+  }
+
   const wrap = el('div', {
     class: 'spira-split',
     style: 'display:flex;flex:1;min-height:0;overflow:hidden;border-top:1px solid var(--line)',
-  }, [leftPane, resizer, rightPane]);
+  }, splitChildren);
 
   return wrap;
+}
+
+// AI ペイン幅 (px) の永続化キー + 制約。
+const AI_PANE_WIDTH_KEY = 'spira:ai-pane-w';
+const AI_PANE_MIN_PX = 280;
+const AI_PANE_MAX_PX = 720;
+const AI_PANE_DEFAULT_PX = 360;
+
+/** AI ペインの左端リサイザ。ドラッグで AI ペインの幅を増減し、その分は
+ *  内部メモペイン (right) が flex で吸収する。leftPane (受信スレッド) は
+ *  影響を受けない。ダブルクリックで既定の 360px に戻す。 */
+function attachAiResizer(resizer: HTMLElement, aiPane: HTMLElement): void {
+  resizer.addEventListener('mouseenter', () => { resizer.style.background = 'var(--accent-soft)'; });
+  resizer.addEventListener('mouseleave', () => { resizer.style.background = 'var(--paper-3)'; });
+  resizer.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = aiPane.getBoundingClientRect().width;
+    const prevCursor = document.body.style.cursor;
+    const prevSelect = document.body.style.userSelect;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    resizer.style.background = 'var(--accent)';
+
+    const onMove = (ev: MouseEvent) => {
+      // ドラッグ方向: 左に動かす (dx<0) と AI ペインが広がる
+      const dx = ev.clientX - startX;
+      let newW = startW - dx;
+      newW = Math.max(AI_PANE_MIN_PX, Math.min(newW, AI_PANE_MAX_PX));
+      aiPane.style.width = `${newW}px`;
+      aiPane.style.flex = `0 0 ${newW}px`;
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      document.body.style.cursor = prevCursor;
+      document.body.style.userSelect = prevSelect;
+      resizer.style.background = 'var(--paper-3)';
+      const w = aiPane.getBoundingClientRect().width;
+      try { localStorage.setItem(AI_PANE_WIDTH_KEY, String(Math.round(w))); } catch { /* ignore */ }
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  });
+  // ダブルクリックで既定値に戻す
+  resizer.addEventListener('dblclick', () => {
+    aiPane.style.width = `${AI_PANE_DEFAULT_PX}px`;
+    aiPane.style.flex = `0 0 ${AI_PANE_DEFAULT_PX}px`;
+    try { localStorage.setItem(AI_PANE_WIDTH_KEY, String(AI_PANE_DEFAULT_PX)); } catch { /* ignore */ }
+  });
 }
 
 function paneTitle(title: string, sub: string, action?: HTMLElement): HTMLElement {

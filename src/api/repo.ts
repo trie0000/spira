@@ -1,5 +1,38 @@
 // Repository abstraction — backed by SP REST in production, in-memory mock in dev.
-import type { Ticket, Comment, InboxMail, SiteUser, InboxState, TicketStatus, Priority } from '../types';
+import type {
+  Ticket, Comment, InboxMail, SiteUser, InboxState, TicketStatus, Priority,
+  AuditRecord, AuditAction, AuditTargetType,
+} from '../types';
+
+export interface AppendAuditInput {
+  action: AuditAction;
+  ticketId: number;
+  targetType: AuditTargetType;
+  targetId?: number;
+  /** 任意のメタデータ。書込時に JSON.stringify される。 */
+  details?: Record<string, unknown>;
+  /** 任意のオーバーライド。通常は audit.ts が currentUser から自動補完するが、
+   *  バックグラウンドで実行ユーザを明示したい場合に指定。 */
+  actorEmail?: string;
+  actorName?: string;
+  /** 保持期限の上書き (ISO)。指定しない場合は呼出元で AuditEmitter が
+   *  retention 設定から計算して埋める。 */
+  expiresAt?: string;
+}
+
+export interface ListAuditOpts {
+  /** 期間で絞り込み (ISO、両端含む)。 */
+  fromTime?: string;
+  toTime?: string;
+  /** 特定チケットの履歴のみ。0 なら ticket-less も含む。 */
+  ticketId?: number;
+  /** アクション種別フィルタ。 */
+  action?: AuditAction;
+  /** 実行ユーザのメール一致。 */
+  actorEmail?: string;
+  /** 最大取得件数。SP の上限負荷を避けるため既定 500。 */
+  limit?: number;
+}
 
 export interface CreateTicketInput {
   title: string;
@@ -140,6 +173,16 @@ export interface Repository {
   //   保存形式は文字列。複雑な値は呼び出し側で JSON.stringify する。
   getSetting(key: string): Promise<string | null>;
   setSetting(key: string, value: string | null): Promise<void>;
+
+  // 監査ログ (AuditLog リスト)
+  //   全 mutation メソッドは内部で appendAudit を best-effort で呼ぶ。
+  //   呼出側 (UI) から直接呼ぶ必要は無いが、AI 等のオプション操作で明示的に
+  //   記録したい場合は appendAudit を直接呼ぶ。
+  appendAudit(input: AppendAuditInput): Promise<void>;
+  listAudit(opts?: ListAuditOpts): Promise<AuditRecord[]>;
+  /** 期限切れ (ExpiresAt < now) のレコードを物理削除。クライアントが
+   *  起動時に呼んでベストエフォートで掃除する。 */
+  cleanupExpiredAudit(): Promise<{ deleted: number }>;
 }
 
 // ----- factory -----

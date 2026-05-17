@@ -1,9 +1,13 @@
 // In-memory mock repository — used in dev (off-SP host) or with ?mock=1.
-import type { Ticket, Comment, InboxMail, SiteUser, InboxState } from '../types';
-import type { Repository, CreateTicketInput, AddCommentInput, SyncResult, ResetResult } from './repo';
+import type { Ticket, Comment, InboxMail, SiteUser, InboxState, AuditRecord } from '../types';
+import type {
+  Repository, CreateTicketInput, AddCommentInput, SyncResult, ResetResult,
+  AppendAuditInput, ListAuditOpts,
+} from './repo';
 import { sampleInboxInputs, toMockInbox } from './sampleInbox';
 import { formatTicketTag, parseTicketTag } from '../utils/ticketTag';
 import { normalizeForSearch } from '../utils/search';
+import { emitAudit, ticketDiff } from '../lib/audit';
 
 interface DataStore {
   tickets: Ticket[];
@@ -11,14 +15,18 @@ interface DataStore {
   inbox: InboxMail[];
   users: SiteUser[];
   settings: Map<string, string>;
+  /** 監査ログ。Mock では in-memory 配列。 */
+  auditLog: AuditRecord[];
   nextTicketId: number;
   nextCommentId: number;
   nextInboxId: number;
+  nextAuditId: number;
 }
 
 const store: DataStore = {
   tickets: [], comments: [], inbox: [], users: [], settings: new Map(),
-  nextTicketId: 1, nextCommentId: 1, nextInboxId: 1,
+  auditLog: [],
+  nextTicketId: 1, nextCommentId: 1, nextInboxId: 1, nextAuditId: 1,
 };
 
 const now = () => new Date().toISOString();
@@ -258,11 +266,20 @@ export class MockRepository implements Repository {
       updatedAt: now(),
     };
     store.tickets.push(t);
+    void emitAudit({
+      action: 'ticket.create',
+      ticketId: t.id,
+      targetType: 'ticket',
+      targetId: t.id,
+      details: { title: t.title, status: t.status, priority: t.priority },
+    });
     return t;
   }
   async updateTicket(id: number, patch: Partial<Ticket>): Promise<Ticket | null> {
     const t = store.tickets.find(x => x.id === id);
     if (!t) return null;
+    // 差分計算のため before を浅コピー
+    const before: Ticket = { ...t };
     Object.assign(t, patch);
     // assigneeEmails が更新されたら、displayName を AD から引いて
     // assigneeNames も同期する。両方一括 patch しているケースは
@@ -274,6 +291,16 @@ export class MockRepository implements Repository {
         : undefined;
     }
     t.updatedAt = now();
+    const diff = ticketDiff(before, patch);
+    if (Object.keys(diff).length > 0) {
+      void emitAudit({
+        action: 'ticket.update',
+        ticketId: id,
+        targetType: 'ticket',
+        targetId: id,
+        details: { changes: diff },
+      });
+    }
     return t;
   }
   async softDeleteTicket(id: number): Promise<void> {
@@ -282,6 +309,7 @@ export class MockRepository implements Repository {
     t.isDeleted = true;
     t.deletedAt = now();
     t.updatedAt = now();
+    void emitAudit({ action: 'ticket.delete', ticketId: id, targetType: 'ticket', targetId: id });
   }
   async restoreTicket(id: number): Promise<void> {
     const t = store.tickets.find(x => x.id === id);
@@ -289,10 +317,19 @@ export class MockRepository implements Repository {
     t.isDeleted = false;
     t.deletedAt = undefined;
     t.updatedAt = now();
+    void emitAudit({ action: 'ticket.restore', ticketId: id, targetType: 'ticket', targetId: id });
   }
   async hardDeleteTicket(id: number): Promise<void> {
+    const removed = store.comments.filter(c => c.ticketId === id).length;
     store.tickets = store.tickets.filter(t => t.id !== id);
     store.comments = store.comments.filter(c => c.ticketId !== id);
+    void emitAudit({
+      action: 'ticket.purge',
+      ticketId: id,
+      targetType: 'ticket',
+      targetId: id,
+      details: { purgedComments: removed },
+    });
   }
   async emptyTrash(): Promise<void> {
     const ids = store.tickets.filter(t => t.isDeleted).map(t => t.id);
@@ -329,15 +366,34 @@ export class MockRepository implements Repository {
     c.updatedBy = store.users[0]?.displayName ?? c.updatedBy;
     const t = store.tickets.find(x => x.id === c.ticketId);
     if (t) t.updatedAt = nowIso;
+    // 受信スレッド (received) の手動編集のみ記録。メモ (note) の自動保存は
+    // Strategy C で記録対象外。
+    if (c.type === 'received') {
+      const fields = Object.keys(patch).filter(k => (patch as Record<string, unknown>)[k] !== undefined);
+      void emitAudit({
+        action: 'comment.update',
+        ticketId: c.ticketId,
+        targetType: 'comment',
+        targetId: id,
+        details: { fields },
+      });
+    }
   }
 
   async deleteComment(id: number): Promise<void> {
     const c = store.comments.find(x => x.id === id);
     if (!c) return;
     const ticketId = c.ticketId;
+    const wasNote = c.type === 'note';
     store.comments = store.comments.filter(x => x.id !== id);
     const t = store.tickets.find(x => x.id === ticketId);
     if (t) t.updatedAt = now();
+    void emitAudit({
+      action: wasNote ? 'note.delete' : 'comment.delete',
+      ticketId,
+      targetType: wasNote ? 'note' : 'comment',
+      targetId: id,
+    });
   }
 
   async addComment(input: AddCommentInput): Promise<Comment> {
@@ -365,6 +421,16 @@ export class MockRepository implements Repository {
     store.comments.push(c);
     const t = store.tickets.find(x => x.id === input.ticketId);
     if (t) t.updatedAt = nowIso;
+    void emitAudit({
+      action: input.type === 'note' ? 'note.create' : 'comment.add',
+      ticketId: input.ticketId,
+      targetType: input.type === 'note' ? 'note' : 'comment',
+      targetId: c.id,
+      details: {
+        source: input.source ?? null,
+        fromName: input.fromName ?? null,
+      },
+    });
     return c;
   }
 
@@ -376,6 +442,14 @@ export class MockRepository implements Repository {
   async hideInboxItems(ids: number[]): Promise<void> {
     for (const m of store.inbox) {
       if (ids.includes(m.id)) m.isHidden = true;
+    }
+    if (ids.length > 0) {
+      void emitAudit({
+        action: 'inbox.hide',
+        ticketId: 0,
+        targetType: 'inbox',
+        details: { ids, count: ids.length },
+      });
     }
   }
   async unhideInboxItems(ids: number[]): Promise<void> {
@@ -394,6 +468,15 @@ export class MockRepository implements Repository {
     m.ticketId = patch.ticketId;
     m.processedAt = now();
     m.processResult = patch.result;
+    if (patch.result !== 'auto-linked') {
+      void emitAudit({
+        action: patch.result === 'created' ? 'inbox.ingest' : 'inbox.link',
+        ticketId: patch.ticketId,
+        targetType: 'inbox',
+        targetId: id,
+        details: { result: patch.result },
+      });
+    }
   }
   async syncInbox(): Promise<SyncResult> {
     let autoLinked = 0;
@@ -530,7 +613,15 @@ export class MockRepository implements Repository {
       }
       t.updatedAt = now();
     }
-    return { id: Math.floor(Math.random() * 100000) };
+    const reqId = Math.floor(Math.random() * 100000);
+    void emitAudit({
+      action: 'teams.thread.create',
+      ticketId: params.ticketId,
+      targetType: 'teams',
+      targetId: reqId,
+      details: { threadType: params.threadType, channelId },
+    });
+    return { id: reqId };
   }
 
   // dev helper: simulate a tagged reply landing in the inbox
@@ -546,4 +637,57 @@ export class MockRepository implements Repository {
       isProcessed: false,
     });
   }
+
+  // ---- 監査ログ
+  //
+  // Mock では in-memory 配列に append。`appendAudit` は best-effort
+  // (例外吐かない)、`listAudit` は filter + Timestamp desc、
+  // `cleanupExpiredAudit` は ExpiresAt < now の行を物理削除。
+
+  async appendAudit(input: AppendAuditInput): Promise<void> {
+    try {
+      const me = store.users[0]; // mock の currentUser
+      const detailsStr = input.details ? JSON.stringify(input.details) : undefined;
+      const rec: AuditRecord = {
+        id: store.nextAuditId++,
+        timestamp: now(),
+        actorEmail: input.actorEmail ?? me?.email ?? '',
+        actorName: input.actorName ?? me?.displayName ?? '',
+        action: input.action,
+        ticketId: input.ticketId,
+        targetType: input.targetType,
+        targetId: input.targetId,
+        details: detailsStr,
+        expiresAt: input.expiresAt ?? mockDefaultExpiresAt(),
+      };
+      store.auditLog.push(rec);
+    } catch (e) {
+      console.warn('[mock/audit] append failed:', e);
+    }
+  }
+
+  async listAudit(opts: ListAuditOpts = {}): Promise<AuditRecord[]> {
+    let recs = store.auditLog.slice();
+    if (opts.fromTime) recs = recs.filter(r => r.timestamp >= opts.fromTime!);
+    if (opts.toTime)   recs = recs.filter(r => r.timestamp <= opts.toTime!);
+    if (opts.ticketId != null) recs = recs.filter(r => r.ticketId === opts.ticketId);
+    if (opts.action) recs = recs.filter(r => r.action === opts.action);
+    if (opts.actorEmail) recs = recs.filter(r => (r.actorEmail ?? '').toLowerCase() === opts.actorEmail!.toLowerCase());
+    recs.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+    const limit = Math.max(1, Math.min(opts.limit ?? 500, 2000));
+    return recs.slice(0, limit);
+  }
+
+  async cleanupExpiredAudit(): Promise<{ deleted: number }> {
+    const nowIso = new Date().toISOString();
+    const before = store.auditLog.length;
+    store.auditLog = store.auditLog.filter(r => r.expiresAt >= nowIso);
+    return { deleted: before - store.auditLog.length };
+  }
+}
+
+function mockDefaultExpiresAt(): string {
+  const d = new Date();
+  d.setDate(d.getDate() + 30);
+  return d.toISOString();
 }

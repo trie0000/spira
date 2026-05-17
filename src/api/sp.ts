@@ -1,10 +1,17 @@
 // SharePoint REST API repository — same-origin auth, MERGE/DELETE via X-HTTP-Method.
 // All endpoints are relative to siteUrl.
-import type { Ticket, Comment, InboxMail, SiteUser, InboxState, TicketStatus, Priority, CommentType } from '../types';
-import type { Repository, CreateTicketInput, AddCommentInput, SyncResult, ResetResult } from './repo';
+import type {
+  Ticket, Comment, InboxMail, SiteUser, InboxState, TicketStatus, Priority, CommentType,
+  AuditRecord,
+} from '../types';
+import type {
+  Repository, CreateTicketInput, AddCommentInput, SyncResult, ResetResult,
+  AppendAuditInput, ListAuditOpts,
+} from './repo';
 import { sampleInboxInputs } from './sampleInbox';
 import { parseTicketTag } from '../utils/ticketTag';
 import { normalizeForSearch } from '../utils/search';
+import { emitAudit, ticketDiff } from '../lib/audit';
 
 export interface SpConfig {
   siteUrl: string;        // absolute, e.g. https://contoso.sharepoint.com/sites/spira
@@ -13,6 +20,9 @@ export interface SpConfig {
   listInbox: string;
   listTeamsPostRequests: string;
   listSettings: string;
+  /** 監査ログ。チケット属性変更・受信スレッド追加・メモ追加/削除 等を
+   *  追記する。retention 設定 (default 30 日) で期限切れは自動削除。 */
+  listAuditLog: string;
 }
 
 const DEFAULT_LISTS = {
@@ -21,6 +31,7 @@ const DEFAULT_LISTS = {
   listInbox:             'InboxMails',
   listTeamsPostRequests: 'TeamsPostRequests',
   listSettings:          'SpiraSettings',
+  listAuditLog:          'AuditLog',
 };
 
 /** Document library used for internal-memo attachments. Auto-created by
@@ -371,6 +382,7 @@ export class SpRepository implements Repository {
     await ensure(this.cfg.listInbox, inboxFieldSpecs());
     await ensure(this.cfg.listTeamsPostRequests, teamsPostRequestFieldSpecs());
     await ensure(this.cfg.listSettings, settingsFieldSpecs());
+    await ensure(this.cfg.listAuditLog, auditLogFieldSpecs());
 
     // Attachment library — a single document library shared across all
     // tickets. Per-ticket sub-folders are created on first upload.
@@ -727,12 +739,34 @@ export class SpRepository implements Repository {
       method: 'POST',
       body: JSON.stringify(body),
     });
-    return asTicket(created);
+    const t = asTicket(created);
+    void emitAudit({
+      action: 'ticket.create',
+      ticketId: t.id,
+      targetType: 'ticket',
+      targetId: t.id,
+      details: { title: t.title, status: t.status, priority: t.priority },
+    });
+    return t;
   }
 
   async updateTicket(id: number, patch: Partial<Ticket>): Promise<Ticket | null> {
+    const before = await this.getTicket(id);
     await this.tx.update(this.listPath(this.cfg.listTickets), id, ticketBody(patch));
-    return this.getTicket(id);
+    const after = await this.getTicket(id);
+    if (before && after) {
+      const diff = ticketDiff(before, patch);
+      if (Object.keys(diff).length > 0) {
+        void emitAudit({
+          action: 'ticket.update',
+          ticketId: id,
+          targetType: 'ticket',
+          targetId: id,
+          details: { changes: diff },
+        });
+      }
+    }
+    return after;
   }
 
   async softDeleteTicket(id: number): Promise<void> {
@@ -740,6 +774,7 @@ export class SpRepository implements Repository {
       IsDeleted: true,
       DeletedAt: new Date().toISOString(),
     });
+    void emitAudit({ action: 'ticket.delete', ticketId: id, targetType: 'ticket', targetId: id });
   }
 
   async restoreTicket(id: number): Promise<void> {
@@ -747,6 +782,7 @@ export class SpRepository implements Repository {
       IsDeleted: false,
       DeletedAt: null,
     });
+    void emitAudit({ action: 'ticket.restore', ticketId: id, targetType: 'ticket', targetId: id });
   }
 
   async hardDeleteTicket(id: number): Promise<void> {
@@ -756,6 +792,13 @@ export class SpRepository implements Repository {
       await this.tx.remove(this.listPath(this.cfg.listComments), c.id);
     }
     await this.tx.remove(this.listPath(this.cfg.listTickets), id);
+    void emitAudit({
+      action: 'ticket.purge',
+      ticketId: id,
+      targetType: 'ticket',
+      targetId: id,
+      details: { purgedComments: comments.length },
+    });
   }
 
   async emptyTrash(): Promise<void> {
@@ -801,10 +844,44 @@ export class SpRepository implements Repository {
     if (patch.source !== undefined) body.Source = patch.source;
     if (Object.keys(body).length === 0) return;
     await this.tx.update(this.listPath(this.cfg.listComments), id, body);
+    // 監査: コメント編集。メモの「内容」自動保存は記録対象外 (Strategy C) だが、
+    // 「履歴 (received) 編集」は手動操作なので記録する。type を取得して切り分け。
+    const meta = await this.fetchCommentMeta(id).catch(() => null);
+    if (meta && meta.type === 'received') {
+      const changed: Record<string, true> = {};
+      for (const k of ['content', 'isHtml', 'fromName', 'fromEmail', 'sentAt', 'source']) {
+        if ((patch as Record<string, unknown>)[k] !== undefined) changed[k] = true;
+      }
+      void emitAudit({
+        action: 'comment.update',
+        ticketId: meta.ticketId,
+        targetType: 'comment',
+        targetId: id,
+        details: { fields: Object.keys(changed) },
+      });
+    }
+  }
+
+  /** 監査削除前の type 判定用に、最小限の列だけ取得。 */
+  private async fetchCommentMeta(id: number): Promise<{ ticketId: number; type: 'received' | 'note' } | null> {
+    const url = `${this.listPath(this.cfg.listComments)}/items(${id})?$select=TicketId,Type`;
+    try {
+      const res = await this.tx.req<{ TicketId: number; Type: string }>(url);
+      return { ticketId: Number(res.TicketId ?? 0), type: (res.Type === 'note' ? 'note' : 'received') };
+    } catch { return null; }
   }
 
   async deleteComment(id: number): Promise<void> {
+    const meta = await this.fetchCommentMeta(id).catch(() => null);
     await this.tx.remove(this.listPath(this.cfg.listComments), id);
+    if (meta) {
+      void emitAudit({
+        action: meta.type === 'note' ? 'note.delete' : 'comment.delete',
+        ticketId: meta.ticketId,
+        targetType: meta.type === 'note' ? 'note' : 'comment',
+        targetId: id,
+      });
+    }
   }
 
   async addComment(input: AddCommentInput): Promise<Comment> {
@@ -826,7 +903,18 @@ export class SpRepository implements Repository {
       method: 'POST',
       body: JSON.stringify(body),
     });
-    return asComment(created);
+    const c = asComment(created);
+    void emitAudit({
+      action: input.type === 'note' ? 'note.create' : 'comment.add',
+      ticketId: input.ticketId,
+      targetType: input.type === 'note' ? 'note' : 'comment',
+      targetId: c.id,
+      details: {
+        source: input.source ?? null,
+        fromName: input.fromName ?? null,
+      },
+    });
+    return c;
   }
 
   // ---- inbox
@@ -844,6 +932,14 @@ export class SpRepository implements Repository {
   async hideInboxItems(ids: number[]): Promise<void> {
     for (const id of ids) {
       await this.tx.update(this.listPath(this.cfg.listInbox), id, { IsHidden: true });
+    }
+    if (ids.length > 0) {
+      void emitAudit({
+        action: 'inbox.hide',
+        ticketId: 0,
+        targetType: 'inbox',
+        details: { ids, count: ids.length },
+      });
     }
   }
 
@@ -864,6 +960,18 @@ export class SpRepository implements Repository {
       ProcessedAt: new Date().toISOString(),
       ProcessResult: patch.result,
     });
+    // 手動 (manual-linked / created) のみ操作ログに残す。auto-linked は
+    // 単なる同期処理 (PA で取り込み済みのメールを Spira が紐付けただけ) で
+    // ノイズになるので除外。
+    if (patch.result !== 'auto-linked') {
+      void emitAudit({
+        action: patch.result === 'created' ? 'inbox.ingest' : 'inbox.link',
+        ticketId: patch.ticketId,
+        targetType: 'inbox',
+        targetId: id,
+        details: { result: patch.result },
+      });
+    }
   }
 
   async syncInbox(): Promise<SyncResult> {
@@ -993,6 +1101,13 @@ export class SpRepository implements Repository {
       `${this.listPath(this.cfg.listTeamsPostRequests)}/items`,
       { method: 'POST', body: JSON.stringify(body) },
     );
+    void emitAudit({
+      action: 'teams.thread.create',
+      ticketId: params.ticketId,
+      targetType: 'teams',
+      targetId: created.Id,
+      details: { threadType: params.threadType, channelId, teamId },
+    });
     return { id: created.Id };
   }
 
@@ -1057,6 +1172,108 @@ export class SpRepository implements Repository {
       return { id: res.Id, email, displayName: res.Title || email };
     } catch { return null; }
   }
+
+  // ---- 監査ログ (AuditLog)
+  //
+  // appendAudit / listAudit / cleanupExpiredAudit。書込は best-effort
+  // (失敗してもユーザ操作は通す)、listAudit はフィルタ + 並び順 desc、
+  // cleanup は ExpiresAt < now の行を物理削除。
+  //
+  // 主要 mutation メソッド (createTicket / updateTicket / softDeleteTicket /
+  // restoreTicket / hardDeleteTicket / addComment / updateComment /
+  // deleteComment / markInboxProcessed / hideInboxItems /
+  // createTeamsPostRequest) からは emitAudit ヘルパー経由で呼ばれる。
+
+  async appendAudit(input: AppendAuditInput): Promise<void> {
+    try {
+      const me = await this.getCurrentUser().catch(() => null);
+      const now = new Date();
+      const detailsStr = input.details ? JSON.stringify(input.details) : '';
+      const body: Record<string, unknown> = {
+        Title: `${input.action} #${input.ticketId}`,
+        Timestamp: now.toISOString(),
+        ActorEmail: input.actorEmail ?? me?.email ?? '',
+        ActorName: input.actorName ?? me?.displayName ?? '',
+        Action: input.action,
+        TicketId: input.ticketId,
+        TargetType: input.targetType,
+        TargetId: input.targetId ?? null,
+        Details: detailsStr,
+        ExpiresAt: input.expiresAt ?? defaultAuditExpiresAt(now),
+      };
+      await this.tx.req(`${this.listPath(this.cfg.listAuditLog)}/items`, {
+        method: 'POST',
+        body: JSON.stringify(body),
+      });
+    } catch (e) {
+      // 監査書込失敗はユーザに影響を伝播させない (操作はもう成功している)
+      console.warn('[spira/audit] appendAudit failed:', e);
+    }
+  }
+
+  async listAudit(opts: ListAuditOpts = {}): Promise<AuditRecord[]> {
+    const filters: string[] = [];
+    if (opts.fromTime) filters.push(`Timestamp ge datetime'${opts.fromTime}'`);
+    if (opts.toTime)   filters.push(`Timestamp le datetime'${opts.toTime}'`);
+    if (opts.ticketId != null) filters.push(`TicketId eq ${opts.ticketId}`);
+    if (opts.action) filters.push(`Action eq '${opts.action}'`);
+    if (opts.actorEmail) filters.push(`ActorEmail eq '${opts.actorEmail.replace(/'/g, "''")}'`);
+    const limit = Math.max(1, Math.min(opts.limit ?? 500, 2000));
+    const filterStr = filters.length > 0 ? `&$filter=${encodeURIComponent(filters.join(' and '))}` : '';
+    const url =
+      `${this.listPath(this.cfg.listAuditLog)}/items` +
+      `?$select=Id,Timestamp,ActorEmail,ActorName,Action,TicketId,TargetType,TargetId,Details,ExpiresAt` +
+      `&$orderby=Timestamp desc&$top=${limit}${filterStr}`;
+    interface AuditItem {
+      Id: number; Timestamp: string; ActorEmail?: string; ActorName?: string;
+      Action: string; TicketId: number; TargetType?: string; TargetId?: number | null;
+      Details?: string | null; ExpiresAt?: string;
+    }
+    const res = await this.tx.req<ListItemsResp<AuditItem>>(url);
+    return (res.value ?? []).map(asAuditRecord);
+  }
+
+  async cleanupExpiredAudit(): Promise<{ deleted: number }> {
+    const nowIso = new Date().toISOString();
+    const url =
+      `${this.listPath(this.cfg.listAuditLog)}/items?$select=Id` +
+      `&$filter=ExpiresAt lt datetime'${nowIso}'&$top=500`;
+    const res = await this.tx.req<ListItemsResp<{ Id: number }>>(url);
+    const ids = (res.value ?? []).map(r => r.Id);
+    for (const id of ids) {
+      try { await this.tx.remove(this.listPath(this.cfg.listAuditLog), id); }
+      catch (e) { console.warn('[spira/audit] cleanup remove failed:', e); }
+    }
+    return { deleted: ids.length };
+  }
+}
+
+function defaultAuditExpiresAt(from: Date): string {
+  // appendAudit に明示的な expiresAt を渡さなかった場合のフォールバック。
+  // 通常は呼出側 (lib/audit.ts の emitAudit) が retention 設定から計算
+  // した値を渡すので、ここに来るのはレアケース。安全な 30 日デフォルト。
+  const d = new Date(from.getTime());
+  d.setDate(d.getDate() + 30);
+  return d.toISOString();
+}
+
+function asAuditRecord(it: {
+  Id: number; Timestamp: string; ActorEmail?: string; ActorName?: string;
+  Action: string; TicketId: number; TargetType?: string; TargetId?: number | null;
+  Details?: string | null; ExpiresAt?: string;
+}): AuditRecord {
+  return {
+    id: it.Id,
+    timestamp: it.Timestamp,
+    actorEmail: it.ActorEmail ?? undefined,
+    actorName: it.ActorName ?? undefined,
+    action: it.Action as AuditRecord['action'],
+    ticketId: Number(it.TicketId ?? 0),
+    targetType: (it.TargetType ?? 'ticket') as AuditRecord['targetType'],
+    targetId: it.TargetId != null ? Number(it.TargetId) : undefined,
+    details: it.Details ?? undefined,
+    expiresAt: it.ExpiresAt ?? new Date().toISOString(),
+  };
 }
 
 // ---------------------------------------------------------------- field specs
@@ -1194,6 +1411,24 @@ function teamsPostRequestFieldSpecs(): FieldSpec[] {
     { name: 'RequestedAt', type: 'DateTime' },
     { name: 'Status', type: 'Choice', choices: ['Pending', 'Completed', 'Failed'] },
     { name: 'ErrorMessage', type: 'Note' },
+  ];
+}
+
+/** 監査ログ。チケット管理 / 受信スレッド / メモのライフサイクル
+ *  イベントを追記する。retention 設定で期限切れは Spira クライアントが
+ *  起動時に物理削除する。
+ *  Title は表示用 (`<Action> #<TicketId>` の形)。 */
+function auditLogFieldSpecs(): FieldSpec[] {
+  return [
+    { name: 'Timestamp', type: 'DateTime' },
+    { name: 'ActorEmail', type: 'Text' },
+    { name: 'ActorName', type: 'Text' },
+    { name: 'Action', type: 'Text' },
+    { name: 'TicketId', type: 'Number' },
+    { name: 'TargetType', type: 'Text' },
+    { name: 'TargetId', type: 'Number' },
+    { name: 'Details', type: 'Note' },
+    { name: 'ExpiresAt', type: 'DateTime' },
   ];
 }
 

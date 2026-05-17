@@ -87,6 +87,7 @@ const SLASH_ITEMS: SlashItem[] = [
   { cat: 'リスト', cmd: 'ol', icon: '1.', name: '番号付き', desc: '番号付き箇条書き', md: '1.' },
   { cat: 'リスト', cmd: 'todo', icon: '☐', name: 'ToDoリスト', desc: 'チェックボックス付き', md: '[]' },
   { cat: 'メディア', cmd: 'hr', icon: '—', name: '区切り線', desc: 'セクション区切り', md: '---' },
+  { cat: 'メディア', cmd: 'link', icon: '🔗', name: 'リンク', desc: 'URL を貼り付けてリンクを挿入' },
   { cat: 'メディア', cmd: 'file', icon: '📎', name: 'ファイル添付', desc: 'Excel / PDF / Word 等をアップロード' },
   { cat: 'コード', cmd: 'pre', icon: '</>', name: 'コードブロック', desc: 'シンタックスハイライト', md: '```' },
   { cat: 'データ', cmd: 'table', icon: '⊞', name: '表', desc: '簡易表 (3×2)・セル編集可' },
@@ -448,10 +449,115 @@ export function createNoteEditor(opts: NoteEditorOptions = {}): NoteEditor {
       insertTableBlock(3, 2);
     } else if (cmd === 'file') {
       openFilePickerAndUpload();
+    } else if (cmd === 'link') {
+      openLinkPrompt();
     } else {
       execCmd(cmd);
     }
     markDirty();
+  }
+
+  /** Tiny inline prompt for inserting a URL link. Renders a floating
+   *  popup (positioned at the current caret) with two fields (URL + label)
+   *  and "挿入 / キャンセル" buttons. On confirm, inserts an <a> at the
+   *  caret. Esc / blur outside cancels.
+   *
+   *  Style is owned by editor.css (`.ne-link-prompt`). */
+  function openLinkPrompt(): void {
+    // 1. Capture the current caret so we can restore it after focusing the input
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) return;
+    const savedRange = sel.getRangeAt(0).cloneRange();
+    // Selection text (if any) becomes the default label
+    const selText = savedRange.toString();
+
+    // 2. Build the popup DOM
+    const popup = document.createElement('div');
+    popup.className = 'ne-link-prompt';
+    popup.innerHTML =
+      '<div class="ne-link-prompt-row">' +
+      '<label>URL</label>' +
+      '<input type="url" class="ne-link-url" placeholder="https://example.com" autocomplete="off" />' +
+      '</div>' +
+      '<div class="ne-link-prompt-row">' +
+      '<label>表示文字</label>' +
+      '<input type="text" class="ne-link-label" placeholder="(省略時は URL をそのまま表示)" autocomplete="off" />' +
+      '</div>' +
+      '<div class="ne-link-prompt-actions">' +
+      '<button type="button" class="ne-link-cancel">キャンセル</button>' +
+      '<button type="button" class="ne-link-ok">挿入</button>' +
+      '</div>';
+    const urlInput = popup.querySelector<HTMLInputElement>('.ne-link-url')!;
+    const labelInput = popup.querySelector<HTMLInputElement>('.ne-link-label')!;
+    const okBtn = popup.querySelector<HTMLButtonElement>('.ne-link-ok')!;
+    const cancelBtn = popup.querySelector<HTMLButtonElement>('.ne-link-cancel')!;
+    if (selText) labelInput.value = selText;
+
+    // 3. Position near the caret (use the saved range's bounding rect)
+    const rect = savedRange.getBoundingClientRect();
+    popup.style.position = 'fixed';
+    popup.style.zIndex = '2147483700';
+    popup.style.left = `${Math.min(rect.left, window.innerWidth - 360)}px`;
+    popup.style.top = `${Math.min(rect.bottom + 6, window.innerHeight - 180)}px`;
+    floatRoot.appendChild(popup);
+
+    const restoreSelection = (): void => {
+      const s = window.getSelection();
+      if (!s) return;
+      s.removeAllRanges();
+      s.addRange(savedRange);
+    };
+
+    const cleanup = (): void => {
+      popup.remove();
+      document.removeEventListener('keydown', onKey, true);
+      document.removeEventListener('mousedown', onOutside, true);
+    };
+
+    const insert = (): void => {
+      const rawUrl = urlInput.value.trim();
+      if (!rawUrl) { urlInput.focus(); return; }
+      // Auto-prepend https:// when scheme is missing
+      const url = /^(https?:|mailto:|tel:|ftp:)/i.test(rawUrl) ? rawUrl : `https://${rawUrl}`;
+      const label = labelInput.value.trim() || url;
+      cleanup();
+      restoreSelection();
+      // Replace any selected text with the new <a>
+      const s = window.getSelection();
+      if (!s || s.rangeCount === 0) { ed.focus(); return; }
+      const r = s.getRangeAt(0);
+      r.deleteContents();
+      const a = document.createElement('a');
+      a.href = url;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      a.textContent = label;
+      r.insertNode(a);
+      // Caret after the inserted link
+      const after = document.createRange();
+      after.setStartAfter(a);
+      after.collapse(true);
+      s.removeAllRanges();
+      s.addRange(after);
+      ed.focus();
+      markDirty();
+    };
+
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') { e.preventDefault(); cleanup(); ed.focus(); return; }
+      if (e.key === 'Enter') { e.preventDefault(); insert(); return; }
+    };
+    const onOutside = (e: Event): void => {
+      if (popup.contains(e.target as Node)) return;
+      cleanup();
+    };
+    document.addEventListener('keydown', onKey, true);
+    document.addEventListener('mousedown', onOutside, true);
+
+    okBtn.addEventListener('click', insert);
+    cancelBtn.addEventListener('click', () => { cleanup(); ed.focus(); });
+
+    setTimeout(() => urlInput.focus(), 0);
   }
 
   // ── File attachment ──────────────────────────────────────────────────

@@ -97,6 +97,11 @@ export async function mount(): Promise<void> {
     // first-load auto sync
     setTimeout(() => doSync(root, /* silent */ true), 100);
 
+    // 監査ログのクリーンアップ (24h 経過時のみ実行)。失敗してもサイレント。
+    setTimeout(() => {
+      void import('./lib/audit').then(({ runStartupCleanup }) => runStartupCleanup());
+    }, 2000);
+
     // バージョンチェック — SP の SpiraSettings に登録された latest と比較:
     //   - current のビルド日時 > latest なら自動で latest を current に更新
     //     (新版を開いたユーザーが SoT になる)

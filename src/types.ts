@@ -106,3 +106,55 @@ export interface SiteUser {
 }
 
 export type ViewName = 'tickets' | 'inbox' | 'trash';
+
+// ─── 監査ログ (AuditLog リスト) ─────────────────────────────────────────
+// 「いつ・誰が・何を更新したか」を保管する追記専用 (Append-only) ログ。
+// 内容そのもの (メモ本文等) は保持せず、属性変更の前後値のような
+// メタデータだけを Details (JSON) に残す。
+//
+// 保持期間 (default 30 日) は SpiraSettings の `audit.retention.days` で
+// 設定可能。書込時に ExpiresAt = now + retention を一緒に保存し、起動時
+// クリーンアップで ExpiresAt < now の行を物理削除する。
+
+/** Audit イベントのアクション種別。文字列にしてあるのは SP の Choice 列で
+ *  値が増えた場合の安全マージン用 (新規 enum を足しても SP マイグレーションが
+ *  不要)。UI で表示時は AUDIT_ACTION_LABEL で日本語に変換。 */
+export type AuditAction =
+  | 'ticket.create'
+  | 'ticket.update'
+  | 'ticket.delete'        // ゴミ箱へ
+  | 'ticket.restore'       // ゴミ箱から戻す
+  | 'ticket.purge'         // 物理削除
+  | 'note.create'
+  | 'note.delete'
+  | 'comment.add'          // 受信スレッドへの履歴追加
+  | 'comment.update'       // 受信履歴の編集
+  | 'comment.delete'
+  | 'inbox.ingest'         // PA から受信メール取り込み (Spira から処理開始した時点)
+  | 'inbox.link'           // 受信メールを既存チケットに紐付け
+  | 'inbox.hide'           // 受信メールを非表示
+  | 'teams.thread.create'  // Teams スレッド起票キュー
+  | 'ai.note.save';        // AI 生成テキストをメモとして保存
+
+export type AuditTargetType = 'ticket' | 'comment' | 'note' | 'inbox' | 'teams' | 'ai';
+
+export interface AuditRecord {
+  id: number;
+  /** 操作時刻 (ISO)。 */
+  timestamp: string;
+  /** 実行ユーザのメール / 表示名。currentUser 未取得時は空欄。 */
+  actorEmail?: string;
+  actorName?: string;
+  action: AuditAction;
+  /** 対象チケット ID。受信メール起票前など、まだ Ticket が存在しないイベント
+   *  では 0 (= ticket-less) を入れる。 */
+  ticketId: number;
+  targetType: AuditTargetType;
+  /** 対象オブジェクトの SP Id (Comment / Inbox 等)。省略可。 */
+  targetId?: number;
+  /** 詳細 JSON 文字列。例: '{"status":["新規","対応中"]}' のような差分。
+   *  パースは UI 側 (AuditLogModal) で行う。 */
+  details?: string;
+  /** 保持期限 (ISO)。これより古い行はクリーンアップで物理削除される。 */
+  expiresAt: string;
+}

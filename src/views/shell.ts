@@ -382,6 +382,28 @@ function openSettingsMenu(root: HTMLElement, anchor: HTMLElement): void {
     'ヘルプ (PA フロー作成手順)',
   ]);
 
+  const aiSettingsItem = el('div', {
+    class: 'spira-menu-item',
+    onclick: () => {
+      menu.remove();
+      void import('./aiSettingsModal').then(({ openAiSettingsModal }) => openAiSettingsModal());
+    },
+  }, [
+    el('span', { html: icon('sparkles'), style: 'display:inline-flex;width:14px;height:14px' }),
+    'AI 設定 (Claude / 社内 AI)',
+  ]);
+
+  const auditLogItem = el('div', {
+    class: 'spira-menu-item',
+    onclick: () => {
+      menu.remove();
+      void import('./auditLogModal').then(({ openAuditLogModal }) => openAuditLogModal());
+    },
+  }, [
+    el('span', { html: icon('clock'), style: 'display:inline-flex;width:14px;height:14px' }),
+    '監査ログ (操作履歴)',
+  ]);
+
   const resetItem = el('div', {
     class: 'spira-menu-item',
     style: 'color:var(--danger)',
@@ -426,6 +448,8 @@ function openSettingsMenu(root: HTMLElement, anchor: HTMLElement): void {
     deptItem,
     categoryItem,
     versionItem,
+    aiSettingsItem,
+    auditLogItem,
     helpItem,
     el('div', { class: 'spira-menu-divider' }),
     resetItem,
