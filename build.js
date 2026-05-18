@@ -207,15 +207,32 @@ function renderInstallHtml(bookmarkletHref) {
 <div class="step">
   <div class="step-num">2</div>
   <div class="step-body">
-    <h3>下のボタンをブックマークバーにドラッグ</h3>
-    <p>右クリック → 「リンクをブックマーク」 でも OK です。</p>
+    <h3>下のいずれかの方法でブックマークに登録</h3>
+    <p><strong>方法 A: ドラッグ</strong> — 小さいバンドル用 (ブラウザによっては失敗します)<br>
+       <strong>方法 B: コピー & 手動登録</strong> — 確実 (推奨)</p>
   </div>
 </div>
 
 <div class="bm-wrap">
-  <p>↓ このボタンをブックマークバーにドラッグ ↓</p>
+  <p>↓ ① まずはここをブックマークバーにドラッグしてみる ↓</p>
   <a id="bm-link" href="${bookmarkletHref}" onclick="alert('ドラッグしてブックマークバーに登録してください。クリックでは起動しません（このページは SharePoint ではないため）。'); return false;">Spira</a>
+  <p style="margin-top:18px;font-size:12px">
+    ドラッグできない場合は ↓ コピーして手動登録 (推奨)
+  </p>
+  <button id="copy-btn" type="button" style="margin-top:6px;background:var(--paper);color:var(--ink);border:1px solid var(--accent);padding:10px 20px;border-radius:6px;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit">📋 ブックマークレットをコピー</button>
+  <p id="copy-status" style="margin-top:8px;font-size:12px;color:var(--ink-3);min-height:1em"></p>
 </div>
+
+<details style="background:var(--paper-2);border:1px solid var(--paper-3);border-radius:6px;padding:14px 18px;margin:20px 0">
+  <summary style="cursor:pointer;font-weight:600;color:var(--ink)">📋 手動でブックマーク登録する手順 (方法 B)</summary>
+  <ol style="margin:12px 0 0;padding-left:20px;line-height:1.8;font-size:14px;color:var(--ink)">
+    <li>上の「📋 ブックマークレットをコピー」ボタンを押す</li>
+    <li>ブックマークバーの空きを<strong>右クリック</strong> → 「ブックマークを追加」(Chrome) / 「お気に入りの追加」(Edge)</li>
+    <li>名前に <code>Spira</code> と入力</li>
+    <li>URL 欄に <code>Ctrl+V</code> (Mac: <code>Cmd+V</code>) で貼り付け</li>
+    <li>保存 → ブックマークバーに「Spira」が出れば完了</li>
+  </ol>
+</details>
 
 <div class="step">
   <div class="step-num">3</div>
@@ -225,6 +242,48 @@ function renderInstallHtml(bookmarkletHref) {
        初回起動時は SharePoint リスト（Tickets / Comments / InboxMails）が自動作成されます。</p>
   </div>
 </div>
+
+<script>
+(function(){
+  var btn = document.getElementById('copy-btn');
+  var status = document.getElementById('copy-status');
+  var bmHref = document.getElementById('bm-link').getAttribute('href');
+  if (!btn || !bmHref) return;
+  btn.addEventListener('click', function(){
+    var ok = function(){
+      btn.textContent = '✓ コピーしました';
+      status.textContent = 'ブックマークバーで右クリック → 新規ブックマーク追加 → URL 欄に貼り付け';
+      status.style.color = 'var(--accent-strong)';
+      setTimeout(function(){
+        btn.textContent = '📋 ブックマークレットをコピー';
+      }, 3000);
+    };
+    var fail = function(err){
+      status.textContent = 'コピー失敗: ' + err + ' — 下のテキスト欄から手動でコピーしてください';
+      status.style.color = '#c47f1c';
+      // フォールバック: textarea を生成して表示
+      var ta = document.createElement('textarea');
+      ta.value = bmHref;
+      ta.style.cssText = 'width:100%;height:120px;margin-top:10px;font-family:ui-monospace,Menlo,monospace;font-size:11px;padding:8px;border:1px solid var(--paper-3);border-radius:4px';
+      ta.readOnly = true;
+      ta.onclick = function(){ ta.select(); };
+      btn.parentElement.appendChild(ta);
+      ta.focus(); ta.select();
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(bmHref).then(ok).catch(function(e){ fail(e.message || e); });
+    } else {
+      // 古いブラウザ用 fallback
+      var ta = document.createElement('textarea');
+      ta.value = bmHref;
+      document.body.appendChild(ta);
+      ta.select();
+      try { document.execCommand('copy'); ok(); } catch (e) { fail(e.message); }
+      document.body.removeChild(ta);
+    }
+  });
+})();
+</script>
 
 <hr>
 
