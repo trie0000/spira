@@ -8,7 +8,11 @@ import { execSync } from 'node:child_process';
 const watch = process.argv.includes('--watch');
 const serve = process.argv.includes('--serve');
 const makeBookmarklet = process.argv.includes('--bookmarklet');
-const prod = process.argv.includes('--prod') || makeBookmarklet;
+// dist/install.html / dist/index.html はユーザ配布物なので、デフォルトで
+// minify を有効にしてバンドルを最小化する (Edge の drag-to-bookmark 上限
+// は 1〜2MB 程度らしく、unminified だと容易に超える)。
+// dev 時は --watch / --serve を使うのでそちら経由で非 minify ビルドする。
+const prod = !watch && !serve;
 
 // Build identity — baked in at compile time so the running bundle can show
 // "which build is this" in the settings menu. Cache-confusion is the #1
