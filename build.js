@@ -146,50 +146,37 @@ if (watch || serve) {
 }
 
 function renderInstallHtml(bookmarkletHref) {
-  return `<!doctype html>
+  // n365 (shapion) の install.html を踏襲。Edge の drag-to-bookmark が
+  // 正しく動くことを保証するため、構造・属性・スタイルを最小限にする。
+  // 重要:
+  //   - <a> に `draggable` 属性を明示しない (デフォルトで true)
+  //   - <a> に onclick / その他のハンドラを付けない
+  //   - <a> の周囲にコピー ボタンなど別 UI を入れない (.bm-wrap の中身は
+  //     <p> + <a> のみ)
+  //   - CSS は最小限。`user-select` / `::before` 疑似要素は付けない
+  //   - 「コピー して手動登録」用には別途 <textarea readonly> を別ブロックに置く
+  return `<!DOCTYPE html>
 <html lang="ja">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta charset="UTF-8">
 <title>Spira インストール</title>
 <style>
-  :root {
-    --ink: #2a2a26; --ink-3: #7a766c; --ink-4: #a8a39a;
-    --paper: #fafaf7; --paper-2: #f3f1ea; --paper-3: #e8e4d8;
-    --line: rgba(42,42,38,0.12);
-    --accent: #7a8a78; --accent-strong: #5e6f5c;
-    --code-fg: #8b3a30; --code-bg: rgba(122,118,108,0.16);
-    --font: "Meiryo","メイリオ","Hiragino Sans","Yu Gothic UI",-apple-system,"Segoe UI",system-ui,sans-serif;
-    --font-mono: ui-monospace,"Cascadia Mono","Consolas",monospace;
-  }
-  * { box-sizing: border-box; }
-  body { font-family: var(--font); max-width: 580px; margin: 60px auto; padding: 0 24px; color: var(--ink); line-height: 1.75; background: var(--paper); }
-  h1 { font-size: 28px; font-weight: 700; margin: 0 0 8px; letter-spacing: -0.01em; display: flex; align-items: center; gap: 12px; }
-  h1::before { content: ""; width: 14px; height: 14px; border-radius: 50%; background: var(--accent); display: inline-block; }
-  .sub { color: var(--ink-3); font-size: 14px; margin: 0 0 40px; }
-
-  .step { display: flex; gap: 16px; margin-bottom: 28px; align-items: flex-start; }
-  .step-num { width: 28px; height: 28px; background: var(--accent); color: #fff; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; flex-shrink: 0; margin-top: 2px; }
-  .step-body h3 { font-size: 16px; font-weight: 600; margin: 0 0 4px; color: var(--ink); }
-  .step-body p { font-size: 14px; color: var(--ink-3); margin: 0; }
-
-  .bm-wrap { background: var(--paper-2); border: 2px dashed var(--paper-3); border-radius: 8px; padding: 28px; text-align: center; margin: 20px 0 32px; }
-  .bm-wrap p { font-size: 13px; color: var(--ink-3); margin: 0 0 16px; }
-  /* drag-to-bookmark を阻害しないよう、n365 (shapion) と同じ最小スタイルに。
-     user-select:none と ::before 疑似要素は Edge の drag-to-bookmark を
-     拒否させる原因だった (禁止アイコンが出る)。シンプルに保つ。 */
-  #bm-link {
-    display: inline-flex; align-items: center; gap: 8px;
-    background: var(--accent); color: #fff; text-decoration: none;
-    padding: 12px 24px; border-radius: 6px; font-size: 16px; font-weight: 600;
-    box-shadow: 0 2px 8px rgba(122,138,120,.25); cursor: grab;
-  }
-  #bm-link:hover { background: var(--accent-strong); }
-
-  hr { border: none; border-top: 1px solid var(--paper-3); margin: 32px 0; }
-  .alt { font-size: 13px; color: var(--ink-3); }
-  code { background: var(--code-bg); color: var(--code-fg); padding: 2px 6px; border-radius: 3px; font-size: 12px; font-family: var(--font-mono); }
-  .note { background: rgba(196,127,28,0.10); border-left: 3px solid #c47f1c; padding: 12px 16px; border-radius: 4px; font-size: 13px; color: var(--ink); margin-top: 24px; }
+body { font-family: "Meiryo","メイリオ","Hiragino Sans","Yu Gothic UI",-apple-system,"Segoe UI",system-ui,sans-serif; max-width: 580px; margin: 60px auto; padding: 0 24px; color: #2a2a26; line-height: 1.75; background: #fafaf7; }
+h1 { font-size: 28px; font-weight: 700; margin-bottom: 8px; letter-spacing: -0.01em; }
+.sub { color: #7a766c; font-size: 14px; margin-bottom: 40px; }
+.step { display: flex; gap: 16px; margin-bottom: 28px; align-items: flex-start; }
+.step-num { width: 28px; height: 28px; background: #7a8a78; color: #fff; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; flex-shrink: 0; margin-top: 2px; }
+.step-body h3 { font-size: 16px; font-weight: 600; margin: 0 0 4px; }
+.step-body p { font-size: 14px; color: #7a766c; margin: 0; }
+.bm-wrap { background: #f3f1ea; border: 2px dashed #d6d0c0; border-radius: 8px; padding: 28px; text-align: center; margin: 20px 0 32px; }
+.bm-wrap p { font-size: 13px; color: #7a766c; margin: 0 0 16px; }
+#bm-link { display: inline-flex; align-items: center; gap: 8px; background: #7a8a78; color: #fff; text-decoration: none; padding: 12px 24px; border-radius: 6px; font-size: 16px; font-weight: 600; box-shadow: 0 2px 8px rgba(122,138,120,.25); cursor: grab; }
+#bm-link:hover { background: #5e6f5c; }
+hr { border: none; border-top: 1px solid #e8e4d8; margin: 32px 0; }
+.alt { font-size: 13px; color: #7a766c; }
+code { background: rgba(122, 118, 108, 0.16); color: #8b3a30; padding: 2px 6px; border-radius: 3px; font-size: 12px; font-family: "Cascadia Mono","SFMono-Regular", Menlo, Consolas, monospace; }
+#copy-area { width: 100%; height: 100px; font-size: 11px; font-family: "Cascadia Mono","SFMono-Regular", Menlo, Consolas, monospace; border: 1px solid #e8e4d8; border-radius: 4px; padding: 8px; resize: none; word-break: break-all; margin-top: 8px; cursor: pointer; display: block; background: #fafaf7; color: #2a2a26; box-sizing: border-box; }
+.note { background: rgba(196,127,28,0.10); border-left: 3px solid #c47f1c; padding: 12px 16px; border-radius: 4px; font-size: 13px; color: #2a2a26; margin-top: 24px; }
 </style>
 </head>
 <body>
@@ -208,32 +195,15 @@ function renderInstallHtml(bookmarkletHref) {
 <div class="step">
   <div class="step-num">2</div>
   <div class="step-body">
-    <h3>下のいずれかの方法でブックマークに登録</h3>
-    <p><strong>方法 A: ドラッグ</strong> — 小さいバンドル用 (ブラウザによっては失敗します)<br>
-       <strong>方法 B: コピー & 手動登録</strong> — 確実 (推奨)</p>
+    <h3>下のボタンをブックマークバーにドラッグ</h3>
+    <p>右クリック → 「リンクをブックマーク」 でも OK です。</p>
   </div>
 </div>
 
 <div class="bm-wrap">
-  <p>↓ ① ここをブックマークバーにドラッグ ↓</p>
-  <a id="bm-link" href="${bookmarkletHref}" draggable="true">Spira</a>
-  <p style="margin-top:18px;font-size:12px">
-    ドラッグできない場合は ↓ コピーして手動登録
-  </p>
-  <button id="copy-btn" type="button" style="margin-top:6px;background:var(--paper);color:var(--ink);border:1px solid var(--accent);padding:10px 20px;border-radius:6px;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit">📋 ブックマークレットをコピー</button>
-  <p id="copy-status" style="margin-top:8px;font-size:12px;color:var(--ink-3);min-height:1em"></p>
+  <p>↓ このボタンをブックマークバーにドラッグ ↓</p>
+  <a id="bm-link" href="${bookmarkletHref}">Spira</a>
 </div>
-
-<details style="background:var(--paper-2);border:1px solid var(--paper-3);border-radius:6px;padding:14px 18px;margin:20px 0">
-  <summary style="cursor:pointer;font-weight:600;color:var(--ink)">📋 手動でブックマーク登録する手順 (方法 B)</summary>
-  <ol style="margin:12px 0 0;padding-left:20px;line-height:1.8;font-size:14px;color:var(--ink)">
-    <li>上の「📋 ブックマークレットをコピー」ボタンを押す</li>
-    <li>ブックマークバーの空きを<strong>右クリック</strong> → 「ブックマークを追加」(Chrome) / 「お気に入りの追加」(Edge)</li>
-    <li>名前に <code>Spira</code> と入力</li>
-    <li>URL 欄に <code>Ctrl+V</code> (Mac: <code>Cmd+V</code>) で貼り付け</li>
-    <li>保存 → ブックマークバーに「Spira」が出れば完了</li>
-  </ol>
-</details>
 
 <div class="step">
   <div class="step-num">3</div>
@@ -244,51 +214,9 @@ function renderInstallHtml(bookmarkletHref) {
   </div>
 </div>
 
-<script>
-(function(){
-  var btn = document.getElementById('copy-btn');
-  var status = document.getElementById('copy-status');
-  var bmHref = document.getElementById('bm-link').getAttribute('href');
-  if (!btn || !bmHref) return;
-  btn.addEventListener('click', function(){
-    var ok = function(){
-      btn.textContent = '✓ コピーしました';
-      status.textContent = 'ブックマークバーで右クリック → 新規ブックマーク追加 → URL 欄に貼り付け';
-      status.style.color = 'var(--accent-strong)';
-      setTimeout(function(){
-        btn.textContent = '📋 ブックマークレットをコピー';
-      }, 3000);
-    };
-    var fail = function(err){
-      status.textContent = 'コピー失敗: ' + err + ' — 下のテキスト欄から手動でコピーしてください';
-      status.style.color = '#c47f1c';
-      // フォールバック: textarea を生成して表示
-      var ta = document.createElement('textarea');
-      ta.value = bmHref;
-      ta.style.cssText = 'width:100%;height:120px;margin-top:10px;font-family:ui-monospace,Menlo,monospace;font-size:11px;padding:8px;border:1px solid var(--paper-3);border-radius:4px';
-      ta.readOnly = true;
-      ta.onclick = function(){ ta.select(); };
-      btn.parentElement.appendChild(ta);
-      ta.focus(); ta.select();
-    };
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(bmHref).then(ok).catch(function(e){ fail(e.message || e); });
-    } else {
-      // 古いブラウザ用 fallback
-      var ta = document.createElement('textarea');
-      ta.value = bmHref;
-      document.body.appendChild(ta);
-      ta.select();
-      try { document.execCommand('copy'); ok(); } catch (e) { fail(e.message); }
-      document.body.removeChild(ta);
-    }
-  });
-})();
-</script>
-
 <hr>
-
-<p class="alt"><strong>更新方法</strong>: 新しいバージョンが出たら、このページを再度開いて再度ドラッグしてください（古いブックマークは上書き or 削除）。</p>
+<p class="alt">ドラッグできない場合 — 下のテキスト欄をクリックして全選択 → <code>Ctrl+C</code> でコピー後、ブックマークバーで右クリック → 「ブックマークを追加」→ URL 欄に貼り付けてください：</p>
+<textarea id="copy-area" readonly onclick="this.select()">${bookmarkletHref}</textarea>
 
 <div class="note">
   ⚠ <strong>SharePoint 上で実行する必要があります</strong>。Graph API・外部 SaaS・カスタムスクリプト無効環境でも動作するよう、SP REST API（同一オリジン認証）のみを使用しています。
