@@ -214,10 +214,10 @@ function renderInstallHtml(bookmarkletHref) {
 </div>
 
 <div class="bm-wrap">
-  <p>↓ ① まずはここをブックマークバーにドラッグしてみる ↓</p>
-  <a id="bm-link" href="${bookmarkletHref}" onclick="alert('ドラッグしてブックマークバーに登録してください。クリックでは起動しません（このページは SharePoint ではないため）。'); return false;">Spira</a>
+  <p>↓ ① ここをブックマークバーにドラッグ ↓</p>
+  <a id="bm-link" href="${bookmarkletHref}" draggable="true">Spira</a>
   <p style="margin-top:18px;font-size:12px">
-    ドラッグできない場合は ↓ コピーして手動登録 (推奨)
+    ドラッグできない場合は ↓ コピーして手動登録
   </p>
   <button id="copy-btn" type="button" style="margin-top:6px;background:var(--paper);color:var(--ink);border:1px solid var(--accent);padding:10px 20px;border-radius:6px;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit">📋 ブックマークレットをコピー</button>
   <p id="copy-status" style="margin-top:8px;font-size:12px;color:var(--ink-3);min-height:1em"></p>
