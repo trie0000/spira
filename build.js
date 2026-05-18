@@ -109,9 +109,12 @@ if (watch || serve) {
   console.log(`[html] dist/index.html: ${sizeKb('dist/index.html')} KB`);
 
   // install.html: drag-to-bookmark installer with the entire minified bundle inlined.
-  // Wrap the IIFE in `void function(){ ... }()` so re-clicking the bookmark doesn't
-  // pollute globals or cause "var redeclaration" issues — main.ts handles re-mount idempotency.
-  const inlined = `void function(){${js}}()`;
+  // Wrap the IIFE in `void(function(){ ... })()` — n365 (shapion) と同じ
+  // 括弧付きパターン。`void function(){...}()` だと URL に %20 (空白) が
+  // 入って Edge の bookmarklet 判定ヒューリスティクスを通らない疑いあり。
+  // 機能的には等価だが、URL 形を n365 と完全一致させてドラッグ受け付けを
+  // 安定化する。
+  const inlined = `void(function(){${js}})()`;
   const bookmarkletHref = 'javascript:' + encodeURIComponent(inlined);
   const installHtml = renderInstallHtml(bookmarkletHref);
   fs.writeFileSync('dist/install.html', installHtml);
