@@ -83,6 +83,9 @@ async function paintMain(main: HTMLElement): Promise<void> {
         : await renderTicketList();
     } else if (s.view === 'inbox') {
       view = await renderInbox();
+    } else if (s.view === 'dashboard') {
+      const { renderDashboard } = await import('./dashboard');
+      view = await renderDashboard();
     } else {
       view = await renderTrash();
     }
@@ -1893,7 +1896,7 @@ function onResetLists(root: HTMLElement): void {
 function renderSidebar(): HTMLElement {
   const s = getState();
 
-  const item = (label: string, view: 'tickets' | 'inbox' | 'trash', iconName: string, count?: number) => {
+  const item = (label: string, view: 'tickets' | 'inbox' | 'trash' | 'dashboard', iconName: string, count?: number) => {
     const isActive = s.view === view;
     const node = el('div', {
       class: `spira-side-item${isActive ? ' active' : ''}`,
@@ -1934,6 +1937,7 @@ function renderSidebar(): HTMLElement {
         el('span', { style: 'flex:1' }, ['Tickets']),
         searchIconBtn,
       ]),
+      item('ダッシュボード', 'dashboard', 'sparkles'),
       item('チケット一覧', 'tickets', 'list'),
       item('受信', 'inbox', 'inbox', s.inboxCount),
     ]),
