@@ -19,16 +19,21 @@
 #
 # 使い方
 # ------
-#   # 1. 必要な値を環境変数か引数で指定:
-#   $env:SPIRA_AI_TARGET = 'https://gateway.example.com/myapi'
-#   $env:SPIRA_AI_PROXY  = 'http://onprem-proxy.example.com:8080'
-#   $env:SPIRA_AI_PORT   = '18080'   # default
+#   # 1. 設定ファイルを準備:
+#   PS> Copy-Item spira-ai-relay.env.example spira-ai-relay.env
+#   PS> notepad spira-ai-relay.env       # 値を編集
 #
 #   # 2. PowerShell から実行:
 #   PS> .\spira-ai-relay.ps1
 #
-#   # または引数で:
+#   # または引数で個別に上書き:
 #   PS> .\spira-ai-relay.ps1 -Target 'https://...' -Proxy 'http://...:8080'
+#
+# 設定の優先順位:
+#   1. コマンドライン引数 (-Target / -Proxy / -Port)
+#   2. プロセス環境変数 (SPIRA_AI_TARGET 等)
+#   3. spira-ai-relay.env ファイル (同じフォルダ)
+#   4. デフォルト値 (port = 18080)
 #
 # Spira の「AI 設定」モーダルで:
 #   プロバイダ              : 社内 AI (Azure OpenAI 互換)
@@ -47,15 +52,80 @@
 
 [CmdletBinding()]
 param(
-    [string]$Target = $env:SPIRA_AI_TARGET,
-    [string]$Proxy  = $env:SPIRA_AI_PROXY,
-    [int]$Port      = $(if ($env:SPIRA_AI_PORT) { [int]$env:SPIRA_AI_PORT } else { 18080 }),
+    [string]$Target,
+    [string]$Proxy,
+    [int]$Port,
     [switch]$NoProxy,
     # 社内ゲートウェイが自己署名証明書の場合 (要セキュリティ承認)
-    [switch]$SkipCertCheck
+    [switch]$SkipCertCheck,
+    # 環境設定ファイルのパス (既定: スクリプトと同じフォルダの spira-ai-relay.env)
+    [string]$EnvFile
 )
 
 $ErrorActionPreference = 'Stop'
+
+# ─── Load .env file ─────────────────────────────────────────────────────────
+#
+# 設定の中央集権化: 同じフォルダの `spira-ai-relay.env` を読み、まだ
+# 設定されていない `$env:SPIRA_AI_*` だけセットする。プロセス環境変数や
+# 引数が既に与えられていれば、それを優先する (上書きしない)。
+#
+# `.env` の書式は KEY=VALUE。`#` で始まる行と空行は無視。値の前後の
+# クォート (`"..."` / `'...'`) は剥がす。
+
+function Import-EnvFile {
+    param([string]$Path)
+    if (-not (Test-Path -LiteralPath $Path)) { return $false }
+    try {
+        $lines = Get-Content -LiteralPath $Path -Encoding UTF8 -ErrorAction Stop
+    } catch {
+        Write-Warning ".env ファイルを読めませんでした: $Path ($($_.Exception.Message))"
+        return $false
+    }
+    foreach ($raw in $lines) {
+        $line = $raw.Trim()
+        if (-not $line) { continue }
+        if ($line.StartsWith('#')) { continue }
+        $eq = $line.IndexOf('=')
+        if ($eq -lt 1) { continue }                           # 不正な行は skip
+        $key = $line.Substring(0, $eq).Trim()
+        $val = $line.Substring($eq + 1).Trim()
+        # 末尾のインライン コメント (` # ...`) を削除 — クォート外のみ
+        if ($val -notmatch '^["'']') {
+            $hashIdx = $val.IndexOf(' #')
+            if ($hashIdx -ge 0) { $val = $val.Substring(0, $hashIdx).TrimEnd() }
+        }
+        # 前後のクォートを剥がす
+        if (($val.StartsWith('"') -and $val.EndsWith('"')) -or
+            ($val.StartsWith("'") -and $val.EndsWith("'"))) {
+            $val = $val.Substring(1, $val.Length - 2)
+        }
+        # プロセス環境変数に未設定のときだけ反映 (引数 / 既存 env を優先)
+        if (-not [Environment]::GetEnvironmentVariable($key)) {
+            [Environment]::SetEnvironmentVariable($key, $val)
+        }
+    }
+    return $true
+}
+
+# .env のパス解決: 明示指定 → スクリプト同フォルダの spira-ai-relay.env
+if (-not $EnvFile) {
+    $EnvFile = Join-Path $PSScriptRoot 'spira-ai-relay.env'
+}
+$loaded = Import-EnvFile -Path $EnvFile
+if ($loaded) {
+    Write-Host "[config] loaded: $EnvFile" -ForegroundColor DarkGray
+}
+
+# 引数 → 環境変数 → デフォルト の順で確定
+if (-not $Target) { $Target = $env:SPIRA_AI_TARGET }
+if (-not $Proxy)  { $Proxy  = $env:SPIRA_AI_PROXY }
+if (-not $Port)   {
+    $Port = if ($env:SPIRA_AI_PORT) { [int]$env:SPIRA_AI_PORT } else { 18080 }
+}
+if (-not $SkipCertCheck -and $env:SPIRA_AI_SKIP_CERT_CHECK -eq '1') {
+    $SkipCertCheck = [switch]$true
+}
 
 # ─── Pre-flight checks ──────────────────────────────────────────────────────
 

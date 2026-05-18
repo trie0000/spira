@@ -10,3 +10,6 @@ dist/*
 .vscode/
 unpacked/
 Spira.zip
+
+# AI relay の個人設定 (テンプレートは .example として残す)
+scripts/spira-ai-relay.env

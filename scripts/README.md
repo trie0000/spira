@@ -24,23 +24,37 @@ spira-ai-relay.ps1   (PowerShell on local PC)
 | ファイル | 役割 |
 |----------|------|
 | `spira-ai-relay.ps1` | リレー本体。HTTP listener + プロキシ + ストリーミング転送 |
-| `spira-ai-relay.bat` | 環境変数を埋め込んだ起動用 wrapper。ダブルクリックで起動 |
+| `spira-ai-relay.bat` | ダブルクリック起動用の薄い wrapper |
+| `spira-ai-relay.env.example` | 設定ファイルのテンプレート (リポジトリにコミット) |
+| `spira-ai-relay.env` | 各人の実設定 (`.gitignore` で除外、コミットされない) |
 
 ## 使い方
 
-### 1. 環境設定
+### 1. 設定ファイルを作成
 
-`spira-ai-relay.bat` をテキスト エディタで開き、`set` 行を編集:
+テンプレートをコピーして編集:
 
-```bat
-set "SPIRA_AI_TARGET=https://gateway.example.com/myapi"
-set "SPIRA_AI_PROXY=http://onprem-proxy.example.com:8080"
-set "SPIRA_AI_PORT=18080"
+```ps
+Copy-Item spira-ai-relay.env.example spira-ai-relay.env
+notepad spira-ai-relay.env
+```
+
+`.env` の中身 (`KEY=VALUE` 形式):
+
+```ini
+SPIRA_AI_TARGET=https://gateway.example.com/myapi
+SPIRA_AI_PROXY=http://onprem-proxy.example.com:8080
+SPIRA_AI_PORT=18080
+# SPIRA_AI_SKIP_CERT_CHECK=1   ← 自己署名証明書のみ (検証用)
 ```
 
 - `SPIRA_AI_TARGET` — 社内 AI ゲートウェイの URL (パス込み)
-- `SPIRA_AI_PROXY` — オンプレ プロキシ URL (不要なら空のまま)
+- `SPIRA_AI_PROXY` — オンプレ プロキシ URL (不要なら行ごと削除)
 - `SPIRA_AI_PORT` — ローカル listen ポート (既定 18080)
+
+`.env` は `.gitignore` で除外されているのでコミットされません。
+
+> **設定の優先順位**: コマンドライン引数 > プロセス環境変数 > `.env` ファイル > デフォルト値
 
 ### 2. 起動
 
