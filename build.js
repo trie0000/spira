@@ -3,7 +3,6 @@ import * as esbuild from 'esbuild';
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
-import zlib from 'node:zlib';
 import { execSync } from 'node:child_process';
 
 const watch = process.argv.includes('--watch');
@@ -109,36 +108,14 @@ if (watch || serve) {
   const sizeKb = (s) => (fs.statSync(s).size / 1024).toFixed(1);
   console.log(`[html] dist/index.html: ${sizeKb('dist/index.html')} KB`);
 
-  // install.html: drag-to-bookmark installer.
-  // Approach: gzip-compress the entire minified bundle, base64-encode it,
-  // and embed in a tiny loader that decompresses via DecompressionStream
-  // (built-in in Chrome 80+ / Edge 80+ / Firefox 113+ / Safari 16.4+).
-  //
-  // なぜ圧縮:
-  //   生バンドル ~877KB → gzip+base64 ~261KB → URI 後 ~290KB
-  //   Edge / Chrome の drag-to-bookmark 上限 (約 500KB〜2MB) に収まる。
-  //   素のままだと 1.5MB で Edge では drag が拒否される。
-  //
-  // 起動時のオーバーヘッド: 解凍に約 50〜100ms。体感ほぼ無し。
-  const gz = zlib.gzipSync(Buffer.from(js, 'utf8'), { level: 9 });
-  const gzB64 = gz.toString('base64');
-  // bookmarklet body: async IIFE で base64→gunzip→eval。
-  // try/catch でユーザに分かりやすいエラーを出す。
-  // new Function を使うのは Strict CSP 環境でも eval より広く動くため。
-  const loaderTpl =
-    `void (async function(){try{` +
-    `var b="${gzB64}";` +
-    `var bin=atob(b);var u=new Uint8Array(bin.length);for(var i=0;i<bin.length;i++)u[i]=bin.charCodeAt(i);` +
-    `var ds=new DecompressionStream("gzip");` +
-    `var stream=new Blob([u]).stream().pipeThrough(ds);` +
-    `var text=await new Response(stream).text();` +
-    `(new Function(text))();` +
-    `}catch(e){alert("Spira 起動失敗: "+(e&&e.message||e));}})();`;
-  const bookmarkletHref = 'javascript:' + encodeURIComponent(loaderTpl);
+  // install.html: drag-to-bookmark installer with the entire minified bundle inlined.
+  // Wrap the IIFE in `void function(){ ... }()` so re-clicking the bookmark doesn't
+  // pollute globals or cause "var redeclaration" issues — main.ts handles re-mount idempotency.
+  const inlined = `void function(){${js}}()`;
+  const bookmarkletHref = 'javascript:' + encodeURIComponent(inlined);
   const installHtml = renderInstallHtml(bookmarkletHref);
   fs.writeFileSync('dist/install.html', installHtml);
-  console.log(`[install] dist/install.html: ${sizeKb('dist/install.html')} KB (gzip+base64 inlined)`);
-  console.log(`[install] bookmarklet href:   ${(bookmarkletHref.length / 1024).toFixed(1)} KB (drag size)`);
+  console.log(`[install] dist/install.html: ${sizeKb('dist/install.html')} KB (bookmarklet inlined)`);
 
   if (makeBookmarklet) {
     const url = process.env.SPIRA_BUNDLE_URL || '__SPIRA_BUNDLE_URL__';
@@ -198,15 +175,16 @@ function renderInstallHtml(bookmarkletHref) {
 
   .bm-wrap { background: var(--paper-2); border: 2px dashed var(--paper-3); border-radius: 8px; padding: 28px; text-align: center; margin: 20px 0 32px; }
   .bm-wrap p { font-size: 13px; color: var(--ink-3); margin: 0 0 16px; }
+  /* drag-to-bookmark を阻害しないよう、n365 (shapion) と同じ最小スタイルに。
+     user-select:none と ::before 疑似要素は Edge の drag-to-bookmark を
+     拒否させる原因だった (禁止アイコンが出る)。シンプルに保つ。 */
   #bm-link {
     display: inline-flex; align-items: center; gap: 8px;
     background: var(--accent); color: #fff; text-decoration: none;
     padding: 12px 24px; border-radius: 6px; font-size: 16px; font-weight: 600;
     box-shadow: 0 2px 8px rgba(122,138,120,.25); cursor: grab;
-    user-select: none;
   }
   #bm-link:hover { background: var(--accent-strong); }
-  #bm-link::before { content: "●"; color: #fff; font-size: 10px; opacity: .85; }
 
   hr { border: none; border-top: 1px solid var(--paper-3); margin: 32px 0; }
   .alt { font-size: 13px; color: var(--ink-3); }
