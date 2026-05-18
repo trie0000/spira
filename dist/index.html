@@ -5089,13 +5089,13 @@ var Spira = (() => {
         }
         return text2;
       }
-      var MsgReader = (
+      var MsgReader2 = (
         /** @class */
         function() {
-          function MsgReader2(arrayBuffer) {
+          function MsgReader3(arrayBuffer) {
             this.reader = new Reader_1.Reader(arrayBuffer);
           }
-          MsgReader2.prototype.decodeField = function(fieldClass, fieldType, provider, ansiEncoding, insideProps) {
+          MsgReader3.prototype.decodeField = function(fieldClass, fieldType, provider, ansiEncoding, insideProps) {
             var array = provider();
             var ds = new DataStream_1.default(array, 0, DataStream_1.default.LITTLE_ENDIAN);
             var key = const_1.default.MSG.FIELD.FULL_NAME_MAPPING["".concat(fieldClass).concat(fieldType)] || const_1.default.MSG.FIELD.NAME_MAPPING[fieldClass];
@@ -5187,7 +5187,7 @@ var Spira = (() => {
             var propertyTag = "".concat(fieldClass).concat(fieldType);
             return { key, keyType, value, notForRawProp: skip, propertyTag, propertySet, propertyLid };
           };
-          MsgReader2.prototype.fieldsDataDocument = function(parserConfig, documentProperty, fields) {
+          MsgReader3.prototype.fieldsDataDocument = function(parserConfig, documentProperty, fields) {
             var value = documentProperty.name.substring(12).toLowerCase();
             var fieldClass = value.substring(0, 4);
             var fieldType = value.substring(4, 8);
@@ -5199,7 +5199,7 @@ var Spira = (() => {
               this.setDecodedFieldTo(parserConfig, fields, this.decodeField(fieldClass, fieldType, documentProperty.provider, parserConfig.ansiEncoding, false));
             }
           };
-          MsgReader2.prototype.setDecodedFieldTo = function(parserConfig, fields, pair) {
+          MsgReader3.prototype.setDecodedFieldTo = function(parserConfig, fields, pair) {
             var key = pair.key, keyType = pair.keyType, value = pair.value;
             if (key !== void 0) {
               if (keyType === KeyType.root) {
@@ -5219,11 +5219,11 @@ var Spira = (() => {
               }
             }
           };
-          MsgReader2.prototype.getFieldType = function(fieldProperty) {
+          MsgReader3.prototype.getFieldType = function(fieldProperty) {
             var value = fieldProperty.name.substring(12).toLowerCase();
             return value.substring(4, 8);
           };
-          MsgReader2.prototype.fieldsDataDirInner = function(parserConfig, dirProperty, rootFolder, fields) {
+          MsgReader3.prototype.fieldsDataDirInner = function(parserConfig, dirProperty, rootFolder, fields) {
             var _this = this;
             if (dirProperty.name.indexOf(const_1.default.MSG.FIELD.PREFIX.ATTACHMENT) == 0) {
               var attachmentField = {
@@ -5258,7 +5258,7 @@ var Spira = (() => {
               }
             }
           };
-          MsgReader2.prototype.burnMsg = function(folder, rootFolder) {
+          MsgReader3.prototype.burnMsg = function(folder, rootFolder) {
             var entries2 = [
               {
                 name: "Root Entry",
@@ -5270,7 +5270,7 @@ var Spira = (() => {
             this.registerFolder(entries2, 0, folder, rootFolder, 0);
             return (0, Burner_1.burn)(entries2);
           };
-          MsgReader2.prototype.registerFolder = function(entries2, index, folder, rootFolder, depth) {
+          MsgReader3.prototype.registerFolder = function(entries2, index, folder, rootFolder, depth) {
             var _loop_1 = function(set2) {
               var provider = set2.provider, length_1 = set2.length;
               if (depth === 0 && set2.name === "__properties_version1.0") {
@@ -5326,12 +5326,12 @@ var Spira = (() => {
               this.registerFolder(entries2, subIndex, subFolder, rootFolder, depth + 1);
             }
           };
-          MsgReader2.prototype.fieldsRecipAndAttachmentProperties = function(parserConfig, documentProperty, fields) {
+          MsgReader3.prototype.fieldsRecipAndAttachmentProperties = function(parserConfig, documentProperty, fields) {
             var propertiesBinary = documentProperty.provider();
             var propertiesDs = new DataStream_1.default(propertiesBinary, 8, DataStream_1.default.LITTLE_ENDIAN);
             this.importPropertiesFromFile(parserConfig, propertiesDs, fields);
           };
-          MsgReader2.prototype.importPropertiesFromFile = function(parserConfig, propertiesDs, fields) {
+          MsgReader3.prototype.importPropertiesFromFile = function(parserConfig, propertiesDs, fields) {
             var typeConverters = {
               64: function(dataView) {
                 var fileTime = dataView.getUint32(0, true) + 4294967296 * dataView.getUint32(4, true);
@@ -5359,12 +5359,12 @@ var Spira = (() => {
                 break;
             }
           };
-          MsgReader2.prototype.fieldsRootProperties = function(parserConfig, documentProperty, fields) {
+          MsgReader3.prototype.fieldsRootProperties = function(parserConfig, documentProperty, fields) {
             var propertiesBinary = documentProperty.provider();
             var propertiesDs = new DataStream_1.default(propertiesBinary, 32, DataStream_1.default.LITTLE_ENDIAN);
             this.importPropertiesFromFile(parserConfig, propertiesDs, fields);
           };
-          MsgReader2.prototype.fieldsDataDir = function(parserConfig, dirProperty, rootFolder, fields, subClass) {
+          MsgReader3.prototype.fieldsDataDir = function(parserConfig, dirProperty, rootFolder, fields, subClass) {
             for (var _i = 0, _a = dirProperty.subFolders(); _i < _a.length; _i++) {
               var subFolder = _a[_i];
               this.fieldsDataDirInner(parserConfig, subFolder, rootFolder, fields);
@@ -5383,7 +5383,7 @@ var Spira = (() => {
               }
             }
           };
-          MsgReader2.prototype.fieldsNameIdDir = function(parserConfig, dirProperty, rootFolder, fields) {
+          MsgReader3.prototype.fieldsNameIdDir = function(parserConfig, dirProperty, rootFolder, fields) {
             var guidTable = void 0;
             var stringTable = void 0;
             var entryTable = void 0;
@@ -5426,7 +5426,7 @@ var Spira = (() => {
               }
             }
           };
-          MsgReader2.prototype.fieldsDataReader = function(parserConfig) {
+          MsgReader3.prototype.fieldsDataReader = function(parserConfig) {
             var fields = {
               dataType: "msg",
               attachments: [],
@@ -5435,11 +5435,11 @@ var Spira = (() => {
             this.fieldsDataDir(parserConfig, this.reader.rootFolder(), this.reader.rootFolder(), fields, "root");
             return fields;
           };
-          MsgReader2.prototype.parseMsgData = function(parserConfig) {
+          MsgReader3.prototype.parseMsgData = function(parserConfig) {
             this.reader.parse();
             return this.fieldsDataReader(parserConfig);
           };
-          MsgReader2.prototype.getFileData = function() {
+          MsgReader3.prototype.getFileData = function() {
             var _a, _b, _c;
             if (this.fieldsData === void 0) {
               if (!this.reader.isMSGFile()) {
@@ -5459,7 +5459,7 @@ var Spira = (() => {
             }
             return this.fieldsData;
           };
-          MsgReader2.prototype.getAttachment = function(attach) {
+          MsgReader3.prototype.getAttachment = function(attach) {
             var attachData = typeof attach === "number" ? this.fieldsData.attachments[attach] : attach;
             if (attachData.innerMsgContent === true && typeof attachData.folderId === "number") {
               return { fileName: attachData.name + ".msg", content: this.innerMsgBurners[attachData.folderId]() };
@@ -5468,10 +5468,10 @@ var Spira = (() => {
               return { fileName: attachData.fileName, content: fieldData };
             }
           };
-          return MsgReader2;
+          return MsgReader3;
         }()
       );
-      exports.default = MsgReader;
+      exports.default = MsgReader2;
     }
   });
 
@@ -13856,6 +13856,7 @@ var Spira = (() => {
   }
 
   // src/lib/eml-parser.ts
+  var import_msgreader = __toESM(require_lib(), 1);
   function looksLikeOutlookDrag(text2) {
     if (!text2) return false;
     const head = text2.slice(0, 2e3);
@@ -14180,10 +14181,9 @@ var Spira = (() => {
     };
   }
   async function parseMsgFile(file) {
-    const mod = await Promise.resolve().then(() => __toESM(require_lib(), 1));
-    const MsgReader = mod.default ?? mod.default;
     const buf = await file.arrayBuffer();
-    const reader = new MsgReader(buf);
+    const Ctor = import_msgreader.default.default ?? import_msgreader.default;
+    const reader = new Ctor(buf);
     const data = reader.getFileData();
     let dateISO;
     const submitT = data.clientSubmitTime;
@@ -18615,7 +18615,7 @@ ${txt}` : txt;
   var KEY_LATEST = "app:latest-build-id";
   var KEY_UPDATE_URL = "app:update-url";
   function currentBuildId() {
-    return true ? "0.0.1-47f7970+ (2026-05-18T07:11:15Z)" : "(unknown)";
+    return true ? "0.0.1-c3f63f7+ (2026-05-18T07:23:24Z)" : "(unknown)";
   }
   async function loadVersionInfo() {
     let latest = null;
@@ -19030,15 +19030,15 @@ ${txt}` : txt;
       title: "\u30AF\u30EA\u30C3\u30AF\u3067\u30B3\u30D4\u30FC",
       onclick: async () => {
         try {
-          await navigator.clipboard.writeText("0.0.1-47f7970+ (2026-05-18T07:11:15Z)");
+          await navigator.clipboard.writeText("0.0.1-c3f63f7+ (2026-05-18T07:23:24Z)");
           buildLabel.textContent = "\u2713 \u30B3\u30D4\u30FC\u3057\u307E\u3057\u305F";
           setTimeout(() => {
-            buildLabel.textContent = `build: ${"0.0.1-47f7970+ (2026-05-18T07:11:15Z)"}`;
+            buildLabel.textContent = `build: ${"0.0.1-c3f63f7+ (2026-05-18T07:23:24Z)"}`;
           }, 1200);
         } catch {
         }
       }
-    }, [`build: ${"0.0.1-47f7970+ (2026-05-18T07:11:15Z)"}`]);
+    }, [`build: ${"0.0.1-c3f63f7+ (2026-05-18T07:23:24Z)"}`]);
     const menu = el("div", {
       class: "spira-menu spira-settings-menu",
       style: "position:fixed;z-index:var(--z-modal);min-width:280px"
@@ -20458,7 +20458,7 @@ ${txt}` : txt;
       setState({ errorBanner: `\u521D\u671F\u5316\u306B\u5931\u6557\u3057\u307E\u3057\u305F: ${msg}` });
       toast(root2, `\u521D\u671F\u5316\u30A8\u30E9\u30FC: ${msg}`, "error");
     }
-    console.log(`[spira] build: ${"0.0.1-47f7970+ (2026-05-18T07:11:15Z)"}`);
+    console.log(`[spira] build: ${"0.0.1-c3f63f7+ (2026-05-18T07:23:24Z)"}`);
     console.log(`[spira] repo mode: ${getRepoMode()}`);
   }
   async function doSync(root2, silent = false) {

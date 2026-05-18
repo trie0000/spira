@@ -508,16 +508,16 @@ export function parseOutlookDragText(text: string): ParsedEml {
 // File オブジェクトを受け取って ParsedEml で返す async 関数 1 本だけ
 // export する (lazy import 推奨)。
 
-import type MsgReaderClass from '@kenjiuno/msgreader';
+import MsgReader from '@kenjiuno/msgreader';
 
 export async function parseMsgFile(file: File): Promise<ParsedEml> {
-  // Dynamic import で msgreader を遅延ロード — .msg を実際にドロップした
-  // 時だけバンドルから読み込みたいケースに備える。esbuild はこれを
-  // 同じ chunk に統合してしまうが、コード上の意図は分離。
-  const mod = await import('@kenjiuno/msgreader');
-  const MsgReader = (mod.default ?? (mod as unknown as { default: typeof MsgReaderClass }).default) as typeof MsgReaderClass;
   const buf = await file.arrayBuffer();
-  const reader = new MsgReader(buf);
+  // CJS パッケージの default 取り扱いを esbuild に任せる。dynamic import
+  // 経由だと `mod.default.default` で 2 段ネストになるケースがあったため
+  // 静的 import に統一。
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const Ctor: any = (MsgReader as unknown as { default?: unknown }).default ?? MsgReader;
+  const reader = new Ctor(buf);
   const data = reader.getFileData();
 
   // 送信日時: clientSubmitTime (送信者が「送信」を押した時刻) を優先。
