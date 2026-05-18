@@ -133,15 +133,25 @@ export function isFormsSource(m: InboxMail): boolean {
   return !!m.conversationId && m.conversationId.startsWith('forms-');
 }
 
+/** Teams 返信経由で取り込まれた行かどうかを判定。PA フロー④ が
+ *  ConversationId を `teams-<parentMessageId>` 形式で埋め込む規約に従う。
+ *  syncInbox で internalThreadId / userThreadId と一致するチケットがあれば
+ *  自動紐付けされて InboxMails から消えるので、ここに残っている Teams 行は
+ *  「チャネル外の議論」や「完了済みチケットへの返信 (運用次第)」など。 */
+export function isTeamsSource(m: InboxMail): boolean {
+  return !!m.conversationId && m.conversationId.startsWith('teams-');
+}
+
 /** Inbox 表示・バッジカウントで共通して使う一次フィルター。
  *  以下のいずれかを満たすメールを表示:
  *    - 件名にチケットタグを含む (auto-link 待ちの返信メール)
  *    - Forms 経由 (新規問い合わせ、チケット起票判断待ち)
+ *    - Teams 経由 (チケットに紐付かなかった返信 = 手動トリアージ対象)
  *  syncInbox 側でタグ無しメールは物理削除する運用なので、ここに
- *  残っているタグ無しメールはほぼ Forms 経由のはず。 */
+ *  残っているタグ無しメールはほぼ Forms / Teams 経由のはず。 */
 export function inboxRowsWithTag(rows: InboxMail[]): InboxMail[] {
   return rows.filter(m =>
-    parseTicketTag(m.subject) != null || isFormsSource(m),
+    parseTicketTag(m.subject) != null || isFormsSource(m) || isTeamsSource(m),
   );
 }
 
@@ -488,11 +498,25 @@ function renderHeaderRow(m: InboxMail): HTMLElement {
 
   const isHidden = !!m.isHidden;
 
+  // ソース別バッジ — Forms / Teams 由来は件名先頭に小さなチップで識別。
+  const sourceBadge = isFormsSource(m) ? el('span', {
+    class: 'spira-badge',
+    style: 'margin-right:var(--s-2);font-size:var(--fs-xs);background:rgba(160,90,140,0.14);color:#7c3a64;border-color:#a05a8c',
+    title: 'Microsoft Forms から取り込まれた問い合わせ',
+  }, ['📋 Forms'])
+    : isTeamsSource(m) ? el('span', {
+      class: 'spira-badge',
+      style: 'margin-right:var(--s-2);font-size:var(--fs-xs);background:rgba(91,103,168,0.14);color:#3b4789;border-color:#5b67a8',
+      title: 'Teams スレッドの返信 (チケット紐付け先が見つからず保留中)',
+    }, ['💬 Teams'])
+    : null;
+
   const subjectCell = el('td', { class: 'spira-tk-title', style: 'cursor:pointer' }, [
     isHidden ? el('span', {
       class: 'spira-badge spira-badge--muted',
       style: 'margin-right:var(--s-2);font-size:var(--fs-xs)',
     }, ['非表示']) : '',
+    ...(sourceBadge ? [sourceBadge] : []),
     m.subject,
   ]);
 

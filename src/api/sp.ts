@@ -978,12 +978,70 @@ export class SpRepository implements Repository {
     const unprocessed = await this.listInbox({ unprocessedOnly: true });
     const tickets = await this.listTickets();
     const byId = new Map(tickets.map(t => [t.id, t]));
+    // Teams スレッド ID → チケット ID の逆引き map (internalThreadId と
+    // userThreadId 両方を 1 つの map に詰める)。PA フロー④ が
+    // ConversationId に "teams-<parentMessageId>" を埋め込んでくるので、
+    // それを使って既存チケットに自動紐付けする。
+    const threadMap = new Map<string, { ticketId: number; threadType: 'internal' | 'user' }>();
+    for (const t of tickets) {
+      if (t.isDeleted) continue;
+      if (t.internalThreadId) threadMap.set(t.internalThreadId, { ticketId: t.id, threadType: 'internal' });
+      if (t.userThreadId)     threadMap.set(t.userThreadId,     { ticketId: t.id, threadType: 'user' });
+    }
     let autoLinked = 0;
     const errors: string[] = [];
     for (const m of unprocessed) {
       try {
+        const convId = m.conversationId ?? '';
+        const isForms = convId.startsWith('forms-');
+        const isTeams = convId.startsWith('teams-');
+
+        // ── Teams 返信の自動紐付け ──────────────────────────────
+        // PA フロー④ が ConversationId に "teams-<parentMessageId>" を入れて
+        // InboxMails に投入してくる。parentMessageId は Spira がチケット
+        // 起票時に保管した Internal/UserThreadId と一致するはず。
+        // ヒット → Comments に追加、InboxMails 物理削除 (= auto-link)
+        // ハズレ → 受信一覧に残して手動トリアージ (チャネル外の議論など)
+        if (isTeams) {
+          const parentId = convId.slice('teams-'.length);
+          const hit = threadMap.get(parentId);
+          if (hit) {
+            const ticket = byId.get(hit.ticketId);
+            // 完了済みチケットも紐付ける (議論の補足が後から来る場合あり)。
+            // 「完了は紐付けない」運用に変えたければここで !== '完了' に変更可。
+            if (ticket && !ticket.isDeleted) {
+              // 重複防止
+              if (m.internetMessageId) {
+                const existing = await this.listComments(ticket.id);
+                const dup = existing.some(
+                  (c) => c.type === 'received' && c.internetMessageId === m.internetMessageId,
+                );
+                if (dup) {
+                  await this.deleteInboxMail(m.id);
+                  autoLinked++;
+                  continue;
+                }
+              }
+              await this.addComment({
+                ticketId: ticket.id, type: 'received',
+                fromEmail: m.fromEmail, fromName: m.fromName,
+                content: m.bodyHtml || m.bodyText, isHtml: !!m.bodyHtml,
+                sentAt: m.sentAt ?? m.receivedAt, sourceEmailId: m.id,
+                hasAttachments: m.hasAttachments,
+                internetMessageId: m.internetMessageId,
+                source: 'teams',
+              });
+              await this.deleteInboxMail(m.id);
+              autoLinked++;
+              continue;
+            }
+          }
+          // ハズレ → 受信箱に残す (手動トリアージ)
+          console.warn(`[spira/sync] inbox #${m.id}: Teams reply (parent=${parentId}) not matched, kept for manual triage`);
+          continue;
+        }
+
         const tid = parseTicketTag(m.subject);
-        const isForms = !!m.conversationId && m.conversationId.startsWith('forms-');
         if (tid == null) {
           if (isForms) {
             // Forms 経由はタグ無しが正常。受信箱に残して管理者の手動

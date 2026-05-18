@@ -481,12 +481,58 @@ export class MockRepository implements Repository {
   async syncInbox(): Promise<SyncResult> {
     let autoLinked = 0;
     const errors: string[] = [];
+    // Teams スレッド ID → チケット ID の逆引き map (sp.ts と同様)
+    const threadMap = new Map<string, { ticketId: number }>();
+    for (const t of store.tickets) {
+      if (t.isDeleted) continue;
+      if (t.internalThreadId) threadMap.set(t.internalThreadId, { ticketId: t.id });
+      if (t.userThreadId)     threadMap.set(t.userThreadId,     { ticketId: t.id });
+    }
     // 走査対象を先にコピー (削除しながら回ると iteration がズレるため)
     const targets = store.inbox.filter(x => !x.isProcessed).slice();
     for (const m of targets) {
       try {
+        const convId = m.conversationId ?? '';
+        const isForms = convId.startsWith('forms-');
+        const isTeams = convId.startsWith('teams-');
+
+        // Teams 返信の自動紐付け (sp.ts と同じロジック)
+        if (isTeams) {
+          const parentId = convId.slice('teams-'.length);
+          const hit = threadMap.get(parentId);
+          if (hit) {
+            const ticket = store.tickets.find(t => t.id === hit.ticketId && !t.isDeleted);
+            if (ticket) {
+              if (m.internetMessageId) {
+                const dup = store.comments.some(
+                  c => c.ticketId === ticket.id && c.type === 'received' &&
+                       c.internetMessageId === m.internetMessageId,
+                );
+                if (dup) {
+                  await this.deleteInboxMail(m.id);
+                  autoLinked++;
+                  continue;
+                }
+              }
+              await this.addComment({
+                ticketId: ticket.id, type: 'received',
+                fromEmail: m.fromEmail, fromName: m.fromName,
+                content: m.bodyHtml || m.bodyText, isHtml: !!m.bodyHtml,
+                sentAt: m.sentAt ?? m.receivedAt, sourceEmailId: m.id,
+                hasAttachments: m.hasAttachments,
+                internetMessageId: m.internetMessageId,
+                source: 'teams',
+              });
+              await this.deleteInboxMail(m.id);
+              autoLinked++;
+              continue;
+            }
+          }
+          console.warn(`[spira/sync] inbox #${m.id}: Teams reply (parent=${parentId}) not matched, kept for manual triage`);
+          continue;
+        }
+
         const tid = parseTicketTag(m.subject);
-        const isForms = !!m.conversationId && m.conversationId.startsWith('forms-');
         if (tid == null) {
           if (isForms) {
             // Forms 経由はタグ無しが正常。受信箱に残して管理者の手動

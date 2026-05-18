@@ -1277,11 +1277,12 @@ function openHelpModal(root: HTMLElement): void {
   // ── Content sections ───────────────────────────────────────────────
 
   const intro = el('div', {}, [
-    p('Spira は SharePoint 上のリスト (Tickets / Comments / InboxMails / TeamsPostRequests / SpiraSettings) のみで動作します。外部連携のため、Power Automate (PA) を最大 3 本作成します:'),
+    p('Spira は SharePoint 上のリスト (Tickets / Comments / InboxMails / TeamsPostRequests / SpiraSettings) のみで動作します。外部連携のため、Power Automate (PA) を最大 4 本作成します:'),
     el('ul', { style: 'margin:0 0 var(--s-3);padding-left:1.2em;line-height:1.8;font-size:var(--fs-sm);color:var(--ink)' }, [
       el('li', {}, [el('strong', {}, ['① メール取り込み']), ' — Outlook の新着メールを InboxMails リストに追加 (必須)']),
       el('li', {}, [el('strong', {}, ['② Teams スレッド作成']), ' — チケット起票時に Teams へ自動投稿し DeepLink を書き戻す (任意)']),
       el('li', {}, [el('strong', {}, ['③ Forms 取り込み']), ' — Microsoft Forms 応答を InboxMails に追加 (任意)']),
+      el('li', {}, [el('strong', {}, ['④ Teams 返信同期']), ' — 管理チャネルの返信を InboxMails 経由でチケットに自動反映 (任意)']),
     ]),
     p('下の各セクションをクリックして手順を表示できます。'),
   ]);
@@ -1842,7 +1843,110 @@ function openHelpModal(root: HTMLElement): void {
   ]);
 
   // ============================================================
-  // 組み立て — 3 セクションをトグルで配置
+  // ============================================================
+  // PA フロー ④ — Teams 返信同期
+  // ============================================================
+  const teamsSyncFlow = el('div', {}, [
+    pn('Spira が起票時に Teams へ投稿したスレッドへの ',
+       el('strong', {}, ['返信']), ' を、',
+       el('strong', {}, ['同じチャネルから自動収集']), ' して該当チケットの ',
+       '受信スレッドに反映するフロー。'),
+    pn('内部スレッド / ユーザースレッドの両方が同じ管理チャネル群に居る前提。'),
+    pn('動作の流れ:'),
+    el('ol', { style: 'margin:0 0 var(--s-3);padding-left:1.2em;line-height:1.8;font-size:var(--fs-sm);color:var(--ink)' }, [
+      el('li', {}, ['Teams チャネルで誰かが返信 → PA フロー④ が起動']),
+      el('li', {}, ['返信を InboxMails に 1 行 INSERT (ConversationId = ', code("teams-<parentMessageId>"), ')']),
+      el('li', {}, ['Spira の syncInbox が InternalThreadId / UserThreadId と照合']),
+      el('li', {}, ['ヒット → Comments に追加 + InboxMails 行を物理削除 (= 受信一覧に出ない、自動でチケット詳細に反映)']),
+      el('li', {}, ['ハズレ (チャネル外の議論・完了済前の議題等) → 受信一覧に Teams バッジ付きで残置、手動トリアージ']),
+    ]),
+
+    h('1. 前提'),
+    el('ul', { style: 'margin:0 0 var(--s-3);padding-left:1.2em;line-height:1.8;font-size:var(--fs-sm);color:var(--ink)' }, [
+      el('li', {}, [code('PA フロー②'), ' で Spira がチケット起票時に Teams へ親メッセージを投稿していること (InternalThreadId / UserThreadId が Tickets に保存される)']),
+      el('li', {}, ['Spira 用の管理 Teams チャネル群が用意されている (1 つ以上)']),
+      el('li', {}, ['Microsoft Teams コネクタの認証アカウントが対象チャネルのメンバーであること']),
+    ]),
+
+    h('2. フロー本体の作成 — 監視するチャネル数だけフローを作る'),
+    pn(el('strong', {}, ['監視対象チャネルごとに 1 本ずつ作成']),
+       ' (例: 社内議論用 #spira-internal、顧客向け #spira-customer-A など)。',
+       'すべて同じ 2 ステップ構成。'),
+
+    stepCard({
+      num: 1,
+      title: 'Teams チャネル返信をトリガーする',
+      connector: 'Microsoft Teams',
+      action: '新しい返信がチャネルに追加されたとき (When a new reply is added to a channel) (V2)',
+      params: [
+        { field: 'Team', value: '(監視対象の Team を選択)', type: 'choose' },
+        { field: 'Channel', value: '(監視対象のチャネルを選択)', type: 'choose', hint: '例: #spira-internal。1 チャネル = 1 フロー。' },
+      ],
+    }),
+
+    stepCard({
+      num: 2,
+      title: 'InboxMails に行を作成 — Spira 側で自動振り分け',
+      connector: 'SharePoint',
+      action: '項目の作成 (Create item)',
+      note: 'Spira は ConversationId が "teams-..." で始まる行を Teams 返信と認識し、parentMessageId 部分を Tickets の InternalThreadId / UserThreadId と照合して自動紐付けする。',
+      params: [
+        { field: 'Site Address', value: 'https://<tenant>.sharepoint.com/sites/<site>', type: 'choose' },
+        { field: 'List Name', value: 'InboxMails', type: 'choose' },
+        { field: 'Title', value: "concat('[Teams] ', triggerOutputs()?['body/from/user/displayName'])", type: 'expression', hint: 'SP 必須列。識別用。' },
+        { field: 'Subject', value: "concat('[Teams] ', triggerOutputs()?['body/from/user/displayName'], ': ', substring(triggerOutputs()?['body/body/plainTextContent'], 0, min(60, length(triggerOutputs()?['body/body/plainTextContent']))))", type: 'expression', hint: '受信一覧での表示用。冒頭 60 字を含める。' },
+        { field: 'BodyHtml', value: "triggerOutputs()?['body/body/content']", type: 'dynamic', hint: 'Teams 返信の HTML 本文。Spira が isHtml=true で取り込む。' },
+        { field: 'BodyText', value: "triggerOutputs()?['body/body/plainTextContent']", type: 'dynamic' },
+        { field: 'FromName', value: "triggerOutputs()?['body/from/user/displayName']", type: 'dynamic' },
+        { field: 'FromEmail', value: "''", type: 'static', hint: 'Teams 返信から email は直接取れない (Graph API なしのため)。Spira 側で fromName から AD ルックアップして補完される。' },
+        { field: 'ReceivedAt', value: "triggerOutputs()?['body/createdDateTime']", type: 'dynamic' },
+        { field: 'SentAt', value: "triggerOutputs()?['body/createdDateTime']", type: 'dynamic' },
+        { field: 'ConversationId', value: "concat('teams-', triggerOutputs()?['body/replyToId'])", type: 'expression', hint: '★ 必須。"teams-" プレフィクス + 親メッセージ ID。これで Spira が自動紐付け対象と認識。' },
+        { field: 'InternetMessageId', value: "triggerOutputs()?['body/id']", type: 'dynamic', hint: '重複防止用に Teams メッセージ ID を入れる。' },
+        { field: 'HasAttachments', value: 'false', type: 'static' },
+        { field: 'IsProcessed', value: 'false', type: 'static' },
+        { field: 'IsHidden', value: 'false', type: 'static' },
+      ],
+    }),
+
+    h('3. 動作確認'),
+    ol([
+      el('div', {}, ['Spira でチケット起票 → 「🏢 内部スレッド起票」or 「👥 ユーザースレッド起票」をクリック']),
+      el('div', {}, ['対象 Teams チャネル に親メッセージが投稿される']),
+      el('div', {}, ['そのメッセージへ ', el('strong', {}, ['返信']), ' を投稿']),
+      el('div', {}, ['1〜3 分以内に Spira 側のチケット詳細スレッドに返信内容が反映される']),
+      el('div', {}, ['受信一覧には Teams バッジ付きの行が一瞬出るが、自動紐付け後に消える (auto-link 成功)']),
+    ]),
+
+    h('4. トラブルシューティング'),
+    el('ul', { style: 'margin:0;padding-left:1.2em;line-height:1.8;font-size:var(--fs-sm);color:var(--ink)' }, [
+      el('li', {}, [
+        el('strong', {}, ['受信一覧に Teams バッジ付き行が残る']),
+        ': その返信は ',
+        el('em', {}, ['チケット紐付け先が見つからなかった']),
+        '。原因は (a) PA フロー②でまだ起票してないチケットへの返信、(b) チケット側に InternalThreadId / UserThreadId が未保存、(c) 何かの理由で ID が不一致。手動で「既存に紐付け」可能。',
+      ]),
+      el('li', {}, [
+        el('strong', {}, ['同じ返信が複数同期される']),
+        ': PA フロー側で ',
+        code('InternetMessageId'),
+        ' に Teams の `id` を入れているか確認。Spira 側は同 ID の Comments が既にあれば skip するので、ここが空だと重複の原因に。',
+      ]),
+      el('li', {}, [
+        el('strong', {}, ['Spira からの自動投稿 (PA フロー②) が自分自身を起こす']),
+        ': PA フロー②の投稿は「親メッセージ」なので返信トリガー (このフロー④) は発火しない。' +
+        'もし返信トリガーが Spira の親メッセージで誤発火する場合はチャネル設定 / Teams コネクタの世代を確認。',
+      ]),
+      el('li', {}, [
+        el('strong', {}, ['Bot や Spira 自体の返信を除外したい']),
+        ': 必要なら ',
+        code("triggerOutputs()?['body/from/user/userIdentityType']"),
+        " が 'aadUser' のときだけ続行する条件を 2 と 3 の間に挟む。",
+      ]),
+    ]),
+  ]);
+
+  // 組み立て — 4 セクションをトグルで配置
   // ============================================================
   const flow1 = el('div', {}, [prereq, trigger, action, verify, trouble]);
 
@@ -1853,6 +1957,7 @@ function openHelpModal(root: HTMLElement): void {
     toggle('① メール取り込み', '(必須) Outlook → InboxMails', [flow1], true),
     toggle('② Teams スレッド作成', '(任意) チケット起票 → Teams 投稿 + DeepLink', [teamsFlow], false),
     toggle('③ Microsoft Forms 取り込み', '(任意) Forms 応答 → InboxMails', [formsFlow], false),
+    toggle('④ Teams 返信同期', '(任意) チャネル返信 → InboxMails (自動でチケットに紐付け)', [teamsSyncFlow], false),
   ]);
 
   openModal(root, {
