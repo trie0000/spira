@@ -82,6 +82,33 @@ function getRoot(): HTMLElement {
   return document.querySelector<HTMLElement>('#spira-root') ?? document.body;
 }
 
+/** HTML 本文を plain text に剥がす。Forms 経由など PA が BodyText を
+ *  空のまま InboxMails 行を作るケース向けの fallback 用。<br>/<p>/<div>/<li>
+ *  などのブロック境界を改行に置換してから全タグ削除し、よく使う HTML
+ *  エンティティをデコードする。 */
+function htmlToPlainText(html: string): string {
+  return html
+    .replace(/<style[\s\S]*?<\/style>/gi, '')
+    .replace(/<script[\s\S]*?<\/script>/gi, '')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/p>/gi, '\n\n')
+    .replace(/<\/div>/gi, '\n')
+    .replace(/<\/li>/gi, '\n')
+    .replace(/<\/tr>/gi, '\n')
+    .replace(/<\/td>/gi, '\t')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\r\n/g, '\n')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 export async function renderInbox(): Promise<HTMLElement> {
   const wrap = el('div', { class: 'spira-main-wrap', style: 'display:flex;flex-direction:column;height:100%;min-height:0' });
   // unprocessedOnly は外す。タグ付きメールは auto-sync で processed に
@@ -785,7 +812,15 @@ export function openNewTicketModal(m: InboxMail): void {
     style: 'width:100%;font:13px/1.55 ui-monospace,Menlo,monospace;resize:vertical',
     placeholder: 'メール本文 / Teams コピペ / 手入力',
   }) as HTMLTextAreaElement;
-  if (fromInbox) bodyArea.value = m.bodyText || '';
+  if (fromInbox) {
+    // PA が BodyHtml だけ書き込んで BodyText を空にしているケース
+    // (特に Forms 経由) があるため、bodyText が空なら bodyHtml を
+    // タグ剥がしして textarea に入れる。
+    const initialText = (m.bodyText && m.bodyText.trim())
+      ? m.bodyText
+      : (m.bodyHtml ? htmlToPlainText(m.bodyHtml) : '');
+    bodyArea.value = initialText;
+  }
 
   // Teams ソース時のパース結果プレビュー
   const previewLine = el('div', {
