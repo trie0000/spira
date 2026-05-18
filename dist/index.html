@@ -8,7 +8,7 @@
 </head>
 <body>
 <script>"use strict";
-(() => {
+var Spira = (() => {
   var __create = Object.create;
   var __defProp = Object.defineProperty;
   var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -6123,6 +6123,12 @@
       init_audit();
       LABEL_STYLE3 = "color:var(--ink-3);font-size:var(--fs-sm);align-self:center;justify-self:end;text-align:right;white-space:nowrap";
     }
+  });
+
+  // src/main.ts
+  var main_exports = {};
+  __export(main_exports, {
+    mount: () => mount
   });
 
   // src/styles/app.css
@@ -18626,7 +18632,7 @@ ${txt}` : txt;
   var KEY_LATEST = "app:latest-build-id";
   var KEY_UPDATE_URL = "app:update-url";
   function currentBuildId() {
-    return true ? "0.0.1-ca0a13f+ (2026-05-18T09:48:56Z)" : "(unknown)";
+    return true ? "0.0.1-e800aa8+ (2026-05-18T10:21:14Z)" : "(unknown)";
   }
   async function loadVersionInfo() {
     let latest = null;
@@ -19041,15 +19047,15 @@ ${txt}` : txt;
       title: "\u30AF\u30EA\u30C3\u30AF\u3067\u30B3\u30D4\u30FC",
       onclick: async () => {
         try {
-          await navigator.clipboard.writeText("0.0.1-ca0a13f+ (2026-05-18T09:48:56Z)");
+          await navigator.clipboard.writeText("0.0.1-e800aa8+ (2026-05-18T10:21:14Z)");
           buildLabel.textContent = "\u2713 \u30B3\u30D4\u30FC\u3057\u307E\u3057\u305F";
           setTimeout(() => {
-            buildLabel.textContent = `build: ${"0.0.1-ca0a13f+ (2026-05-18T09:48:56Z)"}`;
+            buildLabel.textContent = `build: ${"0.0.1-e800aa8+ (2026-05-18T10:21:14Z)"}`;
           }, 1200);
         } catch {
         }
       }
-    }, [`build: ${"0.0.1-ca0a13f+ (2026-05-18T09:48:56Z)"}`]);
+    }, [`build: ${"0.0.1-e800aa8+ (2026-05-18T10:21:14Z)"}`]);
     const menu = el("div", {
       class: "spira-menu spira-settings-menu",
       style: "position:fixed;z-index:var(--z-modal);min-width:280px"
@@ -20469,7 +20475,7 @@ ${txt}` : txt;
       setState({ errorBanner: `\u521D\u671F\u5316\u306B\u5931\u6557\u3057\u307E\u3057\u305F: ${msg}` });
       toast(root2, `\u521D\u671F\u5316\u30A8\u30E9\u30FC: ${msg}`, "error");
     }
-    console.log(`[spira] build: ${"0.0.1-ca0a13f+ (2026-05-18T09:48:56Z)"}`);
+    console.log(`[spira] build: ${"0.0.1-e800aa8+ (2026-05-18T10:21:14Z)"}`);
     console.log(`[spira] repo mode: ${getRepoMode()}`);
   }
   async function doSync(root2, silent = false) {
@@ -20513,6 +20519,7 @@ ${txt}` : txt;
   } else if (typeof document !== "undefined") {
     document.addEventListener("DOMContentLoaded", mount);
   }
+  return __toCommonJS(main_exports);
 })();
 /*! Bundled license information:
 

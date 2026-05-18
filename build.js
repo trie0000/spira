@@ -31,11 +31,7 @@ const buildOptions = {
   entryPoints: ['src/main.ts'],
   bundle: true,
   format: 'iife',
-  // globalName は意図的に外している。設定すると bundle 先頭が
-  //   var Spira = (() => { ... })()
-  // という形になり、bookmarklet URI 先頭が n365 (shapion) と異なるため
-  // Edge の drag-to-bookmark で挙動差が出る疑いあり。globalName 無しなら
-  // 単純な IIFE 形式となり n365 と同じ先頭パターンになる。
+  globalName: 'Spira',
   outfile: 'dist/spira.js',
   target: 'es2020',
   platform: 'browser',
@@ -113,12 +109,9 @@ if (watch || serve) {
   console.log(`[html] dist/index.html: ${sizeKb('dist/index.html')} KB`);
 
   // install.html: drag-to-bookmark installer with the entire minified bundle inlined.
-  // Wrap the IIFE in `void(function(){ ... })()` — n365 (shapion) と同じ
-  // 括弧付きパターン。`void function(){...}()` だと URL に %20 (空白) が
-  // 入って Edge の bookmarklet 判定ヒューリスティクスを通らない疑いあり。
-  // 機能的には等価だが、URL 形を n365 と完全一致させてドラッグ受け付けを
-  // 安定化する。
-  const inlined = `void(function(){${js}})()`;
+  // Wrap the IIFE in `void(function(){ ... }())` so re-clicking the bookmark doesn't
+  // pollute globals or cause "var redeclaration" issues — main.ts handles re-mount idempotency.
+  const inlined = `void function(){${js}}()`;
   const bookmarkletHref = 'javascript:' + encodeURIComponent(inlined);
   const installHtml = renderInstallHtml(bookmarkletHref);
   fs.writeFileSync('dist/install.html', installHtml);
@@ -153,37 +146,49 @@ if (watch || serve) {
 }
 
 function renderInstallHtml(bookmarkletHref) {
-  // n365 (shapion) の install.html を踏襲。Edge の drag-to-bookmark が
-  // 正しく動くことを保証するため、構造・属性・スタイルを最小限にする。
-  // 重要:
-  //   - <a> に `draggable` 属性を明示しない (デフォルトで true)
-  //   - <a> に onclick / その他のハンドラを付けない
-  //   - <a> の周囲にコピー ボタンなど別 UI を入れない (.bm-wrap の中身は
-  //     <p> + <a> のみ)
-  //   - CSS は最小限。`user-select` / `::before` 疑似要素は付けない
-  //   - 「コピー して手動登録」用には別途 <textarea readonly> を別ブロックに置く
-  return `<!DOCTYPE html>
+  return `<!doctype html>
 <html lang="ja">
 <head>
-<meta charset="UTF-8">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Spira インストール</title>
 <style>
-body { font-family: "Meiryo","メイリオ","Hiragino Sans","Yu Gothic UI",-apple-system,"Segoe UI",system-ui,sans-serif; max-width: 580px; margin: 60px auto; padding: 0 24px; color: #2a2a26; line-height: 1.75; background: #fafaf7; }
-h1 { font-size: 28px; font-weight: 700; margin-bottom: 8px; letter-spacing: -0.01em; }
-.sub { color: #7a766c; font-size: 14px; margin-bottom: 40px; }
-.step { display: flex; gap: 16px; margin-bottom: 28px; align-items: flex-start; }
-.step-num { width: 28px; height: 28px; background: #7a8a78; color: #fff; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; flex-shrink: 0; margin-top: 2px; }
-.step-body h3 { font-size: 16px; font-weight: 600; margin: 0 0 4px; }
-.step-body p { font-size: 14px; color: #7a766c; margin: 0; }
-.bm-wrap { background: #f3f1ea; border: 2px dashed #d6d0c0; border-radius: 8px; padding: 28px; text-align: center; margin: 20px 0 32px; }
-.bm-wrap p { font-size: 13px; color: #7a766c; margin: 0 0 16px; }
-#bm-link { display: inline-flex; align-items: center; gap: 8px; background: #7a8a78; color: #fff; text-decoration: none; padding: 12px 24px; border-radius: 6px; font-size: 16px; font-weight: 600; box-shadow: 0 2px 8px rgba(122,138,120,.25); cursor: grab; }
-#bm-link:hover { background: #5e6f5c; }
-hr { border: none; border-top: 1px solid #e8e4d8; margin: 32px 0; }
-.alt { font-size: 13px; color: #7a766c; }
-code { background: rgba(122, 118, 108, 0.16); color: #8b3a30; padding: 2px 6px; border-radius: 3px; font-size: 12px; font-family: "Cascadia Mono","SFMono-Regular", Menlo, Consolas, monospace; }
-#copy-area { width: 100%; height: 100px; font-size: 11px; font-family: "Cascadia Mono","SFMono-Regular", Menlo, Consolas, monospace; border: 1px solid #e8e4d8; border-radius: 4px; padding: 8px; resize: none; word-break: break-all; margin-top: 8px; cursor: pointer; display: block; background: #fafaf7; color: #2a2a26; box-sizing: border-box; }
-.note { background: rgba(196,127,28,0.10); border-left: 3px solid #c47f1c; padding: 12px 16px; border-radius: 4px; font-size: 13px; color: #2a2a26; margin-top: 24px; }
+  :root {
+    --ink: #2a2a26; --ink-3: #7a766c; --ink-4: #a8a39a;
+    --paper: #fafaf7; --paper-2: #f3f1ea; --paper-3: #e8e4d8;
+    --line: rgba(42,42,38,0.12);
+    --accent: #7a8a78; --accent-strong: #5e6f5c;
+    --code-fg: #8b3a30; --code-bg: rgba(122,118,108,0.16);
+    --font: "Meiryo","メイリオ","Hiragino Sans","Yu Gothic UI",-apple-system,"Segoe UI",system-ui,sans-serif;
+    --font-mono: ui-monospace,"Cascadia Mono","Consolas",monospace;
+  }
+  * { box-sizing: border-box; }
+  body { font-family: var(--font); max-width: 580px; margin: 60px auto; padding: 0 24px; color: var(--ink); line-height: 1.75; background: var(--paper); }
+  h1 { font-size: 28px; font-weight: 700; margin: 0 0 8px; letter-spacing: -0.01em; display: flex; align-items: center; gap: 12px; }
+  h1::before { content: ""; width: 14px; height: 14px; border-radius: 50%; background: var(--accent); display: inline-block; }
+  .sub { color: var(--ink-3); font-size: 14px; margin: 0 0 40px; }
+
+  .step { display: flex; gap: 16px; margin-bottom: 28px; align-items: flex-start; }
+  .step-num { width: 28px; height: 28px; background: var(--accent); color: #fff; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; flex-shrink: 0; margin-top: 2px; }
+  .step-body h3 { font-size: 16px; font-weight: 600; margin: 0 0 4px; color: var(--ink); }
+  .step-body p { font-size: 14px; color: var(--ink-3); margin: 0; }
+
+  .bm-wrap { background: var(--paper-2); border: 2px dashed var(--paper-3); border-radius: 8px; padding: 28px; text-align: center; margin: 20px 0 32px; }
+  .bm-wrap p { font-size: 13px; color: var(--ink-3); margin: 0 0 16px; }
+  #bm-link {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: var(--accent); color: #fff; text-decoration: none;
+    padding: 12px 24px; border-radius: 6px; font-size: 16px; font-weight: 600;
+    box-shadow: 0 2px 8px rgba(122,138,120,.25); cursor: grab;
+    user-select: none;
+  }
+  #bm-link:hover { background: var(--accent-strong); }
+  #bm-link::before { content: "●"; color: #fff; font-size: 10px; opacity: .85; }
+
+  hr { border: none; border-top: 1px solid var(--paper-3); margin: 32px 0; }
+  .alt { font-size: 13px; color: var(--ink-3); }
+  code { background: var(--code-bg); color: var(--code-fg); padding: 2px 6px; border-radius: 3px; font-size: 12px; font-family: var(--font-mono); }
+  .note { background: rgba(196,127,28,0.10); border-left: 3px solid #c47f1c; padding: 12px 16px; border-radius: 4px; font-size: 13px; color: var(--ink); margin-top: 24px; }
 </style>
 </head>
 <body>
@@ -209,7 +214,7 @@ code { background: rgba(122, 118, 108, 0.16); color: #8b3a30; padding: 2px 6px; 
 
 <div class="bm-wrap">
   <p>↓ このボタンをブックマークバーにドラッグ ↓</p>
-  <a id="bm-link" href="${bookmarkletHref}">Spira</a>
+  <a id="bm-link" href="${bookmarkletHref}" onclick="alert('ドラッグしてブックマークバーに登録してください。クリックでは起動しません（このページは SharePoint ではないため）。'); return false;">Spira</a>
 </div>
 
 <div class="step">
@@ -222,8 +227,8 @@ code { background: rgba(122, 118, 108, 0.16); color: #8b3a30; padding: 2px 6px; 
 </div>
 
 <hr>
-<p class="alt">ドラッグできない場合 — 下のテキスト欄をクリックして全選択 → <code>Ctrl+C</code> でコピー後、ブックマークバーで右クリック → 「ブックマークを追加」→ URL 欄に貼り付けてください：</p>
-<textarea id="copy-area" readonly onclick="this.select()">${bookmarkletHref}</textarea>
+
+<p class="alt"><strong>更新方法</strong>: 新しいバージョンが出たら、このページを再度開いて再度ドラッグしてください（古いブックマークは上書き or 削除）。</p>
 
 <div class="note">
   ⚠ <strong>SharePoint 上で実行する必要があります</strong>。Graph API・外部 SaaS・カスタムスクリプト無効環境でも動作するよう、SP REST API（同一オリジン認証）のみを使用しています。
