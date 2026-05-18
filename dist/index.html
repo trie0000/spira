@@ -17990,8 +17990,11 @@ ${txt}` : txt;
               return;
             }
           }
+          const descriptionRaw = fromInbox && m.bodyText ? m.bodyText : bodyArea.value;
+          const description = descriptionRaw.trim().slice(0, 4e3) || void 0;
           const t = await repo.createTicket({
             title,
+            description,
             status: statusSel.value,
             priority: prioSel.value,
             assigneeEmails: assigneePicker.getValue().emails.length > 0 ? assigneePicker.getValue().emails : void 0,
@@ -18629,7 +18632,7 @@ ${txt}` : txt;
   var KEY_LATEST = "app:latest-build-id";
   var KEY_UPDATE_URL = "app:update-url";
   function currentBuildId() {
-    return true ? "0.0.1-9039db9+ (2026-05-18T08:14:22Z)" : "(unknown)";
+    return true ? "0.0.1-e9eec2d+ (2026-05-18T08:50:09Z)" : "(unknown)";
   }
   async function loadVersionInfo() {
     let latest = null;
@@ -19044,15 +19047,15 @@ ${txt}` : txt;
       title: "\u30AF\u30EA\u30C3\u30AF\u3067\u30B3\u30D4\u30FC",
       onclick: async () => {
         try {
-          await navigator.clipboard.writeText("0.0.1-9039db9+ (2026-05-18T08:14:22Z)");
+          await navigator.clipboard.writeText("0.0.1-e9eec2d+ (2026-05-18T08:50:09Z)");
           buildLabel.textContent = "\u2713 \u30B3\u30D4\u30FC\u3057\u307E\u3057\u305F";
           setTimeout(() => {
-            buildLabel.textContent = `build: ${"0.0.1-9039db9+ (2026-05-18T08:14:22Z)"}`;
+            buildLabel.textContent = `build: ${"0.0.1-e9eec2d+ (2026-05-18T08:50:09Z)"}`;
           }, 1200);
         } catch {
         }
       }
-    }, [`build: ${"0.0.1-9039db9+ (2026-05-18T08:14:22Z)"}`]);
+    }, [`build: ${"0.0.1-e9eec2d+ (2026-05-18T08:50:09Z)"}`]);
     const menu = el("div", {
       class: "spira-menu spira-settings-menu",
       style: "position:fixed;z-index:var(--z-modal);min-width:280px"
@@ -20472,7 +20475,7 @@ ${txt}` : txt;
       setState({ errorBanner: `\u521D\u671F\u5316\u306B\u5931\u6557\u3057\u307E\u3057\u305F: ${msg}` });
       toast(root2, `\u521D\u671F\u5316\u30A8\u30E9\u30FC: ${msg}`, "error");
     }
-    console.log(`[spira] build: ${"0.0.1-9039db9+ (2026-05-18T08:14:22Z)"}`);
+    console.log(`[spira] build: ${"0.0.1-e9eec2d+ (2026-05-18T08:50:09Z)"}`);
     console.log(`[spira] repo mode: ${getRepoMode()}`);
   }
   async function doSync(root2, silent = false) {

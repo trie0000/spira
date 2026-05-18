@@ -1037,9 +1037,18 @@ export function openNewTicketModal(m: InboxMail): void {
           }
         }
 
-        // チケット作成
+        // チケット作成 — Description には初期本文の plain text 版を入れる。
+        // 一覧の Description 列が空にならないように。HTML メール (fromInbox の
+        // bodyHtml) は plain text 部分 (bodyText) を優先。長文は安全のため
+        // 4000 文字でクリップ (SP の Note 列は問題ないが、リスト表示の
+        // パフォーマンスを考慮)。
+        const descriptionRaw = (fromInbox && m.bodyText)
+          ? m.bodyText
+          : bodyArea.value;
+        const description = descriptionRaw.trim().slice(0, 4000) || undefined;
         const t = await repo.createTicket({
           title,
+          description,
           status: statusSel.value as TicketStatus,
           priority: prioSel.value as Priority,
           assigneeEmails: assigneePicker.getValue().emails.length > 0 ? assigneePicker.getValue().emails : undefined,
