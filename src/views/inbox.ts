@@ -15,25 +15,33 @@ import { createAssigneePicker } from '../components/assigneePicker';
 import { getDepartmentOptions, getInquiryCategoryOptions } from '../utils/optionLists';
 import type { InboxMail, TicketStatus, Priority, Ticket } from '../types';
 
-/** Find an existing (non-deleted) ticket whose source mail matches this
- *  inbox mail — used to block duplicate ticket creation when PA delivered
- *  the same email twice (or the user clicks 起票 on an already-imported
- *  mail).
+/** 同じ送信者 (fromEmail or fromName) かつ 同じ送信時刻 (分単位) の
+ *  受信履歴を持つチケットを探す。受信箱由来でも手動入力でも使える汎用版。
  *
- *  Match priority:
- *    1. internetMessageId — strongest signal, set by Outlook per-message.
- *    2. (fromEmail, sentAt) — what the user explicitly asked us to dedupe
- *       on. Comparing ISO timestamps as strings is fine; PA always emits
- *       the same shape.
+ *  比較ロジック:
+ *    1. internetMessageId 一致 → 強シグナル (PA / Outlook の per-message ID)
+ *    2. fromEmail + sentAt (分単位) 一致 → 通常のユースケース
+ *    3. fromName + sentAt (分単位) 一致 → email が無い場合の代替
  *
- *  N+1 cost: one listComments() per ticket. List size is small in
- *  practice; if it gets slow we can push the lookup into the repo with
- *  a server-side $filter on the Comments list. */
-async function findDuplicateTicketForMail(m: InboxMail): Promise<Ticket | null> {
-  if (!m.fromEmail && !m.internetMessageId) return null; // nothing reliable to match on
-  // Compare on sent time (sender's "send" timestamp). Fall back to
-  // receivedAt for rows that predate the SentAt column.
-  const mailTime = m.sentAt ?? m.receivedAt;
+ *  N+1 コスト: チケット数 × listComments。実用上は小さい (SP の Tickets は
+ *  数百件以下が想定)。 */
+async function findDuplicateTicket(opts: {
+  fromEmail?: string;
+  fromName?: string;
+  sentISO?: string;        // ISO 8601 (秒/ミリ秒含んでよい、内部で分まで切り捨て)
+  internetMessageId?: string;
+}): Promise<{ ticket: Ticket; reason: string } | null> {
+  const minuteKey = (iso?: string): string => {
+    if (!iso) return '';
+    const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+    return m ? `${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}` : iso;
+  };
+  const targetMin = minuteKey(opts.sentISO);
+  const fromEmailLc = (opts.fromEmail ?? '').toLowerCase().trim();
+  const fromNameLc  = (opts.fromName  ?? '').toLowerCase().trim();
+  const messageId   = (opts.internetMessageId ?? '').trim();
+  if (!fromEmailLc && !fromNameLc && !messageId) return null;
+
   const repo = getRepo();
   const tickets = await repo.listTickets();
   for (const t of tickets) {
@@ -42,18 +50,25 @@ async function findDuplicateTicketForMail(m: InboxMail): Promise<Ticket | null> 
     catch { continue; }
     for (const c of comments) {
       if (c.type !== 'received') continue;
-      if (m.internetMessageId && c.internetMessageId &&
-          c.internetMessageId === m.internetMessageId) {
-        return t;
+      if (messageId && c.internetMessageId && c.internetMessageId === messageId) {
+        return { ticket: t, reason: 'Message-ID 一致' };
       }
-      if (m.fromEmail && mailTime &&
-          c.fromEmail === m.fromEmail && c.sentAt === mailTime) {
-        return t;
+      const cMin = minuteKey(c.sentAt);
+      if (!cMin || !targetMin || cMin !== targetMin) continue;
+      const cEmail = (c.fromEmail ?? '').toLowerCase().trim();
+      const cName  = (c.fromName  ?? '').toLowerCase().trim();
+      if (fromEmailLc && cEmail && fromEmailLc === cEmail) {
+        return { ticket: t, reason: '送信者 (メール) + 送信時刻一致' };
+      }
+      if (fromNameLc && cName && fromNameLc === cName) {
+        return { ticket: t, reason: '送信者 (名前) + 送信時刻一致' };
       }
     }
   }
   return null;
 }
+
+// 旧 findDuplicateTicketForMail は findDuplicateTicket に統一済み。
 
 const expandedIds = new Set<number>();
 const selectedInboxIds = new Set<number>();
@@ -996,6 +1011,11 @@ export function openNewTicketModal(m: InboxMail): void {
   // 初期 placeholder
   sourceSel.dispatchEvent(new Event('change'));
 
+  // 重複起票チェックの 2-click 確認フラグ。ユーザが確認モーダルで
+  // 「重複しても起票」を押した後、もう一度「起票」をクリックすると
+  // dup チェックを skip して登録が進む。
+  let pendingDupOk = false;
+
   openModal(getRoot(), {
     title: '新規チケットを起票',
     body: grid,
@@ -1016,26 +1036,50 @@ export function openNewTicketModal(m: InboxMail): void {
       })();
 
       try {
-        // 受信箱由来の重複検知 (同じ送信者・送信時刻の既存チケット)
-        if (fromInbox) {
-          const dup = await findDuplicateTicketForMail(m);
+        // 受信箱由来 / 手動入力どちらでも、同じ送信者・送信時刻の既存
+        // チケットがあれば確認モーダルを出す。pendingDupOk フラグでもう
+        // 一度「起票」を押せば重複してもそのまま登録される 2-click 確認。
+        // pendingDupOk フラグはこの try ブロックの外 (modal 全体) で持つ
+        // ためにクロージャの外で定義済み。
+        if (!pendingDupOk) {
+          const dupQuery = fromInbox
+            ? {
+                fromEmail: m.fromEmail,
+                fromName: m.fromName,
+                sentISO: m.sentAt ?? m.receivedAt,
+                internetMessageId: m.internetMessageId,
+              }
+            : {
+                fromEmail,
+                fromName,
+                sentISO: baseISO,
+              };
+          const dup = await findDuplicateTicket(dupQuery);
           if (dup) {
-            const idShort = formatTicketIdShort(dup.id);
-            toast(getRoot(),
-              `${idShort} 「${dup.title}」 が同じメール (送信者・送信時刻一致) ですでに起票済みです。`,
-              'warn', 7000);
-            try { await repo.markInboxProcessed(m.id, { ticketId: dup.id, result: 'auto-linked' }); }
-            catch { /* non-fatal */ }
-            const open = getState().openTicketIds;
-            setState({
-              view: 'tickets',
-              selectedTicketId: dup.id,
-              openTicketIds: open.includes(dup.id) ? open : [...open, dup.id],
-              inboxCount: Math.max(0, getState().inboxCount - 1),
+            const idShort = formatTicketIdShort(dup.ticket.id);
+            confirmModal(getRoot(), {
+              title: '同じ送信者・送信時刻のチケットが存在します',
+              message:
+                `${idShort} 「${dup.ticket.title}」\n` +
+                `(${dup.reason})\n\n` +
+                'すでに同じ送信者・送信時刻で登録済みです。\n' +
+                '「重複しても起票」を押すと、もう一度「起票」ボタンを\n' +
+                'クリックすることで重複登録できます。',
+              primaryLabel: '重複しても起票',
+              primaryVariant: 'danger',
+              onConfirm: () => {
+                pendingDupOk = true; // 次の「起票」クリックで dup チェックを skip
+                toast(getRoot(),
+                  '重複登録モードに切り替えました。もう一度「起票」をクリックしてください',
+                  'warn', 6000);
+              },
             });
-            return;
+            // outer modal は開いたまま。ユーザは確認 modal で OK → 再度「起票」
+            // ボタンを押して登録、または直接モーダル閉じて中止。
+            throw new Error('pending-duplicate-confirm');
           }
         }
+        pendingDupOk = false; // 通常パスに戻すリセット (再利用時のため)
 
         // チケット作成 — Description には初期本文の plain text 版を入れる。
         // 一覧の Description 列が空にならないように。HTML メール (fromInbox の
@@ -1128,7 +1172,11 @@ export function openNewTicketModal(m: InboxMail): void {
           inboxCount,
         });
       } catch (e) {
-        toast(getRoot(), `起票に失敗: ${(e as Error).message}`, 'error');
+        const msg = (e as Error).message;
+        // pending-duplicate-confirm は確認モーダル表示用の意図的な throw。
+        // toast は出さず、外側 modal を開いたまま再 throw する。
+        if (msg === 'pending-duplicate-confirm') throw e;
+        toast(getRoot(), `起票に失敗: ${msg}`, 'error');
         throw e;
       }
     },

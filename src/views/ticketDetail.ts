@@ -1039,6 +1039,16 @@ function openAddHistoryModal(t: Ticket, existing: Comment[]): void {
     existing.map(c => fingerprint(c.fromName ?? '', c.sentAt, c.content))
   );
 
+  /** 送信者 (fromName) + 送信時刻 (分単位) だけのキー。本文は無視。
+   *  「同じ送信者・同じ日時の履歴がすでにあるか」を緩く検知するための
+   *  fingerprint より緩い指標。確認モーダルを出すだけで強制ブロックでは
+   *  ないので、本文違いでも「念のため確認したい」用途に使う。 */
+  const senderTimeKey = (author: string, isoTime: string): string =>
+    `${author.toLowerCase().trim()}::${minuteKey(isoTime)}`;
+  const existingSenderTimeKeys = new Set(
+    existing.map(c => senderTimeKey(c.fromName ?? '', c.sentAt))
+  );
+
   const sourceSel = el('select', {
     class: 'spira-input',
     style: 'width:200px;min-width:0',
@@ -1149,6 +1159,10 @@ function openAddHistoryModal(t: Ticket, existing: Comment[]): void {
   // proceeds with fromName='' on the orphan.
   let pendingEmptyOk = false;
   const clearPendingEmptyOk = () => { pendingEmptyOk = false; };
+  // 重複検知 (送信者 + 送信時刻一致) の 2-click 確認フラグ。
+  // 確認モーダルで「重複しても登録」を押すと true になり、次回「登録」
+  // クリック時は重複チェックを skip して登録が進む。
+  let pendingDupOk = false;
   // Any input change un-arms the pending confirmation so the user
   // isn't surprised by a stale state.
   // (wired after the inputs exist; declarations below)
@@ -1535,9 +1549,36 @@ function openAddHistoryModal(t: Ticket, existing: Comment[]): void {
           }
           return baseDate.toISOString();
         })();
+        // 重複検知: 同じ送信者・同じ送信時刻 (分単位) の履歴が既存にあれば
+        // 確認モーダルを表示。pendingDupOk が true なら skip して登録に進む。
+        if (!pendingDupOk) {
+          const sKey = senderTimeKey(fromName, sentISO);
+          if (existingSenderTimeKeys.has(sKey)) {
+            confirmModal(getRoot(), {
+              title: '同じ送信者・送信時刻の履歴があります',
+              message:
+                `送信者: ${fromName || '(空)'}\n` +
+                `送信時刻: ${sentISO}\n\n` +
+                'すでに同じ送信者・同じ日時の履歴が登録済みです。\n' +
+                '「重複しても登録」を押すと、もう一度「登録」ボタンを\n' +
+                'クリックすることで重複登録できます。',
+              primaryLabel: '重複しても登録',
+              primaryVariant: 'danger',
+              onConfirm: () => {
+                pendingDupOk = true;
+                toast(getRoot(),
+                  '重複登録モードに切り替えました。もう一度「登録」をクリックしてください',
+                  'warn', 6000);
+              },
+            });
+            throw new Error('pending-duplicate-confirm');
+          }
+        }
+        pendingDupOk = false; // リセット
+        // 完全一致 (本文も) のチェックはそのまま残す (silent skip)。
         const fp = fingerprint(fromName, sentISO, text);
         if (existingFingerprints.has(fp)) {
-          toast(getRoot(), '同じ時間の同じ履歴がすでに登録されています', 'warn');
+          toast(getRoot(), '同じ時間・同じ送信者・同じ本文の履歴がすでに登録されています', 'warn');
           throw new Error('duplicate');
         }
         try {
