@@ -605,15 +605,31 @@ export function openNewTicketModal(m: InboxMail): void {
     }
   };
 
-  // ファイルドロップ (.eml) は target に関係なく preventDefault + 自前処理。
-  // textarea 上にドロップされた場合でも textarea の intrinsic な file 挙動
-  // (= ブラウザがファイルを開いてモーダルが閉じる) を抑止するため、必ず
-  // preventDefault を最初に呼ぶ。テキストドロップは textarea 上であれば
-  // 標準挙動 (テキスト挿入) を尊重して preventDefault しない。
+  // メール (.eml / .msg / Outlook ドラッグテキスト) を取り込む統一ハンドラ。
+  // 優先順 (各段階で取得できれば return):
+  //   1. .eml ファイル — RFC 822 を parseEml で解析
+  //   2. .msg ファイル — Outlook 専用バイナリ。ブラウザでは解析不能なので
+  //      ユーザに代替手順を案内。
+  //   3. text/plain が RFC 822 風 → parseEml で解析
+  //   4. text/plain が Outlook ヘッダ風 → parseOutlookDragText で解析
+  //   5. text/plain (素のテキスト) → 最初の非空行を件名扱い
+  //
+  // textarea 上のテキストドロップは標準挙動 (テキスト貼付け) を尊重して
+  // preventDefault しない。ただし*ファイル*ドロップは textarea 上でも
+  // ブラウザがファイルを開く挙動を抑止するため必ず preventDefault する。
   const handleEmlDrop = async (e: DragEvent): Promise<void> => {
     const dt = e.dataTransfer;
     if (!dt) return;
     const files = Array.from(dt.files ?? []);
+    const types = Array.from(dt.types ?? []);
+    // デバッグ用: 何が来たかを console に残す (本番でもユーザが devtools
+    // を開けば確認可能、PII は含まない)。
+    console.debug('[spira/drop]', {
+      fileCount: files.length,
+      fileNames: files.map(f => `${f.name} (${f.type || '?'}, ${f.size}B)`),
+      types,
+    });
+    // .eml ファイル — Mac Outlook 主経路 & Outlook 「.eml で保存」した結果
     const emlFile = files.find(f =>
       /\.eml$/i.test(f.name) || f.type === 'message/rfc822',
     );
@@ -628,11 +644,39 @@ export function openNewTicketModal(m: InboxMail): void {
       }
       return;
     }
+    // .msg ファイル — Outlook for Windows 主経路。バイナリ形式 (CFB) で
+    // ブラウザ側パーサが無いため、テキストドラッグへの誘導 / .eml 保存を案内。
+    const msgFile = files.find(f =>
+      /\.msg$/i.test(f.name) || f.type === 'application/vnd.ms-outlook',
+    );
+    if (msgFile) {
+      e.preventDefault();
+      // ファイル名だけは件名候補として入れておく (拡張子を外す)
+      const stem = msgFile.name.replace(/\.[^.]+$/, '').trim();
+      if (stem && !titleInput.value.trim()) {
+        titleInput.value = stem;
+        titleInput.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+      toast(getRoot(),
+        '.msg は未対応です。Outlook で右クリック→「他のアクション」→「別名で保存」→ 形式を「テキストのみ (.eml)」にして保存し、その .eml をドラッグしてください。または、メール本文をテキスト選択してドラッグすれば送信者・件名も取り込めます。',
+        'warn', 12000);
+      return;
+    }
+    // その他のファイル (画像等) — 未対応として通知
+    if (files.length > 0) {
+      e.preventDefault();
+      toast(getRoot(), `未対応のファイル形式: ${files[0]!.name}`, 'warn', 5000);
+      return;
+    }
     // ファイル以外の場合、textarea 上のドロップは標準挙動 (テキスト貼付け) を尊重
     if (e.target instanceof HTMLTextAreaElement) return;
     e.preventDefault();
     const txt = dt.getData('text/plain') ?? '';
-    if (!txt) return;
+    if (!txt) {
+      console.warn('[spira/drop] no text/plain, no files matched. types:', types);
+      toast(getRoot(), 'ドロップされた内容を取り込めませんでした (text/plain も空)', 'warn');
+      return;
+    }
     if (looksLikeEml(txt)) {
       try { applyParsedEml(parseEml(txt)); return; } catch { /* fall through */ }
     }

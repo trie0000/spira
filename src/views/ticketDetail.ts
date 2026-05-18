@@ -1354,6 +1354,13 @@ function openAddHistoryModal(t: Ticket, existing: Comment[]): void {
     const dt = e.dataTransfer;
     if (!dt) return;
     const files = Array.from(dt.files ?? []);
+    const types = Array.from(dt.types ?? []);
+    console.debug('[spira/drop history]', {
+      fileCount: files.length,
+      fileNames: files.map(f => `${f.name} (${f.type || '?'}, ${f.size}B)`),
+      types,
+    });
+    // .eml — Mac Outlook 主経路
     const emlFile = files.find(f =>
       /\.eml$/i.test(f.name) || f.type === 'message/rfc822',
     );
@@ -1366,6 +1373,23 @@ function openAddHistoryModal(t: Ticket, existing: Comment[]): void {
       } catch (err) {
         toast(getRoot(), `EML 読み取り失敗: ${(err as Error).message}`, 'error');
       }
+      return;
+    }
+    // .msg — Outlook for Windows 主経路。バイナリで解析不能なので案内のみ。
+    const msgFile = files.find(f =>
+      /\.msg$/i.test(f.name) || f.type === 'application/vnd.ms-outlook',
+    );
+    if (msgFile) {
+      e.preventDefault();
+      toast(getRoot(),
+        '.msg は未対応です。Outlook で「別名で保存」→ 形式を「テキストのみ (.eml)」にして保存し再ドラッグするか、メール本文をテキスト選択してドラッグしてください。',
+        'warn', 12000);
+      return;
+    }
+    // 未対応ファイル
+    if (files.length > 0) {
+      e.preventDefault();
+      toast(getRoot(), `未対応のファイル形式: ${files[0]!.name}`, 'warn', 5000);
       return;
     }
     // ファイル以外は textarea 上の標準挙動を尊重
