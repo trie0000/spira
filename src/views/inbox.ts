@@ -10,7 +10,7 @@ import { attachColumnResize, savedColWidth } from '../utils/colResize';
 import { formatTicketIdShort, parseTicketTag } from '../utils/ticketTag';
 import { createDateTime } from '../components/datetime';
 import { parseTeamsPaste, resolveTeamsTimeToISO, detectLeadingOrphan } from '../lib/teams-paste';
-import { parseEml, parseOutlookDragText, looksLikeEml, looksLikeOutlookDrag } from '../lib/eml-parser';
+import { parseEml, parseOutlookDragText, parseMsgFile, looksLikeEml, looksLikeOutlookDrag } from '../lib/eml-parser';
 import { createAssigneePicker } from '../components/assigneePicker';
 import { getDepartmentOptions, getInquiryCategoryOptions } from '../utils/optionLists';
 import type { InboxMail, TicketStatus, Priority, Ticket } from '../types';
@@ -644,24 +644,35 @@ export function openNewTicketModal(m: InboxMail): void {
       }
       return;
     }
-    // .msg ファイル — Outlook for Windows 主経路。バイナリ (CFB) でブラウザ
-    // 側パーサが無いが、Outlook for Windows は .msg と一緒に text/plain
-    // (差出人/件名/日時等のヘッダ付き) を併送するケースが多いので、
-    // ここでは early-return せず text/plain 経路に流す。fallback で
-    // 何も取れなかったときに最後に .msg 用の案内 toast を出す。
+    // .msg ファイル — Outlook for Windows 主経路。@kenjiuno/msgreader で
+    // CFB バイナリをデコードして件名/送信者/メアド/送信日時/本文を抽出。
     const msgFile = files.find(f =>
       /\.msg$/i.test(f.name) || f.type === 'application/vnd.ms-outlook',
     );
     if (msgFile) {
       e.preventDefault();
-      // ファイル名を件名候補として保険で入れる (text/plain 解析が失敗した
-      // 場合の最低限のフォールバック)。後段が成功して上書きすれば OK。
-      const stem = msgFile.name.replace(/\.[^.]+$/, '').trim();
-      if (stem && !titleInput.value.trim()) {
-        titleInput.value = stem;
-        titleInput.dispatchEvent(new Event('input', { bubbles: true }));
+      try {
+        const parsed = await parseMsgFile(msgFile);
+        console.debug('[spira/drop] parseMsgFile result:', {
+          subject: parsed.subject,
+          fromName: parsed.fromName,
+          fromEmail: parsed.fromEmail,
+          dateISO: parsed.dateISO,
+          bodyLen: parsed.body?.length ?? 0,
+        });
+        applyParsedEml(parsed);
+        toast(getRoot(), `「${msgFile.name}」を取り込みました`, 'ok');
+        return;
+      } catch (err) {
+        console.warn('[spira/drop] parseMsgFile threw:', err);
+        toast(getRoot(), `.msg 読み取り失敗: ${(err as Error).message} — text/plain にフォールバックします`, 'warn', 8000);
+        // 失敗時は text/plain 経路へ流す (フォールバック)
+        const stem = msgFile.name.replace(/\.[^.]+$/, '').trim();
+        if (stem && !titleInput.value.trim()) {
+          titleInput.value = stem;
+          titleInput.dispatchEvent(new Event('input', { bubbles: true }));
+        }
       }
-      // 続行 → text/plain 経路へ
     } else if (files.length > 0) {
       // その他のファイル (画像等) — 未対応として通知して終了
       e.preventDefault();

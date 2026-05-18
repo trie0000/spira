@@ -5,6 +5,9 @@
 // and Outlook for Windows both emit reasonably clean .eml files for drag
 // operations and the parts we need live near the top.
 //
+// .msg files (Outlook for Windows binary format) are also supported via
+// @kenjiuno/msgreader — see parseMsgFile() below.
+//
 // Edge cases we handle:
 //   - MIME encoded-words in headers:  =?UTF-8?B?...?= and =?UTF-8?Q?...?=
 //     (Japanese subjects are commonly base64-encoded UTF-8).
@@ -492,4 +495,82 @@ export function parseOutlookDragText(text: string): ParsedEml {
     dateISO,
     body: body || undefined,
   };
+}
+
+// ─── .msg (Outlook for Windows binary) parser ─────────────────────────────
+//
+// .msg は OLE Compound File 形式のバイナリで、ブラウザ標準 API では中身を
+// 読めないが、@kenjiuno/msgreader が CFB ストリームをデコードして
+// senderName / senderEmail / subject / body / clientSubmitTime 等を取得
+// してくれる。bundle に約 200KB 追加されるが、Outlook for Windows での
+// 件名/送信者/メアド/本文/日時の取得が確実になる。
+//
+// File オブジェクトを受け取って ParsedEml で返す async 関数 1 本だけ
+// export する (lazy import 推奨)。
+
+import type MsgReaderClass from '@kenjiuno/msgreader';
+
+export async function parseMsgFile(file: File): Promise<ParsedEml> {
+  // Dynamic import で msgreader を遅延ロード — .msg を実際にドロップした
+  // 時だけバンドルから読み込みたいケースに備える。esbuild はこれを
+  // 同じ chunk に統合してしまうが、コード上の意図は分離。
+  const mod = await import('@kenjiuno/msgreader');
+  const MsgReader = (mod.default ?? (mod as unknown as { default: typeof MsgReaderClass }).default) as typeof MsgReaderClass;
+  const buf = await file.arrayBuffer();
+  const reader = new MsgReader(buf);
+  const data = reader.getFileData();
+
+  // 送信日時: clientSubmitTime (送信者が「送信」を押した時刻) を優先。
+  // 文字列で来るので Date.parse できる形式 (ISO 8601 など) を期待。
+  // 失敗時は messageDeliveryTime (受信時刻) にフォールバック。
+  let dateISO: string | undefined;
+  const submitT = data.clientSubmitTime;
+  if (submitT) {
+    const t = Date.parse(submitT);
+    if (!Number.isNaN(t)) dateISO = new Date(t).toISOString();
+  }
+  if (!dateISO && data.messageDeliveryTime) {
+    const t = Date.parse(data.messageDeliveryTime);
+    if (!Number.isNaN(t)) dateISO = new Date(t).toISOString();
+  }
+
+  // 本文: body (plain) を優先、なければ bodyHtml から tag を剥がしてテキスト化。
+  let body: string | undefined = data.body?.trim() || undefined;
+  if (!body && data.bodyHtml) {
+    body = stripHtmlTags(data.bodyHtml).trim() || undefined;
+  }
+
+  // SenderEmail は SMTP アドレスでなく EX アドレス (/o=ExchangeLabs/...)
+  // で来る場合があるため、`@` が含まれていなければ undefined に倒す。
+  let fromEmail: string | undefined = data.senderEmail?.trim();
+  if (fromEmail && !/@/.test(fromEmail)) fromEmail = undefined;
+
+  return {
+    subject: data.subject?.trim() || undefined,
+    fromName: data.senderName?.trim() || undefined,
+    fromEmail,
+    dateISO,
+    body,
+  };
+}
+
+/** 簡易 HTML タグ剥がし。bodyHtml だけ取れて plain text が無い時の
+ *  フォールバック用。`<style>` `<script>` ブロック丸ごと除去後、
+ *  改行系タグを `\n` に置換してからタグ全削除。 */
+function stripHtmlTags(html: string): string {
+  return html
+    .replace(/<style[\s\S]*?<\/style>/gi, '')
+    .replace(/<script[\s\S]*?<\/script>/gi, '')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/p>/gi, '\n')
+    .replace(/<\/div>/gi, '\n')
+    .replace(/<\/li>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\n{3,}/g, '\n\n');
 }

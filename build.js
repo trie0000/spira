@@ -34,6 +34,7 @@ const buildOptions = {
   globalName: 'Spira',
   outfile: 'dist/spira.js',
   target: 'es2020',
+  platform: 'browser',
   minify: prod,
   sourcemap: !prod,
   loader: { '.css': 'text' },
@@ -43,6 +44,16 @@ const buildOptions = {
     __SPIRA_BUILD_TIME__: JSON.stringify(buildTime),
     __SPIRA_BUILD_SHA__: JSON.stringify(gitSha + gitDirty),
     __SPIRA_VERSION__: JSON.stringify(pkg.version),
+  },
+  // Node 専用モジュールをブラウザ向け空スタブに差し替え。
+  // @kenjiuno/msgreader が iconv-lite (→ safer-buffer → buffer +
+  // string_decoder) を持ち込むが、現代の Unicode .msg ではこれらを実呼び
+  // しないため空実装で良い。
+  alias: {
+    'iconv-lite':     path.resolve('src/lib/_browser-shims.ts'),
+    'safer-buffer':   path.resolve('src/lib/_browser-shims.ts'),
+    'buffer':         path.resolve('src/lib/_browser-shims.ts'),
+    'string_decoder': path.resolve('src/lib/_browser-shims.ts'),
   },
   logLevel: 'info',
 };

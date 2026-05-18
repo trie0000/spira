@@ -22,7 +22,7 @@ import { openTicketPropertiesModal } from './ticketProperties';
 import { getDepartmentOptions, getInquiryCategoryOptions } from '../utils/optionLists';
 import { createDateTime } from '../components/datetime';
 import { parseTeamsPaste, resolveTeamsTimeToISO, normalizeForDedup, detectLeadingOrphan } from '../lib/teams-paste';
-import { parseEml, parseOutlookDragText, looksLikeEml, looksLikeOutlookDrag } from '../lib/eml-parser';
+import { parseEml, parseOutlookDragText, parseMsgFile, looksLikeEml, looksLikeOutlookDrag } from '../lib/eml-parser';
 import { createAiChatPane, isAiPanelOpen, toggleAiPanel } from './aiChat';
 import type { Ticket, Comment } from '../types';
 
@@ -1375,15 +1375,29 @@ function openAddHistoryModal(t: Ticket, existing: Comment[]): void {
       }
       return;
     }
-    // .msg — Outlook for Windows 主経路。バイナリで解析不能だが、併送される
-    // text/plain にヘッダが入っていることが多いので、ここでは return せず
-    // text/plain 経路に流す。
+    // .msg — Outlook for Windows 主経路。@kenjiuno/msgreader でデコード。
     const msgFile = files.find(f =>
       /\.msg$/i.test(f.name) || f.type === 'application/vnd.ms-outlook',
     );
     if (msgFile) {
       e.preventDefault();
-      // 続行 → text/plain 経路へ
+      try {
+        const parsed = await parseMsgFile(msgFile);
+        console.debug('[spira/drop history] parseMsgFile result:', {
+          subject: parsed.subject,
+          fromName: parsed.fromName,
+          fromEmail: parsed.fromEmail,
+          dateISO: parsed.dateISO,
+          bodyLen: parsed.body?.length ?? 0,
+        });
+        applyParsedEmlToHistory(parsed);
+        toast(getRoot(), `「${msgFile.name}」を取り込みました`, 'ok');
+        return;
+      } catch (err) {
+        console.warn('[spira/drop history] parseMsgFile threw:', err);
+        toast(getRoot(), `.msg 読み取り失敗: ${(err as Error).message} — text/plain にフォールバックします`, 'warn', 8000);
+        // 失敗時は text/plain 経路へ
+      }
     } else if (files.length > 0) {
       // 未対応ファイル
       e.preventDefault();
