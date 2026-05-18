@@ -14185,15 +14185,23 @@ var Spira = (() => {
     const Ctor = import_msgreader.default.default ?? import_msgreader.default;
     const reader = new Ctor(buf);
     const data = reader.getFileData();
+    const dateCandidates = [
+      { key: "clientSubmitTime", val: data.clientSubmitTime },
+      { key: "messageDeliveryTime", val: data.messageDeliveryTime },
+      { key: "creationTime", val: data.creationTime },
+      { key: "lastModificationTime", val: data.lastModificationTime }
+    ];
+    console.debug("[spira/parseMsg] date candidates:", dateCandidates);
     let dateISO;
-    const submitT = data.clientSubmitTime;
-    if (submitT) {
-      const t = Date.parse(submitT);
-      if (!Number.isNaN(t)) dateISO = new Date(t).toISOString();
-    }
-    if (!dateISO && data.messageDeliveryTime) {
-      const t = Date.parse(data.messageDeliveryTime);
-      if (!Number.isNaN(t)) dateISO = new Date(t).toISOString();
+    for (const c of dateCandidates) {
+      if (!c.val || typeof c.val !== "string") continue;
+      const t = Date.parse(c.val);
+      if (Number.isNaN(t)) continue;
+      const year = new Date(t).getUTCFullYear();
+      if (year < 1980 || year > 2100) continue;
+      dateISO = new Date(t).toISOString();
+      console.debug("[spira/parseMsg] adopted date:", c.key, "\u2192", dateISO);
+      break;
     }
     let body = data.body?.trim() || void 0;
     if (!body && data.bodyHtml) {
@@ -16334,8 +16342,14 @@ ${txt}` : txt;
             throw new Error("empty");
           }
           const fromName = authorInput.value.trim();
-          const baseISO = baseDate.toISOString();
-          const fp = fingerprint(fromName, baseISO, text2);
+          const pickerV = leadingDateTimePicker.getValue();
+          const sentISO = (() => {
+            if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(pickerV)) {
+              return new Date(pickerV).toISOString();
+            }
+            return baseDate.toISOString();
+          })();
+          const fp = fingerprint(fromName, sentISO, text2);
           if (existingFingerprints.has(fp)) {
             toast(getRoot3(), "\u540C\u3058\u6642\u9593\u306E\u540C\u3058\u5C65\u6B74\u304C\u3059\u3067\u306B\u767B\u9332\u3055\u308C\u3066\u3044\u307E\u3059", "warn");
             throw new Error("duplicate");
@@ -16347,7 +16361,7 @@ ${txt}` : txt;
               fromName: fromName || (src === "mail" ? "(\u30E1\u30FC\u30EB)" : "(\u5C65\u6B74)"),
               content: text2,
               isHtml: false,
-              sentAt: baseISO,
+              sentAt: sentISO,
               source: src
             });
             toast(getRoot3(), "\u30B9\u30EC\u30C3\u30C9\u306B\u8FFD\u52A0\u3057\u307E\u3057\u305F", "ok");
@@ -18615,7 +18629,7 @@ ${txt}` : txt;
   var KEY_LATEST = "app:latest-build-id";
   var KEY_UPDATE_URL = "app:update-url";
   function currentBuildId() {
-    return true ? "0.0.1-c3f63f7+ (2026-05-18T07:23:24Z)" : "(unknown)";
+    return true ? "0.0.1-9039db9+ (2026-05-18T08:14:22Z)" : "(unknown)";
   }
   async function loadVersionInfo() {
     let latest = null;
@@ -19030,15 +19044,15 @@ ${txt}` : txt;
       title: "\u30AF\u30EA\u30C3\u30AF\u3067\u30B3\u30D4\u30FC",
       onclick: async () => {
         try {
-          await navigator.clipboard.writeText("0.0.1-c3f63f7+ (2026-05-18T07:23:24Z)");
+          await navigator.clipboard.writeText("0.0.1-9039db9+ (2026-05-18T08:14:22Z)");
           buildLabel.textContent = "\u2713 \u30B3\u30D4\u30FC\u3057\u307E\u3057\u305F";
           setTimeout(() => {
-            buildLabel.textContent = `build: ${"0.0.1-c3f63f7+ (2026-05-18T07:23:24Z)"}`;
+            buildLabel.textContent = `build: ${"0.0.1-9039db9+ (2026-05-18T08:14:22Z)"}`;
           }, 1200);
         } catch {
         }
       }
-    }, [`build: ${"0.0.1-c3f63f7+ (2026-05-18T07:23:24Z)"}`]);
+    }, [`build: ${"0.0.1-9039db9+ (2026-05-18T08:14:22Z)"}`]);
     const menu = el("div", {
       class: "spira-menu spira-settings-menu",
       style: "position:fixed;z-index:var(--z-modal);min-width:280px"
@@ -20458,7 +20472,7 @@ ${txt}` : txt;
       setState({ errorBanner: `\u521D\u671F\u5316\u306B\u5931\u6557\u3057\u307E\u3057\u305F: ${msg}` });
       toast(root2, `\u521D\u671F\u5316\u30A8\u30E9\u30FC: ${msg}`, "error");
     }
-    console.log(`[spira] build: ${"0.0.1-c3f63f7+ (2026-05-18T07:23:24Z)"}`);
+    console.log(`[spira] build: ${"0.0.1-9039db9+ (2026-05-18T08:14:22Z)"}`);
     console.log(`[spira] repo mode: ${getRepoMode()}`);
   }
   async function doSync(root2, silent = false) {

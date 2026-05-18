@@ -520,18 +520,29 @@ export async function parseMsgFile(file: File): Promise<ParsedEml> {
   const reader = new Ctor(buf);
   const data = reader.getFileData();
 
-  // 送信日時: clientSubmitTime (送信者が「送信」を押した時刻) を優先。
-  // 文字列で来るので Date.parse できる形式 (ISO 8601 など) を期待。
-  // 失敗時は messageDeliveryTime (受信時刻) にフォールバック。
+  // 送信日時の候補列。msgreader は PT_SYSTIME を .toUTCString() で
+  // 文字列化して返すので Date.parse で UTC として解釈できる。優先順:
+  //   clientSubmitTime  — 送信者が「送信」を押した時刻 (= 通常の「送信日時」)
+  //   messageDeliveryTime — 受信メールボックスへの配信時刻
+  //   creationTime / lastModificationTime — 上記が空の保険
+  // 1980〜2100 の範囲外なら捨てる (FILETIME 0 や 1601 など壊れた値を排除)。
+  const dateCandidates = [
+    { key: 'clientSubmitTime',     val: (data as Record<string, unknown>).clientSubmitTime as string | undefined },
+    { key: 'messageDeliveryTime',  val: (data as Record<string, unknown>).messageDeliveryTime as string | undefined },
+    { key: 'creationTime',         val: (data as Record<string, unknown>).creationTime as string | undefined },
+    { key: 'lastModificationTime', val: (data as Record<string, unknown>).lastModificationTime as string | undefined },
+  ];
+  console.debug('[spira/parseMsg] date candidates:', dateCandidates);
   let dateISO: string | undefined;
-  const submitT = data.clientSubmitTime;
-  if (submitT) {
-    const t = Date.parse(submitT);
-    if (!Number.isNaN(t)) dateISO = new Date(t).toISOString();
-  }
-  if (!dateISO && data.messageDeliveryTime) {
-    const t = Date.parse(data.messageDeliveryTime);
-    if (!Number.isNaN(t)) dateISO = new Date(t).toISOString();
+  for (const c of dateCandidates) {
+    if (!c.val || typeof c.val !== 'string') continue;
+    const t = Date.parse(c.val);
+    if (Number.isNaN(t)) continue;
+    const year = new Date(t).getUTCFullYear();
+    if (year < 1980 || year > 2100) continue; // FILETIME 0 や 1601 を排除
+    dateISO = new Date(t).toISOString();
+    console.debug('[spira/parseMsg] adopted date:', c.key, '→', dateISO);
+    break;
   }
 
   // 本文: body (plain) を優先、なければ bodyHtml から tag を剥がしてテキスト化。

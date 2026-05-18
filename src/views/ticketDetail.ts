@@ -1523,8 +1523,19 @@ function openAddHistoryModal(t: Ticket, existing: Comment[]): void {
           throw new Error('empty');
         }
         const fromName = authorInput.value.trim();
-        const baseISO = baseDate.toISOString();
-        const fp = fingerprint(fromName, baseISO, text);
+        // mail / other ソースでは picker の「日付 + 時刻」両方を sentAt に
+        // 反映する。currentBaseDate() は日付しか取らない (Teams 用) ので
+        // ここでは picker.getValue() の完全な ISO 風文字列を採用。
+        // フォーマット: "yyyy-MM-ddTHH:mm" (タイムゾーン無 = ローカル時刻
+        // として new Date() が解釈) → toISOString() で UTC に変換。
+        const pickerV = leadingDateTimePicker.getValue();
+        const sentISO = (() => {
+          if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(pickerV)) {
+            return new Date(pickerV).toISOString();
+          }
+          return baseDate.toISOString();
+        })();
+        const fp = fingerprint(fromName, sentISO, text);
         if (existingFingerprints.has(fp)) {
           toast(getRoot(), '同じ時間の同じ履歴がすでに登録されています', 'warn');
           throw new Error('duplicate');
@@ -1536,7 +1547,7 @@ function openAddHistoryModal(t: Ticket, existing: Comment[]): void {
             fromName: fromName || (src === 'mail' ? '(メール)' : '(履歴)'),
             content: text,
             isHtml: false,
-            sentAt: baseISO,
+            sentAt: sentISO,
             source: src,
           });
           toast(getRoot(), 'スレッドに追加しました', 'ok');
