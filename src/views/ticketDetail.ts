@@ -322,6 +322,64 @@ function openMemoConflictModal(
   });
 }
 
+/** Teams チャット履歴の重複検知 3 択モーダル。
+ *  履歴追加モーダルで Teams ペーストを登録しようとした際、既存スレッドに
+ *  同じ (送信者 + 送信時刻分単位 + 本文) のメッセージがあるときに表示。
+ *
+ *  選択肢:
+ *    1. 削除して登録 — 重複分を skip して新規分のみ登録
+ *    2. 重複登録     — 全件 (重複も含めて) 登録
+ *    3. キャンセル   — 何もしない (モーダル閉じるだけ) */
+function openTeamsDupChoiceModal(opts: {
+  dupCount: number;
+  totalCount: number;
+  onSkipDups: () => void | Promise<void>;
+  onForceAll: () => void | Promise<void>;
+}): void {
+  const root = getRoot();
+  const body = el('div', { style: 'line-height:1.7;font-size:var(--fs-sm)' }, [
+    `Teams 履歴の中に、既存のスレッドに同じ送信者・同じ送信時刻・同じ本文の`,
+    el('br', {}, []),
+    `メッセージが ${opts.dupCount} 件あります (取り込み対象 ${opts.totalCount} 件中)。`,
+    el('br', {}, []),
+    el('br', {}, []),
+    '以下から処理を選択してください:',
+    el('ul', { style: 'margin-top:8px;padding-left:1.4em' }, [
+      el('li', {}, [el('strong', {}, ['削除して登録']), ' — 重複分を除外して新規分のみ登録 (推奨)']),
+      el('li', {}, [el('strong', {}, ['重複登録']), ' — 全件 (重複含む) を登録']),
+      el('li', {}, [el('strong', {}, ['キャンセル']), ' — 登録せず、入力を見直す']),
+    ]),
+  ]);
+
+  const make = (label: string, variant: 'primary' | 'secondary' | 'danger', cb: () => void | Promise<void>): HTMLElement =>
+    el('button', {
+      type: 'button',
+      class: `spira-btn spira-btn--${variant}`,
+      onclick: async (e: Event) => {
+        e.preventDefault();
+        try { await cb(); } catch (err) { console.warn('[teams-dup] action failed:', err); }
+        modalHandle.close();
+      },
+    }, [label]);
+
+  const optSkip   = make('削除して登録', 'primary',   opts.onSkipDups);
+  const optForce  = make('重複登録',     'danger',    opts.onForceAll);
+  const optCancel = make('キャンセル',   'secondary', () => { /* no-op */ });
+
+  const footWrap = el('div', { style: 'display:flex;gap:8px;flex-wrap:wrap;margin-top:16px;justify-content:flex-end' }, [
+    optCancel, optForce, optSkip,
+  ]);
+  body.appendChild(footWrap);
+
+  const modalHandle = openModal(root, {
+    title: 'Teams 履歴に重複があります',
+    body,
+    primaryLabel: '閉じる',
+    hideCancel: true,
+    onPrimary: () => { /* x クリックや Esc 時のフォールバック */ },
+  });
+}
+
 /** カードに「更新」バッジを付ける (画面遷移まで残る)。
  *  date-group の末尾 (NEW の右側 or 日付の右側) に挿入。 */
 function markCardUpdated(commentId: number): void {
@@ -1458,7 +1516,12 @@ function openAddHistoryModal(t: Ticket, existing: Comment[]): void {
 
   setTimeout(updatePreview, 0);
 
-  openModal(getRoot(), {
+  // Teams 重複検知の 3 択モーダル用にメイン modal の handle を保持する。
+  // 子モーダル (削除して登録 / 重複登録 / キャンセル) が選択後に親 modal を
+  // 閉じる必要があるため。`as any` で前方参照、実体は openModal の戻り値。
+  let outerModalHandle: { close: () => void } | null = null;
+
+  outerModalHandle = openModal(getRoot(), {
     title: 'スレッドに履歴を追加',
     body,
     size: 'lg',
@@ -1503,33 +1566,77 @@ function openAddHistoryModal(t: Ticket, existing: Comment[]): void {
           );
           throw new Error('no-messages');
         }
-        let added = 0;
-        let skipped = 0;
-        for (let i = 0; i < msgs.length; i++) {
-          const m = msgs[i];
+
+        // ── 重複検知 (Teams) ───────────────────────────────────────
+        // 各 msg について fingerprint (送信者 + 送信時刻分単位 + 本文) を
+        // 計算し、既存スレッドに同じものがあるか判定。重複が 1 件以上ある
+        // 場合、3 択モーダルを出してユーザに選択させる。
+        //   1. 削除して登録: 重複を skip し、新規分だけ登録
+        //   2. 重複登録: 全件登録 (重複も再登録)
+        //   3. キャンセル: 何もせず modal を閉じる (外側 modal も閉じる)
+        // pendingTeamsDupChoice が決まっていれば 3 択を skip して直接登録。
+        const dupFlags = msgs.map(m => {
           const isoForKey = resolveTeamsTimeToISO(m.time, baseDate, 0);
           const fp = fingerprint(m.author, isoForKey, m.body);
-          if (existingFingerprints.has(fp)) { skipped++; continue; }
-          existingFingerprints.add(fp);
-          try {
-            await repo.addComment({
-              ticketId: t.id,
-              type: 'received',
-              fromName: m.author,
-              content: m.body,
-              isHtml: false,
-              sentAt: resolveTeamsTimeToISO(m.time, baseDate, i),
-              source: 'teams',
-            });
-            added++;
-          } catch (e) {
-            console.warn('[spira] addComment failed for teams message:', e);
+          return existingFingerprints.has(fp);
+        });
+        const dupCount = dupFlags.filter(Boolean).length;
+
+        /** 実際の登録処理。dropDuplicates=true なら dup フラグが立った
+         *  メッセージを skip、false なら全件登録。 */
+        const doRegister = async (dropDuplicates: boolean): Promise<void> => {
+          let added = 0;
+          let skipped = 0;
+          for (let i = 0; i < msgs.length; i++) {
+            const mm = msgs[i];
+            if (dropDuplicates && dupFlags[i]) { skipped++; continue; }
+            const isoForKey = resolveTeamsTimeToISO(mm.time, baseDate, 0);
+            const fp = fingerprint(mm.author, isoForKey, mm.body);
+            existingFingerprints.add(fp);
+            try {
+              await repo.addComment({
+                ticketId: t.id,
+                type: 'received',
+                fromName: mm.author,
+                content: mm.body,
+                isHtml: false,
+                sentAt: resolveTeamsTimeToISO(mm.time, baseDate, i),
+                source: 'teams',
+              });
+              added++;
+            } catch (e) {
+              console.warn('[spira] addComment failed for teams message:', e);
+            }
           }
+          const parts: string[] = [];
+          if (added > 0) parts.push(`${added} 件追加`);
+          if (skipped > 0) parts.push(`${skipped} 件重複スキップ`);
+          toast(getRoot(), parts.length ? parts.join(' / ') : '追加なし', added > 0 ? 'ok' : 'warn');
+          setState({});
+        };
+
+        if (dupCount > 0) {
+          // 3 択モーダルを表示し、選択結果に応じて登録または cancel。
+          // 親モーダルは throw で開いたままにし、子モーダルの選択後に閉じる。
+          openTeamsDupChoiceModal({
+            dupCount,
+            totalCount: msgs.length,
+            onSkipDups: async () => {
+              await doRegister(true);
+              outerModalHandle?.close();
+            },
+            onForceAll: async () => {
+              await doRegister(false);
+              outerModalHandle?.close();
+            },
+            // キャンセル時は何もしない (子モーダルが close するだけ)。
+            // 親モーダルは開いたままなので、ユーザが本文編集して再 submit 可能。
+          });
+          throw new Error('pending-teams-dup-confirm');
         }
-        const parts = [];
-        if (added > 0) parts.push(`${added} 件追加`);
-        if (skipped > 0) parts.push(`${skipped} 件重複スキップ`);
-        toast(getRoot(), parts.length ? parts.join(' / ') : '追加なし', added > 0 ? 'ok' : 'warn');
+
+        // 重複なし → そのまま登録
+        await doRegister(false);
       } else {
         const text = bodyArea.value.trim();
         if (!text) {
