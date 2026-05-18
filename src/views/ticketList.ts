@@ -82,27 +82,89 @@ export async function renderTicketList(): Promise<HTMLElement> {
   const sorted = applySort(filtered);
 
   // ルール: タイトル(subbar) → コントロール(toolbar) → 本体 の順
-  wrap.appendChild(renderSubBar(sorted.length));
+  // sorted を渡しているのは CSV エクスポートで「表示中の (フィルタ済) 全件」
+  // を対象にするため。
+  wrap.appendChild(renderSubBar(sorted.length, sorted));
   wrap.appendChild(renderToolbar());
   wrap.appendChild(renderTable(sorted, metaMap));
   return wrap;
 }
 
-function renderSubBar(visibleCount: number): HTMLElement {
+function renderSubBar(visibleCount: number, visibleTickets: Ticket[]): HTMLElement {
   const selCount = selectedIds.size;
   const right: (HTMLElement | string)[] = [];
+
+  // CSV エクスポート (常時表示) — フィルタ後の visibleTickets を全件 DL
+  // 選択あり → 選択分のみ / なし → 全件
+  const csvBtn = el('button', {
+    class: 'spira-btn spira-btn--secondary spira-btn--sm',
+    title: selCount > 0
+      ? `選択中 ${selCount} 件を CSV ダウンロード`
+      : `表示中の ${visibleCount} 件を CSV ダウンロード`,
+    onclick: () => {
+      const target = selCount > 0
+        ? visibleTickets.filter(t => selectedIds.has(t.id))
+        : visibleTickets;
+      exportTicketsCsv(target);
+    },
+  }, [
+    el('span', { html: icon('external'), style: 'display:inline-flex;width:14px;height:14px' }),
+    selCount > 0 ? `選択分 CSV (${selCount})` : `CSV (${visibleCount})`,
+  ]);
+
   if (selCount > 0) {
+    // 選択中のバルク操作ボタン群
+    const statusBtn = el('button', {
+      class: 'spira-btn spira-btn--secondary spira-btn--sm',
+      onclick: (e: Event) => {
+        e.stopPropagation();
+        openInlineSelectMenu<TicketStatus>(statusBtn, ticketStatusList(), undefined, async (next) => {
+          await onBulkUpdate({ status: next }, `ステータスを「${next}」に変更`);
+        });
+      },
+    }, ['ステータス ▾']);
+
+    const prioBtn = el('button', {
+      class: 'spira-btn spira-btn--secondary spira-btn--sm',
+      onclick: (e: Event) => {
+        e.stopPropagation();
+        openInlineSelectMenu<Priority>(prioBtn, priorityList(), undefined, async (next) => {
+          await onBulkUpdate({ priority: next }, `優先度を「${next}」に変更`);
+        });
+      },
+    }, ['優先度 ▾']);
+
+    const assigneeBtn = el('button', {
+      class: 'spira-btn spira-btn--secondary spira-btn--sm',
+      onclick: (e: Event) => {
+        e.stopPropagation();
+        openInlineAssigneeMenu(assigneeBtn, [], async (emails, names) => {
+          await onBulkUpdate(
+            { assigneeEmails: emails, assigneeNames: names },
+            emails.length > 0 ? `担当者を ${names.join(', ')} に変更` : '担当者をクリア',
+          );
+        });
+      },
+    }, ['担当者 ▾']);
+
     right.push(
       el('span', { style: 'font-size:var(--fs-sm);color:var(--ink);margin-right:var(--s-3)' }, [`${selCount} 件選択中`]),
       el('button', {
         class: 'spira-btn spira-btn--secondary spira-btn--sm',
         onclick: () => { selectedIds.clear(); setState({}); },
       }, ['選択解除']),
+      statusBtn,
+      prioBtn,
+      assigneeBtn,
+      csvBtn,
       el('button', {
         class: 'spira-btn spira-btn--danger spira-btn--sm',
         onclick: () => onBulkDelete(),
       }, [`${selCount} 件を削除`]),
     );
+  } else {
+    // 選択なしのときは CSV だけ右に
+    right.push(csvBtn);
   }
 
   return el('div', { class: 'spira-subbar' + (selCount > 0 ? ' selected' : '') }, [
@@ -113,6 +175,78 @@ function renderSubBar(visibleCount: number): HTMLElement {
     el('div', { style: 'flex:1' }),
     ...right,
   ]);
+}
+
+/** バルク更新の共通実装。引数の patch を選択中の全チケットに適用。 */
+async function onBulkUpdate(patch: Partial<Ticket>, label: string): Promise<void> {
+  const ids = Array.from(selectedIds);
+  if (ids.length === 0) return;
+  try {
+    let failed = 0;
+    for (const id of ids) {
+      try { await getRepo().updateTicket(id, patch); }
+      catch { failed++; }
+    }
+    if (failed > 0) {
+      toast(root(), `${ids.length - failed} 件更新、${failed} 件失敗 (${label})`, 'warn');
+    } else {
+      toast(root(), `${ids.length} 件を更新しました (${label})`, 'ok');
+    }
+    selectedIds.clear();
+    setState({});
+  } catch (e) {
+    toast(root(), `更新失敗: ${(e as Error).message}`, 'error');
+  }
+}
+
+/** チケット一覧 (or 選択分) を CSV 形式でダウンロード。
+ *  Excel が文字化けしないよう UTF-8 BOM を先頭に付与。 */
+function exportTicketsCsv(tickets: Ticket[]): void {
+  if (tickets.length === 0) {
+    toast(root(), 'エクスポート対象がありません', 'warn');
+    return;
+  }
+  const header = [
+    'ID', 'タイトル', 'ステータス', '優先度', '担当者', '担当者メール',
+    '部門', '問い合わせ種別', '起票者', '起票者メール',
+    '期限', '作成日', '最終更新',
+    'Teams 内部スレッド', 'Teams ユーザースレッド',
+    '説明 (先頭 200 文字)',
+  ];
+  const rows = tickets.map(t => [
+    formatTicketIdShort(t.id),
+    t.title,
+    t.status,
+    t.priority,
+    (t.assigneeNames ?? []).join(' / '),
+    (t.assigneeEmails ?? []).join(' / '),
+    t.department ?? '',
+    t.inquiryCategory ?? '',
+    t.reporterName ?? '',
+    t.reporterEmail ?? '',
+    t.dueDate ? fmtDate(t.dueDate, false) : '',
+    fmtDate(t.createdAt),
+    fmtDate(t.updatedAt),
+    t.internalDeepLink ?? '',
+    t.userDeepLink ?? '',
+    (t.description ?? '').replace(/\s+/g, ' ').slice(0, 200),
+  ]);
+  const escape = (v: string): string => {
+    // CSV 仕様: " を "" に。本体を " で囲む。
+    return `"${String(v).replace(/"/g, '""')}"`;
+  };
+  const lines = [header, ...rows].map(r => r.map(escape).join(','));
+  // BOM 付き UTF-8 で Excel 直開き対応
+  const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `spira-tickets-${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  toast(root(), `${tickets.length} 件を CSV でダウンロードしました`, 'ok');
 }
 
 function onBulkDelete(): void {
