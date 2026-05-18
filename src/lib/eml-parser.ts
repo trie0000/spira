@@ -28,6 +28,9 @@ export interface ParsedEml {
   dateISO?: string;
   /** Plain-text body (decoded). Newlines normalised to \n. */
   body?: string;
+  /** Raw HTML body when the source mail had `text/html` content. UI 側で
+   *  「HTML 形式で取り込むかどうか」の判断に使う。 */
+  bodyHtml?: string;
 }
 
 /** Outlook for Windows のメール drag テキスト判定。
@@ -317,6 +320,36 @@ function findTextPart(rawBody: string, ct: { mediaType: string; params: Record<s
   return undefined;
 }
 
+/** multipart 内から **生 HTML 部分** を取り出す。findTextPart は HTML を
+ *  タグ剥がししてしまうので、別途 HTML をそのまま欲しい場合用。 */
+function findHtmlPart(rawBody: string, ct: { mediaType: string; params: Record<string, string> }, headers: Map<string, string>): string | undefined {
+  if (ct.mediaType === 'text/html') {
+    return decodeBody(rawBody, headers);
+  }
+  if (ct.mediaType.startsWith('multipart/')) {
+    const boundary = ct.params['boundary'];
+    if (!boundary) return undefined;
+    const sep = '--' + boundary;
+    const parts = rawBody.split(sep);
+    for (let i = 1; i < parts.length; i++) {
+      let chunk = parts[i]!;
+      if (chunk.startsWith('--')) break;
+      chunk = chunk.replace(/^\r?\n/, '');
+      const { headerBlock, body: partBody } = splitHeadersBody(chunk);
+      const partHeaders = parseHeaders(headerBlock);
+      const partCt = parseContentType(partHeaders.get('content-type'));
+      if (partCt.mediaType === 'text/html') {
+        return decodeBody(partBody.replace(/\r?\n--$/, ''), partHeaders);
+      }
+      if (partCt.mediaType.startsWith('multipart/')) {
+        const nested = findHtmlPart(partBody, partCt, partHeaders);
+        if (nested) return nested;
+      }
+    }
+  }
+  return undefined;
+}
+
 /** Parse a full `.eml` file content into structured fields. */
 export function parseEml(src: string): ParsedEml {
   const { headerBlock, body } = splitHeadersBody(src);
@@ -331,6 +364,7 @@ export function parseEml(src: string): ParsedEml {
   const from = fromRaw ? parseFromHeader(fromRaw) : {};
   const dateISO = dateRaw ? parseDateHeader(dateRaw) : undefined;
   const bodyText = findTextPart(body, ct, headers);
+  const bodyHtmlRaw = findHtmlPart(body, ct, headers);
 
   return {
     subject,
@@ -338,6 +372,7 @@ export function parseEml(src: string): ParsedEml {
     fromEmail: from.fromEmail,
     dateISO,
     body: bodyText?.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim(),
+    bodyHtml: bodyHtmlRaw?.trim() || undefined,
   };
 }
 
@@ -546,9 +581,12 @@ export async function parseMsgFile(file: File): Promise<ParsedEml> {
   }
 
   // 本文: body (plain) を優先、なければ bodyHtml から tag を剥がしてテキスト化。
+  // bodyHtml が存在する場合は、UI 側で「HTML 形式で取り込む」判断ができるよう
+  // 生 HTML も別フィールドで返す。
   let body: string | undefined = data.body?.trim() || undefined;
-  if (!body && data.bodyHtml) {
-    body = stripHtmlTags(data.bodyHtml).trim() || undefined;
+  const bodyHtml: string | undefined = data.bodyHtml?.trim() || undefined;
+  if (!body && bodyHtml) {
+    body = stripHtmlTags(bodyHtml).trim() || undefined;
   }
 
   // SenderEmail は SMTP アドレスでなく EX アドレス (/o=ExchangeLabs/...)
@@ -562,6 +600,7 @@ export async function parseMsgFile(file: File): Promise<ParsedEml> {
     fromEmail,
     dateISO,
     body,
+    bodyHtml,
   };
 }
 

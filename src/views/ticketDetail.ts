@@ -1383,6 +1383,13 @@ function openAddHistoryModal(t: Ticket, existing: Comment[]): void {
   // ファイル本体を渡してくるので、files → text/plain (eml 本文) →
   // text/plain (件名行) の 3 段階フォールバックで取り込む。
   // ドロップ時はソースを "mail" 固定。
+  //
+  // HTML フォーマット保持: parsed に bodyHtml があれば pendingHtmlBody に
+  // 保管し、保存時に「ユーザが textarea を編集していなければ」HTML として
+  // 保存する。編集していたら plain text として保存。
+  let pendingHtmlBody: string | null = null;
+  let textBaseline: string = '';  // applyParsedEml 時の textarea 内容 (編集検知用)
+
   const applyParsedEmlToHistory = (parsed: ReturnType<typeof parseEml>): void => {
     (sourceSel as HTMLSelectElement).value = 'mail';
     sourceSel.dispatchEvent(new Event('change', { bubbles: true }));
@@ -1411,6 +1418,9 @@ function openAddHistoryModal(t: Ticket, existing: Comment[]): void {
         bodyArea.dispatchEvent(new Event('input', { bubbles: true }));
       }
     }
+    // HTML 本文を保管。保存時に textarea が未編集なら HTML として保存する。
+    pendingHtmlBody = parsed.bodyHtml ?? null;
+    textBaseline = bodyArea.value;
     updatePreview();
   };
 
@@ -1689,16 +1699,23 @@ function openAddHistoryModal(t: Ticket, existing: Comment[]): void {
           throw new Error('duplicate');
         }
         try {
+          // HTML 形式の判定:
+          //   1. .eml / .msg ドロップで pendingHtmlBody が取れている
+          //   2. かつ ユーザが textarea を編集していない (textBaseline と同じ)
+          //   → 元 HTML をそのまま isHtml=true で保存
+          //   それ以外は textarea の plain text を isHtml=false で保存。
+          const userEdited = bodyArea.value !== textBaseline;
+          const useHtml = src === 'mail' && pendingHtmlBody && !userEdited;
           await repo.addComment({
             ticketId: t.id,
             type: 'received',
             fromName: fromName || (src === 'mail' ? '(メール)' : '(履歴)'),
-            content: text,
-            isHtml: false,
+            content: useHtml ? pendingHtmlBody! : text,
+            isHtml: !!useHtml,
             sentAt: sentISO,
             source: src,
           });
-          toast(getRoot(), 'スレッドに追加しました', 'ok');
+          toast(getRoot(), useHtml ? 'HTML 形式で取り込みました' : 'スレッドに追加しました', 'ok');
         } catch (e) {
           toast(getRoot(), `追加に失敗: ${(e as Error).message}`, 'error');
           throw e;
@@ -1749,23 +1766,31 @@ function openEditCommentModal(_t: Ticket, c: Comment): void {
     el('option', { value: 'other', ...(initialSource === 'other' ? { selected: 'selected' } : {}) }, ['その他']),
   ]) as HTMLSelectElement;
 
-  // 本文 textarea。
-  //   - isHtml === false (Teams ペースト / 手動追加): プレーンテキストとして表示
-  //   - isHtml === true  (メール取り込み): 生 HTML が見えるが編集は可能。
-  //     注意書きで「整形が崩れる可能性」を明示し、保存時は isHtml フラグを維持。
+  // 本文編集ポリシー:
+  //   - メール起源 (c.source === 'mail') または HTML 本文 (c.isHtml) は
+  //     本文編集を禁止する。受信メールの本文を後から書き換えると監査の
+  //     観点で改ざんになりうるため。ユーザが訂正したいのは大抵
+  //     「送信者表示・送信時刻・source 分類」だけ。
+  //   - それ以外 (Teams ペースト / その他手動追加) は plain text として
+  //     編集可能。
+  const isMailOrHtml = c.isHtml || c.source === 'mail';
   const contentArea = el('textarea', {
     class: 'spira-input',
     rows: '10',
-    style: 'width:100%;font:13px/1.55 ui-monospace,Menlo,monospace;resize:vertical',
+    style: 'width:100%;font:13px/1.55 ui-monospace,Menlo,monospace;resize:vertical' +
+           (isMailOrHtml ? ';background:var(--paper-2);color:var(--ink-3);cursor:not-allowed' : ''),
+    ...(isMailOrHtml ? { readonly: 'readonly' } : {}),
   }) as HTMLTextAreaElement;
-  // textarea content must be set via .value (the `value` attribute
-  // doesn't populate the displayed text).
   contentArea.value = c.content;
 
-  const htmlWarning = c.isHtml ? el('div', {
-    style: 'font-size:var(--fs-xs);color:#78350f;background:#fef3c7;border:1px solid #f59e0b;padding:var(--s-2) var(--s-3);border-radius:var(--r-2)',
+  const htmlWarning = isMailOrHtml ? el('div', {
+    style: 'font-size:var(--fs-xs);color:#78350f;background:#fef3c7;border:1px solid #f59e0b;padding:var(--s-2) var(--s-3);border-radius:var(--r-2);line-height:1.6',
   }, [
-    '⚠ このカードは HTML 形式 (メール取り込み) です。本文は生 HTML として表示・編集されます。タグを誤って削除すると整形が崩れます。',
+    '🔒 ',
+    el('strong', {}, ['メール本文は編集不可']),
+    ' — 受信メールの本文は監査履歴のため変更できません。',
+    el('br'),
+    '送信者・送信時刻・ソース分類は編集できます。本文に補足を残したい場合は「メモを追加」で記録してください。',
   ]) : null;
 
   // Consistent 2-column form grid (same look as the add-history modal).
@@ -1818,12 +1843,16 @@ function openEditCommentModal(_t: Ticket, c: Comment): void {
         sentAt = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4]), Number(m[5]), 0).toISOString();
       }
       try {
+        // メール本文は編集不可ポリシー: contentArea は readonly なので、
+        // 念のため updateComment にも content を渡さない (現在のソース変更
+        // も加味 — source を mail に変えた場合に本文書き換えを通さない)。
+        const newSource = sourceSel.value as 'mail' | 'teams' | 'other';
+        const lockBody = c.isHtml || c.source === 'mail' || newSource === 'mail';
         await getRepo().updateComment(c.id, {
           fromName: fromName || null,
           sentAt,
-          content: contentArea.value,
-          isHtml: c.isHtml, // preserve the original flag
-          source: sourceSel.value as 'mail' | 'teams' | 'other',
+          ...(lockBody ? {} : { content: contentArea.value, isHtml: c.isHtml }),
+          source: newSource,
         });
         toast(getRoot(), '更新しました', 'ok');
         setState({});
