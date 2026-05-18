@@ -187,6 +187,26 @@ code { background: rgba(122, 118, 108, 0.16); color: #8b3a30; padding: 2px 6px; 
 <h1>Spira インストール</h1>
 <p class="sub">SharePoint 上で動くメール起票型チケット管理 — bookmarklet 形式</p>
 
+<div id="file-warn" style="display:none;background:#fef3c7;border:1px solid #f59e0b;color:#78350f;border-radius:6px;padding:14px 18px;margin:20px 0;font-size:13px;line-height:1.7">
+  ⚠ <strong>このページは <code>file://</code> から開かれています</strong>。Edge / Chrome は
+  <code>file://</code> オリジンからの <code>javascript:</code> bookmarklet のドラッグ登録を
+  セキュリティ上拒否します (ドラッグすると禁止アイコン ⊘ が出る)。
+  <br><br>
+  対処は以下のいずれか:
+  <ul style="margin:6px 0 0;padding-left:20px">
+    <li><strong>SharePoint にアップロード</strong>して <code>https://</code> で開き直す (推奨)</li>
+    <li>ローカル HTTP サーバで開く: <code>python -m http.server 8000</code> → <code>http://localhost:8000/install.html</code></li>
+    <li>このページ下の <strong>「ドラッグできない場合」</strong>欄からテキストをコピーして手動でブックマーク追加 (file:// でも OK)</li>
+  </ul>
+</div>
+
+<script>
+  // file:// で開かれているときだけ警告バナーを表示。
+  if (location.protocol === 'file:') {
+    document.getElementById('file-warn').style.display = '';
+  }
+</script>
+
 <div class="step">
   <div class="step-num">1</div>
   <div class="step-body">
