@@ -10947,6 +10947,13 @@ var Spira = (() => {
   }
 
   // src/lib/eml-parser.ts
+  function looksLikeOutlookDrag(text2) {
+    if (!text2) return false;
+    const head = text2.slice(0, 2e3);
+    const hasFrom = /(^|\n)\s*(From|差出人|送信者)\s*[::]\s*\S/i.test(head);
+    const hasSubject = /(^|\n)\s*(Subject|件名)\s*[::]\s*\S/i.test(head);
+    return hasFrom && hasSubject;
+  }
   function looksLikeEml(text2) {
     if (!text2) return false;
     const head = text2.slice(0, 4096);
@@ -11175,6 +11182,93 @@ var Spira = (() => {
       fromEmail: from.fromEmail,
       dateISO,
       body: bodyText?.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim()
+    };
+  }
+  var OUTLOOK_KEYS = [
+    { canon: "from", aliases: ["from", "\u5DEE\u51FA\u4EBA", "\u9001\u4FE1\u8005"] },
+    { canon: "to", aliases: ["to", "\u5B9B\u5148"] },
+    { canon: "cc", aliases: ["cc"] },
+    { canon: "subject", aliases: ["subject", "\u4EF6\u540D"] },
+    { canon: "sent", aliases: ["sent", "date", "\u9001\u4FE1\u65E5\u6642", "\u65E5\u4ED8"] }
+  ];
+  function matchHeaderKey(raw) {
+    const lc = raw.trim().toLowerCase();
+    for (const h of OUTLOOK_KEYS) {
+      if (h.aliases.includes(lc)) return h.canon;
+    }
+    return null;
+  }
+  function parseJpDate(s) {
+    const m = s.match(/(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日(?:\s*\([^)]*\))?\s*(?:(\d{1,2}):(\d{2}))?/);
+    if (!m) return void 0;
+    const y = Number(m[1]);
+    const mo = Number(m[2]) - 1;
+    const d = Number(m[3]);
+    const h = m[4] ? Number(m[4]) : 0;
+    const mi = m[5] ? Number(m[5]) : 0;
+    const dt = new Date(y, mo, d, h, mi);
+    if (Number.isNaN(dt.getTime())) return void 0;
+    return dt.toISOString();
+  }
+  function parseOutlookDragText(text2) {
+    const lines = text2.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
+    const headers = {};
+    let i = 0;
+    const headerLimit = Math.min(30, lines.length);
+    let lastCanon = null;
+    for (; i < headerLimit; i++) {
+      const line = lines[i] ?? "";
+      if (!line.trim()) {
+        i++;
+        break;
+      }
+      if (/^[ \t]/.test(line) && lastCanon) {
+        headers[lastCanon] = ((headers[lastCanon] ?? "") + " " + line.trim()).trim();
+        continue;
+      }
+      const m = line.match(/^([A-Za-z぀-ヿ一-鿿]+)\s*[::]\s*(.*)$/);
+      if (m) {
+        const canon = matchHeaderKey(m[1] ?? "");
+        if (canon) {
+          headers[canon] = (m[2] ?? "").trim();
+          lastCanon = canon;
+          continue;
+        }
+      }
+      break;
+    }
+    if (!headers.from && !headers.subject) {
+      return {};
+    }
+    let fromName;
+    let fromEmail;
+    if (headers.from) {
+      const m = headers.from.match(/^(.*?)<([^>]+)>\s*$/);
+      if (m) {
+        const name = m[1].trim().replace(/^"|"$/g, "").trim();
+        fromName = name || void 0;
+        fromEmail = m[2].trim();
+      } else if (/^[^@\s]+@[^@\s]+$/.test(headers.from)) {
+        fromEmail = headers.from;
+      } else {
+        fromName = headers.from;
+      }
+    }
+    let dateISO;
+    if (headers.sent) {
+      dateISO = parseJpDate(headers.sent);
+      if (!dateISO) {
+        const t = Date.parse(headers.sent);
+        if (!Number.isNaN(t)) dateISO = new Date(t).toISOString();
+      }
+    }
+    const body = lines.slice(i).join("\n").replace(/^\n+/, "").replace(/\n+$/, "");
+    return {
+      subject: headers.subject?.trim(),
+      fromName,
+      fromEmail,
+      dateISO,
+      body: body || void 0
     };
   }
 
@@ -13168,6 +13262,17 @@ ${bodyArea.value}`;
         } catch {
         }
       }
+      if (txt && looksLikeOutlookDrag(txt)) {
+        try {
+          const parsed = parseOutlookDragText(txt);
+          if (parsed.subject || parsed.fromName || parsed.fromEmail || parsed.body) {
+            applyParsedEmlToHistory(parsed);
+            toast(getRoot3(), "Outlook \u30D8\u30C3\u30C0\u304B\u3089\u53D6\u308A\u8FBC\u307F\u307E\u3057\u305F", "ok");
+            return;
+          }
+        } catch {
+        }
+      }
       if (txt) {
         bodyArea.value = bodyArea.value ? `${bodyArea.value}
 ${txt}` : txt;
@@ -14536,6 +14641,17 @@ ${txt}` : txt;
         } catch {
         }
       }
+      if (looksLikeOutlookDrag(txt)) {
+        try {
+          const parsed = parseOutlookDragText(txt);
+          if (parsed.subject || parsed.fromName || parsed.fromEmail || parsed.body) {
+            applyParsedEml(parsed);
+            toast(getRoot4(), "Outlook \u30D8\u30C3\u30C0\u304B\u3089\u53D6\u308A\u8FBC\u307F\u307E\u3057\u305F", "ok");
+            return;
+          }
+        } catch {
+        }
+      }
       const firstLine = txt.split(/\r?\n/).map((s) => s.trim()).find((s) => s.length > 0) ?? txt.trim();
       titleInput.value = firstLine;
       titleInput.dispatchEvent(new Event("input", { bubbles: true }));
@@ -15465,7 +15581,7 @@ ${txt}` : txt;
   var KEY_LATEST = "app:latest-build-id";
   var KEY_UPDATE_URL = "app:update-url";
   function currentBuildId() {
-    return true ? "0.0.1-942f543+ (2026-05-18T01:44:57Z)" : "(unknown)";
+    return true ? "0.0.1-a056d99+ (2026-05-18T02:16:43Z)" : "(unknown)";
   }
   async function loadVersionInfo() {
     let latest = null;
@@ -15880,15 +15996,15 @@ ${txt}` : txt;
       title: "\u30AF\u30EA\u30C3\u30AF\u3067\u30B3\u30D4\u30FC",
       onclick: async () => {
         try {
-          await navigator.clipboard.writeText("0.0.1-942f543+ (2026-05-18T01:44:57Z)");
+          await navigator.clipboard.writeText("0.0.1-a056d99+ (2026-05-18T02:16:43Z)");
           buildLabel.textContent = "\u2713 \u30B3\u30D4\u30FC\u3057\u307E\u3057\u305F";
           setTimeout(() => {
-            buildLabel.textContent = `build: ${"0.0.1-942f543+ (2026-05-18T01:44:57Z)"}`;
+            buildLabel.textContent = `build: ${"0.0.1-a056d99+ (2026-05-18T02:16:43Z)"}`;
           }, 1200);
         } catch {
         }
       }
-    }, [`build: ${"0.0.1-942f543+ (2026-05-18T01:44:57Z)"}`]);
+    }, [`build: ${"0.0.1-a056d99+ (2026-05-18T02:16:43Z)"}`]);
     const menu = el("div", {
       class: "spira-menu spira-settings-menu",
       style: "position:fixed;z-index:var(--z-modal);min-width:280px"
@@ -17308,7 +17424,7 @@ ${txt}` : txt;
       setState({ errorBanner: `\u521D\u671F\u5316\u306B\u5931\u6557\u3057\u307E\u3057\u305F: ${msg}` });
       toast(root2, `\u521D\u671F\u5316\u30A8\u30E9\u30FC: ${msg}`, "error");
     }
-    console.log(`[spira] build: ${"0.0.1-942f543+ (2026-05-18T01:44:57Z)"}`);
+    console.log(`[spira] build: ${"0.0.1-a056d99+ (2026-05-18T02:16:43Z)"}`);
     console.log(`[spira] repo mode: ${getRepoMode()}`);
   }
   async function doSync(root2, silent = false) {

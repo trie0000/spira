@@ -22,7 +22,7 @@ import { openTicketPropertiesModal } from './ticketProperties';
 import { getDepartmentOptions, getInquiryCategoryOptions } from '../utils/optionLists';
 import { createDateTime } from '../components/datetime';
 import { parseTeamsPaste, resolveTeamsTimeToISO, normalizeForDedup, detectLeadingOrphan } from '../lib/teams-paste';
-import { parseEml, looksLikeEml } from '../lib/eml-parser';
+import { parseEml, parseOutlookDragText, looksLikeEml, looksLikeOutlookDrag } from '../lib/eml-parser';
 import { createAiChatPane, isAiPanelOpen, toggleAiPanel } from './aiChat';
 import type { Ticket, Comment } from '../types';
 
@@ -1374,6 +1374,17 @@ function openAddHistoryModal(t: Ticket, existing: Comment[]): void {
     const txt = dt.getData('text/plain') ?? '';
     if (txt && looksLikeEml(txt)) {
       try { applyParsedEmlToHistory(parseEml(txt)); return; } catch { /* fall through */ }
+    }
+    // Outlook for Windows のドラッグ: From/Subject 等のヘッダ付き text/plain
+    if (txt && looksLikeOutlookDrag(txt)) {
+      try {
+        const parsed = parseOutlookDragText(txt);
+        if (parsed.subject || parsed.fromName || parsed.fromEmail || parsed.body) {
+          applyParsedEmlToHistory(parsed);
+          toast(getRoot(), 'Outlook ヘッダから取り込みました', 'ok');
+          return;
+        }
+      } catch { /* fall through */ }
     }
     if (txt) {
       // textarea 外にドロップされた素のテキストは本文に追記。

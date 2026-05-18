@@ -10,7 +10,7 @@ import { attachColumnResize, savedColWidth } from '../utils/colResize';
 import { formatTicketIdShort, parseTicketTag } from '../utils/ticketTag';
 import { createDateTime } from '../components/datetime';
 import { parseTeamsPaste, resolveTeamsTimeToISO, detectLeadingOrphan } from '../lib/teams-paste';
-import { parseEml, looksLikeEml } from '../lib/eml-parser';
+import { parseEml, parseOutlookDragText, looksLikeEml, looksLikeOutlookDrag } from '../lib/eml-parser';
 import { createAssigneePicker } from '../components/assigneePicker';
 import { getDepartmentOptions, getInquiryCategoryOptions } from '../utils/optionLists';
 import type { InboxMail, TicketStatus, Priority, Ticket } from '../types';
@@ -635,6 +635,18 @@ export function openNewTicketModal(m: InboxMail): void {
     if (!txt) return;
     if (looksLikeEml(txt)) {
       try { applyParsedEml(parseEml(txt)); return; } catch { /* fall through */ }
+    }
+    // Outlook for Windows のドラッグ: .eml 本体ではなく、From/Subject 等の
+    // ヘッダ付きテキストだけ来る。looksLikeOutlookDrag で判定してパース。
+    if (looksLikeOutlookDrag(txt)) {
+      try {
+        const parsed = parseOutlookDragText(txt);
+        if (parsed.subject || parsed.fromName || parsed.fromEmail || parsed.body) {
+          applyParsedEml(parsed);
+          toast(getRoot(), 'Outlook ヘッダから取り込みました', 'ok');
+          return;
+        }
+      } catch { /* fall through */ }
     }
     // text/plain が件名のみ (旧来動作)
     const firstLine = txt.split(/\r?\n/).map(s => s.trim()).find(s => s.length > 0) ?? txt.trim();

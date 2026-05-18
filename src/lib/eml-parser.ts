@@ -27,6 +27,28 @@ export interface ParsedEml {
   body?: string;
 }
 
+/** Outlook for Windows のメール drag テキスト判定。
+ *  Windows 版 Outlook はドラッグ時に .eml ファイルではなく、以下の形式の
+ *  text/plain だけを渡してくる:
+ *
+ *    From: 田中太郎 <tanaka@x.com>           (or 差出人:)
+ *    Sent: 2026年5月17日 10:30              (or 送信日時:)
+ *    To: someone@y.com                       (or 宛先:)
+ *    Subject: テストメール                   (or 件名:)
+ *
+ *    (本文)
+ *
+ *  RFC 822 (.eml) ほど厳密でなく、locale により日本語キー or 英語キー混在。
+ *  「From: または 差出人:」「Subject: または 件名:」の両方が見つかれば
+ *  Outlook drag と判定する。 */
+export function looksLikeOutlookDrag(text: string): boolean {
+  if (!text) return false;
+  const head = text.slice(0, 2000);
+  const hasFrom = /(^|\n)\s*(From|差出人|送信者)\s*[::]\s*\S/i.test(head);
+  const hasSubject = /(^|\n)\s*(Subject|件名)\s*[::]\s*\S/i.test(head);
+  return hasFrom && hasSubject;
+}
+
 /** Best-effort detect: does this string look like an .eml file?
  *  Cheap and tolerant — we just look for an obvious mail header at the top. */
 export function looksLikeEml(text: string): boolean {
@@ -313,5 +335,141 @@ export function parseEml(src: string): ParsedEml {
     fromEmail: from.fromEmail,
     dateISO,
     body: bodyText?.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim(),
+  };
+}
+
+// ─── Outlook (Windows) drag-text parser ───────────────────────────────────
+//
+// Outlook for Windows はメールをブラウザにドラッグした際、`.eml` 本体では
+// なく以下のような text/plain だけを渡してくる:
+//
+//   差出人: 田中太郎 <tanaka@x.com>
+//   送信日時: 2026年5月17日 (火) 10:30
+//   宛先: someone@y.com
+//   件名: テストメール
+//
+//   (本文)
+//
+// あるいは英語ロケール:
+//
+//   From: John Doe <john@x.com>
+//   Sent: Monday, May 17, 2026 10:30 AM
+//   To: ...
+//   Subject: Test email
+//
+//   (body)
+//
+// parseEml と同じ ParsedEml シェイプで返し、UI 側 (inbox.ts /
+// ticketDetail.ts) からは parseEml と同じ感覚で扱える。
+
+interface HeaderKey {
+  canon: 'from' | 'to' | 'cc' | 'subject' | 'sent';
+  /** Lowercase aliases that map to this canonical key. */
+  aliases: string[];
+}
+const OUTLOOK_KEYS: HeaderKey[] = [
+  { canon: 'from',    aliases: ['from', '差出人', '送信者'] },
+  { canon: 'to',      aliases: ['to', '宛先'] },
+  { canon: 'cc',      aliases: ['cc'] },
+  { canon: 'subject', aliases: ['subject', '件名'] },
+  { canon: 'sent',    aliases: ['sent', 'date', '送信日時', '日付'] },
+];
+
+function matchHeaderKey(raw: string): HeaderKey['canon'] | null {
+  const lc = raw.trim().toLowerCase();
+  for (const h of OUTLOOK_KEYS) {
+    if (h.aliases.includes(lc)) return h.canon;
+  }
+  return null;
+}
+
+/** 日本語日付「2026年5月17日 (火) 10:30」/「2026年5月17日 10:30」を ISO へ。
+ *  曜日カッコ部分は無視。失敗時 undefined。 */
+function parseJpDate(s: string): string | undefined {
+  const m = s.match(/(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日(?:\s*\([^)]*\))?\s*(?:(\d{1,2}):(\d{2}))?/);
+  if (!m) return undefined;
+  const y = Number(m[1]);
+  const mo = Number(m[2]) - 1;
+  const d = Number(m[3]);
+  const h = m[4] ? Number(m[4]) : 0;
+  const mi = m[5] ? Number(m[5]) : 0;
+  const dt = new Date(y, mo, d, h, mi);
+  if (Number.isNaN(dt.getTime())) return undefined;
+  return dt.toISOString();
+}
+
+/** Outlook drag テキストをパースして ParsedEml に変換する。 */
+export function parseOutlookDragText(text: string): ParsedEml {
+  const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+
+  // ヘッダ部分: 上から見て連続する「キー: 値」行を集め、空行で打ち切る。
+  // 最初の 30 行までしか見ない (それ以上は本文)。
+  const headers: Partial<Record<HeaderKey['canon'], string>> = {};
+  let i = 0;
+  const headerLimit = Math.min(30, lines.length);
+  let lastCanon: HeaderKey['canon'] | null = null;
+  for (; i < headerLimit; i++) {
+    const line = lines[i] ?? '';
+    // 空行 → ヘッダ終了
+    if (!line.trim()) { i++; break; }
+    // 継続行 (空白始まり) → 直前のキーに連結
+    if (/^[ \t]/.test(line) && lastCanon) {
+      headers[lastCanon] = ((headers[lastCanon] ?? '') + ' ' + line.trim()).trim();
+      continue;
+    }
+    // 「キー: 値」または「キー:値」(半角・全角コロン両対応)
+    const m = line.match(/^([A-Za-z぀-ヿ一-鿿]+)\s*[::]\s*(.*)$/);
+    if (m) {
+      const canon = matchHeaderKey(m[1] ?? '');
+      if (canon) {
+        headers[canon] = (m[2] ?? '').trim();
+        lastCanon = canon;
+        continue;
+      }
+    }
+    // 認識できない行が来たら、ヘッダ終了とみなして抜ける
+    break;
+  }
+
+  // ヘッダが 1 つも取れなかったら諦めて空シェイプ
+  if (!headers.from && !headers.subject) {
+    return {};
+  }
+
+  // From: 名前 + email 分離
+  let fromName: string | undefined;
+  let fromEmail: string | undefined;
+  if (headers.from) {
+    const m = headers.from.match(/^(.*?)<([^>]+)>\s*$/);
+    if (m) {
+      const name = m[1].trim().replace(/^"|"$/g, '').trim();
+      fromName = name || undefined;
+      fromEmail = m[2].trim();
+    } else if (/^[^@\s]+@[^@\s]+$/.test(headers.from)) {
+      fromEmail = headers.from;
+    } else {
+      fromName = headers.from;
+    }
+  }
+
+  // 日付パース: 日本語 → JS Date.parse → undefined
+  let dateISO: string | undefined;
+  if (headers.sent) {
+    dateISO = parseJpDate(headers.sent);
+    if (!dateISO) {
+      const t = Date.parse(headers.sent);
+      if (!Number.isNaN(t)) dateISO = new Date(t).toISOString();
+    }
+  }
+
+  // 本文: i 以降の全行を結合 (前後の空行は trim)
+  const body = lines.slice(i).join('\n').replace(/^\n+/, '').replace(/\n+$/, '');
+
+  return {
+    subject: headers.subject?.trim(),
+    fromName,
+    fromEmail,
+    dateISO,
+    body: body || undefined,
   };
 }
