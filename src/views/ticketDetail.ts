@@ -1375,27 +1375,26 @@ function openAddHistoryModal(t: Ticket, existing: Comment[]): void {
       }
       return;
     }
-    // .msg — Outlook for Windows 主経路。バイナリで解析不能なので案内のみ。
+    // .msg — Outlook for Windows 主経路。バイナリで解析不能だが、併送される
+    // text/plain にヘッダが入っていることが多いので、ここでは return せず
+    // text/plain 経路に流す。
     const msgFile = files.find(f =>
       /\.msg$/i.test(f.name) || f.type === 'application/vnd.ms-outlook',
     );
     if (msgFile) {
       e.preventDefault();
-      toast(getRoot(),
-        '.msg は未対応です。Outlook で「別名で保存」→ 形式を「テキストのみ (.eml)」にして保存し再ドラッグするか、メール本文をテキスト選択してドラッグしてください。',
-        'warn', 12000);
-      return;
-    }
-    // 未対応ファイル
-    if (files.length > 0) {
+      // 続行 → text/plain 経路へ
+    } else if (files.length > 0) {
+      // 未対応ファイル
       e.preventDefault();
       toast(getRoot(), `未対応のファイル形式: ${files[0]!.name}`, 'warn', 5000);
       return;
     }
-    // ファイル以外は textarea 上の標準挙動を尊重
-    if (e.target instanceof HTMLTextAreaElement) return;
+    // ファイル以外は textarea 上の標準挙動を尊重 (ただし .msg ありなら処理続行)
+    if (!msgFile && e.target instanceof HTMLTextAreaElement) return;
     e.preventDefault();
     const txt = dt.getData('text/plain') ?? '';
+    console.debug('[spira/drop history] text/plain head (500ch):', txt.slice(0, 500));
     if (txt && looksLikeEml(txt)) {
       try { applyParsedEmlToHistory(parseEml(txt)); return; } catch { /* fall through */ }
     }
@@ -1403,12 +1402,21 @@ function openAddHistoryModal(t: Ticket, existing: Comment[]): void {
     if (txt && looksLikeOutlookDrag(txt)) {
       try {
         const parsed = parseOutlookDragText(txt);
+        console.debug('[spira/drop history] parseOutlookDragText result:', {
+          subject: parsed.subject,
+          fromName: parsed.fromName,
+          fromEmail: parsed.fromEmail,
+          dateISO: parsed.dateISO,
+          bodyLen: parsed.body?.length ?? 0,
+        });
         if (parsed.subject || parsed.fromName || parsed.fromEmail || parsed.body) {
           applyParsedEmlToHistory(parsed);
           toast(getRoot(), 'Outlook ヘッダから取り込みました', 'ok');
           return;
         }
-      } catch { /* fall through */ }
+      } catch (err) {
+        console.warn('[spira/drop history] parseOutlookDragText threw:', err);
+      }
     }
     if (txt) {
       // textarea 外にドロップされた素のテキストは本文に追記。

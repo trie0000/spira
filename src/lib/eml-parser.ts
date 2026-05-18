@@ -398,37 +398,40 @@ function parseJpDate(s: string): string | undefined {
   return dt.toISOString();
 }
 
-/** Outlook drag テキストをパースして ParsedEml に変換する。 */
+/** Outlook drag テキストをパースして ParsedEml に変換する。
+ *
+ *  実装方針 (堅牢化):
+ *  「連続するヘッダ行を上から舐めて空行で終了」だと、Outlook for Windows
+ *  が出すテキスト (ヘッダ間に空行が混ざる / メッセージヘッダの上に署名等
+ *  非ヘッダが入る等) を取り逃がす。よって 2 パス方式で全行スキャン:
+ *    Pass 1: 上から 60 行までを走査して header-shaped な行を全て収集。
+ *            既に取れているキーは上書きしない (最初に出てきた値を採用)。
+ *    Pass 2: 最後に見つかったヘッダ行の次以降を body 候補とする。
+ *            先頭の空行を trim して返す。
+ *  これでヘッダの並び順や空行の有無に依存しなくなる。 */
 export function parseOutlookDragText(text: string): ParsedEml {
   const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
 
-  // ヘッダ部分: 上から見て連続する「キー: 値」行を集め、空行で打ち切る。
-  // 最初の 30 行までしか見ない (それ以上は本文)。
+  // 「キー: 値」「キー：値」「キー : 値」「ASCII / 全角コロン両対応」
+  // キーは英字 or 日本語 (ひらがな・カタカナ・CJK)。
+  const headerRe = /^[ \t]*([A-Za-zぁ-ヿ一-鿿]+)\s*[::]\s*(.*)$/;
+
   const headers: Partial<Record<HeaderKey['canon'], string>> = {};
-  let i = 0;
-  const headerLimit = Math.min(30, lines.length);
-  let lastCanon: HeaderKey['canon'] | null = null;
-  for (; i < headerLimit; i++) {
+  let lastHeaderIdx = -1;
+  const scanLimit = Math.min(60, lines.length);
+
+  for (let i = 0; i < scanLimit; i++) {
     const line = lines[i] ?? '';
-    // 空行 → ヘッダ終了
-    if (!line.trim()) { i++; break; }
-    // 継続行 (空白始まり) → 直前のキーに連結
-    if (/^[ \t]/.test(line) && lastCanon) {
-      headers[lastCanon] = ((headers[lastCanon] ?? '') + ' ' + line.trim()).trim();
-      continue;
+    const m = headerRe.exec(line);
+    if (!m) continue;
+    const canon = matchHeaderKey(m[1] ?? '');
+    if (!canon) continue;
+    // 同じキーが複数あれば最初のものを採用 (= メールヘッダ部分が引用転送
+    // の中にも出る可能性があるため、最上部のを優先)。
+    if (!headers[canon]) {
+      headers[canon] = (m[2] ?? '').trim();
     }
-    // 「キー: 値」または「キー:値」(半角・全角コロン両対応)
-    const m = line.match(/^([A-Za-z぀-ヿ一-鿿]+)\s*[::]\s*(.*)$/);
-    if (m) {
-      const canon = matchHeaderKey(m[1] ?? '');
-      if (canon) {
-        headers[canon] = (m[2] ?? '').trim();
-        lastCanon = canon;
-        continue;
-      }
-    }
-    // 認識できない行が来たら、ヘッダ終了とみなして抜ける
-    break;
+    lastHeaderIdx = Math.max(lastHeaderIdx, i);
   }
 
   // ヘッダが 1 つも取れなかったら諦めて空シェイプ
@@ -440,15 +443,30 @@ export function parseOutlookDragText(text: string): ParsedEml {
   let fromName: string | undefined;
   let fromEmail: string | undefined;
   if (headers.from) {
-    const m = headers.from.match(/^(.*?)<([^>]+)>\s*$/);
-    if (m) {
-      const name = m[1].trim().replace(/^"|"$/g, '').trim();
+    fromName = headers.from;
+    // <...@...> 形式
+    const angle = headers.from.match(/^(.*?)<([^>]+)>\s*$/);
+    if (angle) {
+      const name = angle[1]!.trim().replace(/^"|"$/g, '').trim();
       fromName = name || undefined;
-      fromEmail = m[2].trim();
-    } else if (/^[^@\s]+@[^@\s]+$/.test(headers.from)) {
-      fromEmail = headers.from;
+      fromEmail = angle[2]!.trim();
     } else {
-      fromName = headers.from;
+      // メールアドレスを文字列のどこからでも抽出 (例: "田中太郎 [tanaka@example.com]"
+      // や "田中太郎 (tanaka@example.com)" 等の Outlook 派生表記に対応)
+      const eml = headers.from.match(/([\w.+-]+@[\w.-]+\.\w+)/);
+      if (eml) {
+        fromEmail = eml[1];
+        // メールアドレス部分を除いた残りを名前として採用
+        const stripped = headers.from
+          .replace(eml[0]!, '')
+          .replace(/[<>[\](){}]+/g, '')
+          .replace(/\s+/g, ' ')
+          .trim();
+        fromName = stripped || undefined;
+      } else if (/^[^@\s]+@[^@\s]+$/.test(headers.from)) {
+        fromEmail = headers.from;
+        fromName = undefined;
+      }
     }
   }
 
@@ -462,8 +480,10 @@ export function parseOutlookDragText(text: string): ParsedEml {
     }
   }
 
-  // 本文: i 以降の全行を結合 (前後の空行は trim)
-  const body = lines.slice(i).join('\n').replace(/^\n+/, '').replace(/\n+$/, '');
+  // 本文: lastHeaderIdx の次以降。先頭の空行は捨てる。
+  let bodyStart = lastHeaderIdx + 1;
+  while (bodyStart < lines.length && !(lines[bodyStart] ?? '').trim()) bodyStart++;
+  const body = lines.slice(bodyStart).join('\n').replace(/\n+$/, '');
 
   return {
     subject: headers.subject?.trim(),

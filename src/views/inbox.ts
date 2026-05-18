@@ -644,34 +644,39 @@ export function openNewTicketModal(m: InboxMail): void {
       }
       return;
     }
-    // .msg ファイル — Outlook for Windows 主経路。バイナリ形式 (CFB) で
-    // ブラウザ側パーサが無いため、テキストドラッグへの誘導 / .eml 保存を案内。
+    // .msg ファイル — Outlook for Windows 主経路。バイナリ (CFB) でブラウザ
+    // 側パーサが無いが、Outlook for Windows は .msg と一緒に text/plain
+    // (差出人/件名/日時等のヘッダ付き) を併送するケースが多いので、
+    // ここでは early-return せず text/plain 経路に流す。fallback で
+    // 何も取れなかったときに最後に .msg 用の案内 toast を出す。
     const msgFile = files.find(f =>
       /\.msg$/i.test(f.name) || f.type === 'application/vnd.ms-outlook',
     );
     if (msgFile) {
       e.preventDefault();
-      // ファイル名だけは件名候補として入れておく (拡張子を外す)
+      // ファイル名を件名候補として保険で入れる (text/plain 解析が失敗した
+      // 場合の最低限のフォールバック)。後段が成功して上書きすれば OK。
       const stem = msgFile.name.replace(/\.[^.]+$/, '').trim();
       if (stem && !titleInput.value.trim()) {
         titleInput.value = stem;
         titleInput.dispatchEvent(new Event('input', { bubbles: true }));
       }
-      toast(getRoot(),
-        '.msg は未対応です。Outlook で右クリック→「他のアクション」→「別名で保存」→ 形式を「テキストのみ (.eml)」にして保存し、その .eml をドラッグしてください。または、メール本文をテキスト選択してドラッグすれば送信者・件名も取り込めます。',
-        'warn', 12000);
-      return;
-    }
-    // その他のファイル (画像等) — 未対応として通知
-    if (files.length > 0) {
+      // 続行 → text/plain 経路へ
+    } else if (files.length > 0) {
+      // その他のファイル (画像等) — 未対応として通知して終了
       e.preventDefault();
       toast(getRoot(), `未対応のファイル形式: ${files[0]!.name}`, 'warn', 5000);
       return;
     }
     // ファイル以外の場合、textarea 上のドロップは標準挙動 (テキスト貼付け) を尊重
-    if (e.target instanceof HTMLTextAreaElement) return;
+    // ただし .msg がある場合は preventDefault 済みなので textarea でも処理続行
+    if (!msgFile && e.target instanceof HTMLTextAreaElement) return;
     e.preventDefault();
     const txt = dt.getData('text/plain') ?? '';
+    const htmlTxt = dt.getData('text/html') ?? '';
+    // 受信内容の冒頭を console に残す。本文流出を防ぐため 500 文字まで。
+    console.debug('[spira/drop] text/plain head (500ch):', txt.slice(0, 500));
+    if (htmlTxt) console.debug('[spira/drop] text/html length:', htmlTxt.length);
     if (!txt) {
       console.warn('[spira/drop] no text/plain, no files matched. types:', types);
       toast(getRoot(), 'ドロップされた内容を取り込めませんでした (text/plain も空)', 'warn');
@@ -685,12 +690,21 @@ export function openNewTicketModal(m: InboxMail): void {
     if (looksLikeOutlookDrag(txt)) {
       try {
         const parsed = parseOutlookDragText(txt);
+        console.debug('[spira/drop] parseOutlookDragText result:', {
+          subject: parsed.subject,
+          fromName: parsed.fromName,
+          fromEmail: parsed.fromEmail,
+          dateISO: parsed.dateISO,
+          bodyLen: parsed.body?.length ?? 0,
+        });
         if (parsed.subject || parsed.fromName || parsed.fromEmail || parsed.body) {
           applyParsedEml(parsed);
           toast(getRoot(), 'Outlook ヘッダから取り込みました', 'ok');
           return;
         }
-      } catch { /* fall through */ }
+      } catch (err) {
+        console.warn('[spira/drop] parseOutlookDragText threw:', err);
+      }
     }
     // text/plain が件名のみ (旧来動作)
     const firstLine = txt.split(/\r?\n/).map(s => s.trim()).find(s => s.length > 0) ?? txt.trim();
