@@ -1264,7 +1264,7 @@ function openHelpModal(root: HTMLElement): void {
         }, [opts.action ?? '']),
       ])] : []),
       ...(opts.note ? [el('p', {
-        style: 'margin:0 0 var(--s-2);font-size:var(--fs-sm);color:var(--ink-2);line-height:1.6',
+        style: 'margin:0 0 var(--s-2);font-size:var(--fs-sm);color:var(--ink-2);line-height:1.6;white-space:pre-wrap',
       }, [opts.note])] : []),
       ...(paramTable ? [paramTable] : []),
       ...(opts.extra ?? []),
@@ -1531,9 +1531,9 @@ function openHelpModal(root: HTMLElement): void {
       num: 2,
       title: 'Pending 行のみ処理する (再投稿防止)',
       action: 'コントロール / 条件 (Condition)',
-      note: '同じ行への再実行・誤投稿を防ぐため、Status が Pending のときだけ続行。以降のステップは全て「はいの場合」分岐内に配置。',
+      note: '同じ行への再実行・誤投稿を防ぐため、Status が Pending のときだけ続行。以降のステップは全て「はいの場合」分岐内に配置。\n\n⚠ Status は SP の Choice (選択肢) 列です。動的コンテンツから取り出すときに 必ず「Status Value」を選んでください (= 文字列を返す)。「Status」を選ぶと {Value: "Pending"} のオブジェクトが返り、比較に失敗します。',
       params: [
-        { field: '左辺 (Choose a value)', value: "triggerOutputs()?['body/Status']", type: 'dynamic' },
+        { field: '左辺 (Choose a value)', value: 'Status Value', type: 'dynamic', hint: '動的コンテンツパネルから「Status Value」を選択。「Status」ではない。新デザイナーで表示されない場合は式タブで triggerBody()?[\'Status\']?[\'Value\'] (新) または triggerOutputs()?[\'body/Status\']?[\'Value\'] (旧) を入力。' },
         { field: '比較演算子', value: 'is equal to', type: 'choose' },
         { field: '右辺 (Choose a value)', value: 'Pending', type: 'static' },
       ],
@@ -1580,9 +1580,9 @@ function openHelpModal(root: HTMLElement): void {
       num: 5,
       title: 'ThreadType で分岐 — 内部 / ユーザー',
       action: 'コントロール / Switch',
-      note: 'ThreadType が internal / user で書き戻す列名が変わるため、Switch で分岐させると見通しが良い。各分岐の中に次のステップ (項目の更新) を配置。',
+      note: 'ThreadType が internal / user で書き戻す列名が変わるため、Switch で分岐させると見通しが良い。各分岐の中に次のステップ (項目の更新) を配置。\n\n⚠ ThreadType も Choice (選択肢) 列です。スイッチ対象は必ず「ThreadType Value」 (文字列) を使うこと。',
       params: [
-        { field: 'スイッチ対象 (On)', value: "triggerOutputs()?['body/ThreadType']", type: 'dynamic' },
+        { field: 'スイッチ対象 (On)', value: 'ThreadType Value', type: 'dynamic', hint: '動的コンテンツから「ThreadType Value」。新デザイナーで表示されない場合は式タブで triggerBody()?[\'ThreadType\']?[\'Value\']。' },
         { field: 'Case 1 — 等しい', value: 'internal', type: 'static', hint: 'この中で Tickets を InternalThreadId / InternalChannelId / InternalDeepLink で更新。' },
         { field: 'Case 2 — 等しい', value: 'user', type: 'static', hint: 'この中で Tickets を UserThreadId / UserChannelId / UserDeepLink で更新。' },
       ],
@@ -1639,6 +1639,48 @@ function openHelpModal(root: HTMLElement): void {
       el('div', {}, ['Spira でチケットを開き「🏢 内部スレッド起票」または「👥 ユーザースレッド起票」をクリック']),
       el('div', {}, ['PA の実行履歴で成功を確認 → Teams チャネルに投稿が出る']),
       el('div', {}, ['Spira のボタン表示が「スレッドを開く」に変われば DeepLink 書き戻し成功']),
+    ]),
+
+    h('5. トラブルシューティング'),
+    el('ul', { style: 'margin:0;padding-left:1.2em;line-height:1.8;font-size:var(--fs-sm);color:var(--ink)' }, [
+      el('li', {}, [
+        el('strong', {}, ['条件 (Condition) の「Status equals Pending」が常に False になる']),
+        ': SP の Choice 列は ',
+        code('{Value: "Pending"}'),
+        ' のオブジェクトを返すため。動的コンテンツから ',
+        el('strong', {}, ['「Status Value」']),
+        ' を選び直すか、式タブで ',
+        code("triggerOutputs()?['body/Status']?['Value']"),
+        ' (新デザイナーなら ',
+        code("triggerBody()?['Status']?['Value']"),
+        ') と書く。同様に ThreadType も「ThreadType Value」を使う。',
+      ]),
+      el('li', {}, [
+        el('strong', {}, ['「式には、デバッガーで解決できない動的な関数...」の警告が出る']),
+        ': トリガー出力の動的コンテンツを式の中で使うと出る警告。フローを実際に保存して 1 回実行すれば動く (デバッガ未対応というだけ)。',
+      ]),
+      el('li', {}, [
+        el('strong', {}, ['Teams 投稿が「権限がない」で失敗する']),
+        ': PA の Teams コネクタの認証アカウントが、対象チャネルのメンバーかどうか確認。Flow bot として投稿する場合でも、認証アカウントの権限が要る。',
+      ]),
+      el('li', {}, [
+        el('strong', {}, ['linkToMessage が空で書き戻される']),
+        ': Teams 投稿アクションの出力スキーマで ',
+        code('linkToMessage'),
+        ' を参照しているか確認。コネクタ世代により ',
+        code('webUrl'),
+        ' / ',
+        code('link'),
+        ' の名前で来る場合があるので、実行履歴の Outputs で実際のキー名を確認。',
+      ]),
+      el('li', {}, [
+        el('strong', {}, ['TeamsPostRequests 行が消えない (=Spira のボタンが変わらない)']),
+        ': 最後のステップ「項目の削除」の Id 引数が ',
+        code("triggerOutputs()?['body/ID']"),
+        ' (大文字) になっているか確認。',
+        code('id'),
+        ' (小文字) では SP は受け取らない。',
+      ]),
     ]),
   ]);
 
