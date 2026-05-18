@@ -390,7 +390,7 @@ function openSettingsMenu(root: HTMLElement, anchor: HTMLElement): void {
     },
   }, [
     el('span', { html: icon('sparkles'), style: 'display:inline-flex;width:14px;height:14px' }),
-    'AI 設定 (Claude / 社内 AI)',
+    'AI 設定',
   ]);
 
   const auditLogItem = el('div', {
@@ -1187,6 +1187,90 @@ function openHelpModal(root: HTMLElement): void {
       ]),
     ]);
 
+  /** PA アクションのステップカード。番号付きヘッダ + アクション名 +
+   *  入力パラメータ表 (各フィールドに何を入れるかを明示) + 補足。
+   *  ユーザが「PA で目の前のフォームをどう埋めるか」を 1 画面で見られる
+   *  ことに最適化したレイアウト。 */
+  interface StepParam {
+    field: string;       // フォームのラベル名 (例: "Folder", "Site Address")
+    value: string;       // 入れる値 (動的コンテンツ名 / 式 / 固定値)
+    type?: 'static' | 'dynamic' | 'expression' | 'choose'; // 表示色分け
+    hint?: string;       // 補足
+  }
+  const stepCard = (opts: {
+    num: number | string;
+    title: string;
+    connector?: string;   // 例: "Microsoft 365 Outlook"
+    action?: string;      // 例: "When a new email arrives (V3)"
+    note?: string;        // ステップ全体の補足
+    params?: StepParam[]; // 入力パラメータ
+    extra?: HTMLElement[];// パラメータ表の後ろに追加するブロック
+  }): HTMLElement => {
+    const typeBadge = (t?: StepParam['type']): HTMLElement => {
+      const map: Record<NonNullable<StepParam['type']>, { label: string; color: string }> = {
+        static:     { label: '固定値',     color: '#5e6f5c' },
+        dynamic:    { label: '動的コンテンツ', color: '#3d8b8a' },
+        expression: { label: '式',         color: '#a05a8c' },
+        choose:     { label: '選択',       color: '#7a8aa9' },
+      };
+      const e = map[t ?? 'static'];
+      return el('span', {
+        style: `display:inline-block;padding:1px 6px;border-radius:8px;background:${e.color}22;color:${e.color};font-size:10px;font-weight:600;margin-left:6px;white-space:nowrap`,
+      }, [e.label]);
+    };
+    const paramTable = (opts.params && opts.params.length > 0) ? el('table', {
+      style: 'width:100%;border-collapse:collapse;font-size:12px;margin-top:var(--s-2)',
+    }, [
+      el('thead', {}, [
+        el('tr', {}, [
+          el('th', { style: 'text-align:left;padding:6px 10px;border-bottom:2px solid var(--line);font-size:11px;color:var(--ink-3);text-transform:uppercase;width:30%' }, ['フィールド名']),
+          el('th', { style: 'text-align:left;padding:6px 10px;border-bottom:2px solid var(--line);font-size:11px;color:var(--ink-3);text-transform:uppercase' }, ['設定値']),
+        ]),
+      ]),
+      el('tbody', {}, opts.params.map((p) => el('tr', {}, [
+        el('td', {
+          style: 'padding:6px 10px;border-bottom:1px solid var(--line);vertical-align:top;font-weight:500;color:var(--ink)',
+        }, [p.field]),
+        el('td', { style: 'padding:6px 10px;border-bottom:1px solid var(--line);vertical-align:top' }, [
+          el('div', { style: 'display:flex;align-items:flex-start;gap:6px;flex-wrap:wrap' }, [
+            el('code', {
+              style: 'background:var(--paper-2);padding:1px 6px;border-radius:3px;font-family:ui-monospace,Menlo,monospace;font-size:12px;color:var(--ink);word-break:break-all',
+            }, [p.value]),
+            typeBadge(p.type),
+          ]),
+          ...(p.hint ? [el('div', { style: 'font-size:11px;color:var(--ink-3);margin-top:4px;line-height:1.5' }, [p.hint])] : []),
+        ]),
+      ]))),
+    ]) : null;
+
+    return el('div', {
+      style: 'margin:var(--s-4) 0;border:1px solid var(--line);border-radius:var(--r-2);padding:var(--s-4) var(--s-5);background:var(--paper)',
+    }, [
+      // ヘッダ: ステップ番号 + タイトル
+      el('div', { style: 'display:flex;align-items:center;gap:var(--s-3);margin-bottom:var(--s-2)' }, [
+        el('span', {
+          style: 'display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:var(--accent);color:#fff;font-weight:700;font-size:13px;flex-shrink:0',
+        }, [String(opts.num)]),
+        el('h4', { style: 'margin:0;font-size:var(--fs-md);font-weight:600;color:var(--ink);flex:1' }, [opts.title]),
+      ]),
+      // アクション名 (コネクタ + アクション)
+      ...((opts.connector || opts.action) ? [el('div', {
+        style: 'margin:0 0 var(--s-2);padding:6px 10px;background:var(--paper-2);border-radius:var(--r-2);font-size:var(--fs-sm);color:var(--ink-2)',
+      }, [
+        el('span', { style: 'font-size:11px;color:var(--ink-3);text-transform:uppercase' }, ['追加するアクション: ']),
+        ...(opts.connector ? [el('span', { style: 'color:var(--ink-2)' }, [opts.connector + ' / '])] : []),
+        el('code', {
+          style: 'font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#c7254e;background:transparent',
+        }, [opts.action ?? '']),
+      ])] : []),
+      ...(opts.note ? [el('p', {
+        style: 'margin:0 0 var(--s-2);font-size:var(--fs-sm);color:var(--ink-2);line-height:1.6',
+      }, [opts.note])] : []),
+      ...(paramTable ? [paramTable] : []),
+      ...(opts.extra ?? []),
+    ]);
+  };
+
   // ── Content sections ───────────────────────────────────────────────
 
   const intro = el('div', {}, [
@@ -1216,28 +1300,22 @@ function openHelpModal(root: HTMLElement): void {
   ]);
 
   const trigger = el('div', {}, [
-    h('2. トリガーの設定'),
-    p('Microsoft 365 Outlook コネクタの「新しいメールが届いたとき (V3)」または「共有メールボックスに新しいメールが届いたとき (V2)」を使います。'),
-    ol([
-      el('div', {}, ['Power Automate を開き「+ 作成」 → 「自動化したクラウド フロー」']),
-      el('div', {}, [
-        'フロー名 (例: ',
-        code('Spira – Inbox Ingest'),
-        ') を入力し、トリガーで ',
-        code('When a new email arrives (V3)'),
-        ' を選択',
-      ]),
-      el('div', {}, [
-        'パラメータ:',
-        el('ul', { style: 'margin:6px 0;padding-left:1.2em;line-height:1.7' }, [
-          el('li', {}, ['Folder: ', code('Inbox'), ' (もしくは取り込み対象のフォルダ)']),
-          el('li', {}, ['Importance: ', code('Any')]),
-          el('li', {}, ['Include Attachments: ', code('No'), ' (添付の中身までは保存しない)']),
-          el('li', {}, ['Only with Attachments: ', code('No')]),
-          el('li', {}, ['Subject Filter: 空欄 (全件取り込みたい場合) / ', code('[#'), ' などでフィルタしてもよい']),
-        ]),
-      ]),
-    ]),
+    h('2. フロー本体の作成'),
+    p('Power Automate を開き「+ 作成」 → 「自動化したクラウド フロー」を選択。フロー名 (例: Spira – Inbox Ingest) を入力し、以下のステップを順番に追加していきます。'),
+    stepCard({
+      num: 1,
+      title: '受信メールをトリガーする',
+      connector: 'Microsoft 365 Outlook',
+      action: 'When a new email arrives (V3)',
+      note: '共有メールボックスの場合は「共有メールボックスに新しいメールが届いたとき (V2)」を選択 (パラメータはほぼ同じ)。',
+      params: [
+        { field: 'Folder', value: 'Inbox', type: 'choose', hint: '取り込み対象のフォルダ。サブフォルダ運用なら該当パスを選択。' },
+        { field: 'Importance', value: 'Any', type: 'choose' },
+        { field: 'Include Attachments', value: 'No', type: 'choose', hint: '添付の中身までは SP に保存しないため No 推奨。HasAttachments フラグだけ立つ。' },
+        { field: 'Only with Attachments', value: 'No', type: 'choose' },
+        { field: 'Subject Filter', value: '(空欄)', type: 'static', hint: '全件取り込みたい場合は空。特定タグだけ取り込むなら "[#" 等。' },
+      ],
+    }),
   ]);
 
   // Column mapping table — matches inboxFieldSpecs() in api/sp.ts
@@ -1269,50 +1347,49 @@ function openHelpModal(root: HTMLElement): void {
   ]);
 
   const action = el('div', {}, [
-    h('3. アクション: SharePoint に項目を作成'),
-    p('トリガーの後に SharePoint コネクタの「項目の作成」を追加します。'),
-    ol([
-      el('div', {}, [
-        'Site Address: Spira を導入した SP サイト URL (例: ',
-        code('https://<tenant>.sharepoint.com/sites/<site>'),
-        ')',
-      ]),
-      el('div', {}, [
-        'List Name: ',
-        code('InboxMails'),
-        ' を選択',
-      ]),
-      el('div', {}, [
-        '以下の列に動的コンテンツをマッピング (',
-        el('strong', {}, ['列名は大文字小文字含めて完全一致']),
-        '):',
-      ]),
-    ]),
-    mappingTable,
-    p('式の入力例 (IsProcessed / IsHidden 用):'),
-    codeBlock('false'),
-    p('SentAt は通常 V3 トリガの body に含まれません。確実に取得するには下記の (推奨) 手順をとってください:'),
-    p('(推奨) トリガー直後に「メールの取得 (V2) — Get email (V2)」アクションを追加し、Message Id を渡す。返り値の body から sentDateTime を SentAt 列にマッピング:'),
-    codeBlock("body('メールの取得_V2')?['sentDateTime']"),
-    p('(代替) 動的コンテンツに「Sent Time」が見える場合はそれを直接バインドして OK。バインドできない場合は次の式を「式」タブから順に試す (テナント / コネクタ世代で field 名が異なる):'),
-    codeBlock(
-      "triggerOutputs()?['body/sentDateTime']\n" +
-      "triggerOutputs()?['body/DateTimeSent']\n" +
-      "triggerOutputs()?['body/dateTimeSent']"
-    ),
-    p('どうしても取れない場合は SentAt 列を空欄のまま保存しても問題ありません。Spira は SentAt が空なら ReceivedAt にフォールバックして重複判定します (受信時刻はメールボックス間で揺らぐため精度は落ちますが、運用は止まりません)。'),
-    p('OwaLink 用の式 (動的コンテンツ パネルではなく「式」タブに貼り付け):'),
-    codeBlock(
-      "concat('https://outlook.office.com/mail/inbox/id/', encodeUriComponent(triggerOutputs()?['body/Id']))"
-    ),
-    p('共有メールボックス トリガー (V2) の場合や、ユーザ別 OWA を開きたい場合は以下のいずれかに置き換え可:'),
-    codeBlock(
-      "concat('https://outlook.office365.com/owa/?ItemID=', encodeUriComponent(triggerOutputs()?['body/Id']), '&exvsurl=1&viewmodel=ReadMessageItem')"
-    ),
+    stepCard({
+      num: 2,
+      title: 'SentAt (送信時刻) を取得 — 推奨',
+      connector: 'Microsoft 365 Outlook',
+      action: 'メールの取得 (V2) — Get email (V2)',
+      note: 'V3 トリガの body には sentDateTime が含まれないことが多いので、トリガー直後にこのアクションを挟むと安定して取得できます。SentAt は Spira の重複起票判定 (送信者 + 送信時刻一致) に使う主キーなので入れることを推奨。空でも動作はしますが、別人の同タイミングメールで誤判定の可能性あり。',
+      params: [
+        { field: 'Message Id', value: "triggerOutputs()?['body/Id']", type: 'dynamic', hint: 'トリガーの動的コンテンツ「Message Id」をそのまま選択。' },
+      ],
+    }),
+    stepCard({
+      num: 3,
+      title: 'InboxMails リストに行を作成',
+      connector: 'SharePoint',
+      action: '項目の作成 (Create item)',
+      note: 'これが本フローのメインアクションです。受信メールの内容を SP に保存して Spira に流します。',
+      params: [
+        { field: 'Site Address', value: 'https://<tenant>.sharepoint.com/sites/<site>', type: 'choose', hint: 'Spira を導入した SP サイト。一覧から選択するか「カスタム値を入力」で直接 URL 入力。' },
+        { field: 'List Name', value: 'InboxMails', type: 'choose' },
+      ],
+      extra: [
+        el('h5', { style: 'margin:var(--s-3) 0 var(--s-2);font-size:var(--fs-sm);font-weight:600;color:var(--ink)' },
+          ['「項目の作成」で表示される各列への入力値:']),
+        el('p', { style: 'margin:0 0 var(--s-2);font-size:var(--fs-xs);color:var(--ink-3)' },
+          ['※ 列名は大文字小文字含めて完全一致。動的コンテンツパネル / 式タブのどちらに入力するかは右端の色バッジで判別。']),
+        mappingTable,
+        el('h5', { style: 'margin:var(--s-3) 0 var(--s-2);font-size:var(--fs-sm);font-weight:600;color:var(--ink)' },
+          ['補足情報']),
+        pn('OwaLink の式 (動的コンテンツに「Web Link」が出ないため): '),
+        codeBlock("concat('https://outlook.office.com/mail/inbox/id/', encodeUriComponent(triggerOutputs()?['body/Id']))"),
+        pn('共有メールボックス トリガー (V2) や、ユーザ別 OWA を開きたい場合: '),
+        codeBlock("concat('https://outlook.office365.com/owa/?ItemID=', encodeUriComponent(triggerOutputs()?['body/Id']), '&exvsurl=1&viewmodel=ReadMessageItem')"),
+        pn('SentAt の動的コンテンツに「Sent Time」が見える場合はそれをバインド可。見えない場合は ',
+          code("triggerOutputs()?['body/sentDateTime']"),
+          ' / ',
+          code("triggerOutputs()?['body/DateTimeSent']"),
+          ' を「式」タブから試す。'),
+      ],
+    }),
   ]);
 
   const verify = el('div', {}, [
-    h('4. 動作確認'),
+    h('3. 動作確認'),
     ol([
       el('div', {}, ['フローを「保存」 → 「テスト」 → 手動でテスト メールを送信']),
       el('div', {}, [
@@ -1332,7 +1409,7 @@ function openHelpModal(root: HTMLElement): void {
   ]);
 
   const trouble = el('div', {}, [
-    h('5. トラブルシューティング'),
+    h('4. トラブルシューティング'),
     el('ul', { style: 'margin:0;padding-left:1.2em;line-height:1.8;font-size:var(--fs-sm);color:var(--ink)' }, [
       el('li', {}, [
         el('strong', {}, ['列マッピング エラー']),
@@ -1430,79 +1507,134 @@ function openHelpModal(root: HTMLElement): void {
       el('li', {}, [code('TeamsPostRequests'), ' リストが Spira 初回起動で作成済みであること (', code('ensureLists'), ' が自動作成)']),
     ]),
 
-    h('2. トリガー (TeamsPostRequests リスト)'),
-    pn('SharePoint コネクタの ', code('項目が作成されたとき (When an item is created)'), ' を使用。リスト行のスキーマは下表のとおり (Spira が起票時に自動で値を入れる)。'),
+    h('2. 入力データ (TeamsPostRequests リスト) のスキーマ'),
+    pn('Spira が起票時に下記スキーマで 1 行 INSERT します。PA 側ではこれらの列を ',
+      code("triggerOutputs()?['body/<列名>']"),
+      ' で参照できます。'),
     teamsTable,
-    ol([
-      el('div', {}, ['Site Address: Spira を入れた SP サイト URL']),
-      el('div', {}, ['List Name: ', code('TeamsPostRequests')]),
-    ]),
 
-    h('3. アクション構成'),
-    p('以下を順番に追加:'),
-    ol([
-      el('div', {}, [
-        el('strong', {}, ['① 条件 (Condition)']),
-        ': ', code("triggerOutputs()?['body/Status']"), ' が ', code("'Pending'"),
-        ' と等しい場合のみ続行 (再実行・誤投稿防止)。',
-      ]),
-      el('div', {}, [
-        el('strong', {}, ['② SharePoint「項目の取得」']),
-        ': List = ', code('Tickets'),
-        '、Id = ', code("triggerOutputs()?['body/TicketId']"),
-        ' — 投稿本文に件名・本文を埋め込むため。',
-      ]),
-      el('div', {}, [
-        el('strong', {}, ['③ Teams「チャネル内でメッセージを投稿する (Post a message in a channel)」']),
-        ':',
-        el('ul', { style: 'margin:6px 0;padding-left:1.2em;line-height:1.7' }, [
-          el('li', {}, ['Post As: ', code('Flow bot'), ' (またはユーザ)']),
-          el('li', {}, ['Team: ', code("triggerOutputs()?['body/TeamId']"), ' (カスタム値タブで入力)']),
-          el('li', {}, ['Channel: ', code("triggerOutputs()?['body/ChannelId']"), ' (カスタム値タブで入力)']),
-          el('li', {}, ['Message: HTML 形式で件名 + 説明 + Spira へのリンクを投稿 (下記サンプル参照)']),
-          el('li', {}, ['Subject: ', code("concat('[#', triggerOutputs()?['body/TicketId'], '] ', body('Tickets取得')?['Title'])")]),
-        ]),
-      ]),
-      el('div', {}, [
-        el('strong', {}, ['④ SharePoint「項目の更新」']),
-        ' (Tickets リスト): 投稿結果の Message Id と weblink を書き戻す。',
-        el('ul', { style: 'margin:6px 0;padding-left:1.2em;line-height:1.7' }, [
-          el('li', {}, [code('ThreadType'), " === 'internal' のとき → InternalThreadId / InternalChannelId / InternalDeepLink を更新"]),
-          el('li', {}, [code('ThreadType'), " === 'user' のとき → UserThreadId / UserChannelId / UserDeepLink を更新"]),
-          el('li', {}, ['※ Switch アクションで ThreadType を分岐させると分かりやすい']),
-        ]),
-      ]),
-      el('div', {}, [
-        el('strong', {}, ['⑤ SharePoint「項目の削除」']),
-        ' — トリガー行 (', code("triggerOutputs()?['body/ID']"),
-        ') を削除。これで Spira の「DeepLink 未設定」表示が解消され、ボタンが「スレッドを開く」に変わる。',
-      ]),
-    ]),
+    h('3. フロー本体の作成'),
+    p('「+ 作成」 → 「自動化したクラウド フロー」。フロー名 (例: Spira – Teams Thread Create)。以下のステップを順番に追加:'),
 
-    h('4. 投稿本文サンプル'),
-    p('Teams 投稿のメッセージ欄に貼り付け (HTML 入力モードに切り替えてから):'),
-    codeBlock(
-      '<h3>[#@{triggerOutputs()?[\'body/TicketId\']}] @{body(\'Tickets取得\')?[\'Title\']}</h3>\n' +
-      '<p><b>優先度:</b> @{body(\'Tickets取得\')?[\'Priority\']} / <b>ステータス:</b> @{body(\'Tickets取得\')?[\'Status\']}</p>\n' +
-      '<p>@{body(\'Tickets取得\')?[\'Description\']}</p>\n' +
-      '<hr><p><i>このメッセージは Spira から自動投稿されています。</i></p>'
-    ),
+    stepCard({
+      num: 1,
+      title: 'TeamsPostRequests への INSERT をトリガー',
+      connector: 'SharePoint',
+      action: '項目が作成されたとき (When an item is created)',
+      params: [
+        { field: 'Site Address', value: 'https://<tenant>.sharepoint.com/sites/<site>', type: 'choose' },
+        { field: 'List Name', value: 'TeamsPostRequests', type: 'choose' },
+      ],
+    }),
 
-    h('5. DeepLink の取得'),
-    p('Teams「チャネル内でメッセージを投稿する」の返り値から DeepLink を取り出す式:'),
-    codeBlock("outputs('チャネル内でメッセージを投稿する')?['body/linkToMessage']"),
-    p('Message Id を取り出す式 (InternalThreadId / UserThreadId 用):'),
-    codeBlock("outputs('チャネル内でメッセージを投稿する')?['body/messageId']"),
+    stepCard({
+      num: 2,
+      title: 'Pending 行のみ処理する (再投稿防止)',
+      action: 'コントロール / 条件 (Condition)',
+      note: '同じ行への再実行・誤投稿を防ぐため、Status が Pending のときだけ続行。以降のステップは全て「はいの場合」分岐内に配置。',
+      params: [
+        { field: '左辺 (Choose a value)', value: "triggerOutputs()?['body/Status']", type: 'dynamic' },
+        { field: '比較演算子', value: 'is equal to', type: 'choose' },
+        { field: '右辺 (Choose a value)', value: 'Pending', type: 'static' },
+      ],
+    }),
 
-    h('6. エラーハンドリング'),
-    p('上記アクションが失敗したときの「Configure run after」を使い、Failed 経路では TeamsPostRequests 行を更新する分岐を追加:'),
-    el('ul', { style: 'margin:0 0 var(--s-3);padding-left:1.2em;line-height:1.8;font-size:var(--fs-sm);color:var(--ink)' }, [
-      el('li', {}, [code('Status'), ' = ', code("'Failed'")]),
-      el('li', {}, [code('ErrorMessage'), ' = ', code("outputs('チャネル内でメッセージを投稿する')?['body']"), ' などのエラー本文']),
-    ]),
-    p('行は削除せず残し、管理者が原因確認後に手動削除 (or 再 Pending に戻す) する運用が安全。'),
+    stepCard({
+      num: 3,
+      title: 'Tickets リストからチケット情報を取得',
+      connector: 'SharePoint',
+      action: '項目の取得 (Get item)',
+      note: 'Teams 投稿の本文に件名・説明・優先度・ステータスを埋め込むためにチケット行を取得。',
+      params: [
+        { field: 'Site Address', value: 'https://<tenant>.sharepoint.com/sites/<site>', type: 'choose' },
+        { field: 'List Name', value: 'Tickets', type: 'choose' },
+        { field: 'Id', value: "triggerOutputs()?['body/TicketId']", type: 'dynamic' },
+      ],
+    }),
 
-    h('7. 動作確認'),
+    stepCard({
+      num: 4,
+      title: 'Teams チャネルにメッセージ投稿',
+      connector: 'Microsoft Teams',
+      action: 'チャネル内でメッセージを投稿する (Post message in a chat or channel)',
+      params: [
+        { field: 'Post as', value: 'Flow bot', type: 'choose', hint: 'もしくは「ユーザー」(自分の名前で投稿したい場合)。' },
+        { field: 'Post in', value: 'Channel', type: 'choose' },
+        { field: 'Team', value: "triggerOutputs()?['body/TeamId']", type: 'expression', hint: 'チームの一覧から選ぶのではなく、「カスタム値を入力」タブで TeamId を直接渡す。' },
+        { field: 'Channel', value: "triggerOutputs()?['body/ChannelId']", type: 'expression', hint: '同上 — カスタム値タブで ChannelId を渡す。' },
+        { field: 'Subject', value: "concat('[#', triggerOutputs()?['body/TicketId'], '] ', body('項目の取得')?['Title'])", type: 'expression', hint: '「式」タブから入力。"項目の取得" の部分はアクション名と一致させる。' },
+        { field: 'Message (HTML)', value: '(下記サンプル参照)', type: 'static', hint: 'メッセージ欄を HTML 入力モードに切り替え、下のサンプルを貼り付け。' },
+      ],
+      extra: [
+        el('p', { style: 'margin:var(--s-3) 0 var(--s-2);font-size:var(--fs-sm);color:var(--ink-2)' }, ['投稿本文 HTML サンプル:']),
+        codeBlock(
+          '<h3>[#@{triggerOutputs()?[\'body/TicketId\']}] @{body(\'項目の取得\')?[\'Title\']}</h3>\n' +
+          '<p><b>優先度:</b> @{body(\'項目の取得\')?[\'Priority\']} / <b>ステータス:</b> @{body(\'項目の取得\')?[\'Status\']}</p>\n' +
+          '<p>@{body(\'項目の取得\')?[\'Description\']}</p>\n' +
+          '<hr><p><i>このメッセージは Spira から自動投稿されています。</i></p>'
+        ),
+      ],
+    }),
+
+    stepCard({
+      num: 5,
+      title: 'ThreadType で分岐 — 内部 / ユーザー',
+      action: 'コントロール / Switch',
+      note: 'ThreadType が internal / user で書き戻す列名が変わるため、Switch で分岐させると見通しが良い。各分岐の中に次のステップ (項目の更新) を配置。',
+      params: [
+        { field: 'スイッチ対象 (On)', value: "triggerOutputs()?['body/ThreadType']", type: 'dynamic' },
+        { field: 'Case 1 — 等しい', value: 'internal', type: 'static', hint: 'この中で Tickets を InternalThreadId / InternalChannelId / InternalDeepLink で更新。' },
+        { field: 'Case 2 — 等しい', value: 'user', type: 'static', hint: 'この中で Tickets を UserThreadId / UserChannelId / UserDeepLink で更新。' },
+      ],
+    }),
+
+    stepCard({
+      num: 6,
+      title: 'Tickets リストに DeepLink を書き戻す (Switch の各分岐内)',
+      connector: 'SharePoint',
+      action: '項目の更新 (Update item)',
+      note: 'ThreadType=internal の分岐では Internal* 列、ThreadType=user の分岐では User* 列を更新する (項目の更新アクションを 2 つ作って分岐に配置)。',
+      params: [
+        { field: 'Site Address', value: 'https://<tenant>.sharepoint.com/sites/<site>', type: 'choose' },
+        { field: 'List Name', value: 'Tickets', type: 'choose' },
+        { field: 'Id', value: "triggerOutputs()?['body/TicketId']", type: 'dynamic' },
+        { field: 'Title', value: "body('項目の取得')?['Title']", type: 'expression', hint: 'Title は SP 必須列なので既存値を渡し直す。' },
+        { field: 'InternalThreadId (internal 分岐のみ)', value: "outputs('チャネル内でメッセージを投稿する')?['body/messageId']", type: 'expression' },
+        { field: 'InternalChannelId (internal 分岐のみ)', value: "triggerOutputs()?['body/ChannelId']", type: 'dynamic' },
+        { field: 'InternalDeepLink (internal 分岐のみ)', value: "outputs('チャネル内でメッセージを投稿する')?['body/linkToMessage']", type: 'expression' },
+        { field: 'UserThreadId (user 分岐のみ)', value: "outputs('チャネル内でメッセージを投稿する')?['body/messageId']", type: 'expression' },
+        { field: 'UserChannelId (user 分岐のみ)', value: "triggerOutputs()?['body/ChannelId']", type: 'dynamic' },
+        { field: 'UserDeepLink (user 分岐のみ)', value: "outputs('チャネル内でメッセージを投稿する')?['body/linkToMessage']", type: 'expression' },
+      ],
+    }),
+
+    stepCard({
+      num: 7,
+      title: 'TeamsPostRequests 行を削除 (キュー消化)',
+      connector: 'SharePoint',
+      action: '項目の削除 (Delete item)',
+      note: 'これでキュー行が消えて、Spira 側のボタンが「スレッドを開く」に変わる (=DeepLink 書き戻し完了の合図)。',
+      params: [
+        { field: 'Site Address', value: 'https://<tenant>.sharepoint.com/sites/<site>', type: 'choose' },
+        { field: 'List Name', value: 'TeamsPostRequests', type: 'choose' },
+        { field: 'Id', value: "triggerOutputs()?['body/ID']", type: 'dynamic', hint: '※ ID は大文字 (Title と同じ自動採番列)。' },
+      ],
+    }),
+
+    stepCard({
+      num: '⚠',
+      title: 'エラー時の分岐 (オプション)',
+      action: 'コントロール / Configure run after — Failed 経路',
+      note: 'ステップ 4 (Teams 投稿) が失敗したときに、TeamsPostRequests 行を更新するパスを別途用意。「Configure run after」で「has failed」「has timed out」を ON にして繋ぐ。',
+      params: [
+        { field: '対象アクション', value: '項目の更新 (TeamsPostRequests)', type: 'choose' },
+        { field: 'Id', value: "triggerOutputs()?['body/ID']", type: 'dynamic' },
+        { field: 'Status', value: 'Failed', type: 'static' },
+        { field: 'ErrorMessage', value: "outputs('チャネル内でメッセージを投稿する')?['body']", type: 'expression', hint: 'Teams API のエラー本文。手動確認後に行を削除 or 再 Pending に戻す運用が安全。' },
+      ],
+    }),
+
+    h('4. 動作確認'),
     ol([
       el('div', {}, ['Spira でチケットを開き「🏢 内部スレッド起票」または「👥 ユーザースレッド起票」をクリック']),
       el('div', {}, ['PA の実行履歴で成功を確認 → Teams チャネルに投稿が出る']),
@@ -1549,51 +1681,93 @@ function openHelpModal(root: HTMLElement): void {
       el('li', {}, ['Forms 応答取り込みは Standard ライセンスで完結 (Graph API 不要)']),
     ]),
 
-    h('2. トリガー'),
-    pn('Microsoft Forms コネクタの ', code('新しい応答が送信されるとき (When a new response is submitted)'), '。'),
-    ol([
-      el('div', {}, ['Form Id: 対象フォームを選択']),
-    ]),
+    h('2. フロー本体の作成'),
+    p('「+ 作成」 → 「自動化したクラウド フロー」。フロー名 (例: Spira – Forms Ingest)。以下のステップを順番に追加:'),
 
-    h('3. アクション構成'),
-    ol([
-      el('div', {}, [
-        el('strong', {}, ['① Microsoft Forms「応答の詳細を取得 (Get response details)」']),
-        ' — トリガーの Response Id を渡す。各質問の回答が動的コンテンツとして取り出せるようになります。',
-      ]),
-      el('div', {}, [
-        el('strong', {}, ['② (任意) Office 365 ユーザー「ユーザー プロファイル取得」']),
-        ' — Responder Email を入力に取り、displayName を取得 (FromName 用)。',
-      ]),
-      el('div', {}, [
-        el('strong', {}, ['③ 作成 (Compose) — BodyHtml']),
-        ' — Q&A を HTML で整形。Spira が ', code('<strong>カテゴリ:</strong>'), ' を見て値を抽出するため、ラベルは ', el('strong', {}, ['日本語の「カテゴリ:」「優先度:」']), ' を使うこと:',
-      ]),
-      el('div', {}, [
-        el('strong', {}, ['④ SharePoint「項目の作成」 (List = ']), code('InboxMails'), el('strong', {}, [')']),
-        ' — 下表の通り列にマッピング。',
-      ]),
-    ]),
+    stepCard({
+      num: 1,
+      title: 'Forms 応答送信をトリガー',
+      connector: 'Microsoft Forms',
+      action: '新しい応答が送信されるとき (When a new response is submitted)',
+      params: [
+        { field: 'Form Id', value: '(対象フォームを選択)', type: 'choose', hint: 'プルダウンから対象の Forms フォームを選ぶ。' },
+      ],
+    }),
 
-    h('4. 列マッピング'),
-    formsTable,
+    stepCard({
+      num: 2,
+      title: '応答の詳細を取得',
+      connector: 'Microsoft Forms',
+      action: '応答の詳細を取得 (Get response details)',
+      note: 'これを通すことで、各質問の回答が動的コンテンツとして個別に参照できるようになる。',
+      params: [
+        { field: 'Form Id', value: '(同じフォームを選択)', type: 'choose' },
+        { field: 'Response Id', value: "triggerOutputs()?['body/resourceData/responseId']", type: 'dynamic', hint: 'トリガーの動的コンテンツ「Response Id」を選択。テナントによっては body/responseId の場合もある。' },
+      ],
+    }),
 
-    h('5. BodyHtml の組み立てサンプル'),
-    p('Compose アクションの「入力」欄に貼り付け (動的コンテンツの参照部分は環境に応じて差し替え):'),
-    codeBlock(
-      '<p><strong>カテゴリ:</strong> @{outputs(\'応答の詳細を取得\')?[\'body/<カテゴリ質問の internal name>\']}</p>\n' +
-      '<p><strong>優先度:</strong> @{outputs(\'応答の詳細を取得\')?[\'body/<優先度質問の internal name>\']}</p>\n' +
-      '<p><strong>内容:</strong></p>\n' +
-      '<p>@{outputs(\'応答の詳細を取得\')?[\'body/<本文質問の internal name>\']}</p>'
-    ),
-    p('Forms 質問の internal name は「応答の詳細を取得」アクションの「Outputs」JSON を一度実行して確認するのが確実です。'),
+    stepCard({
+      num: 3,
+      title: '回答者のプロファイルを取得 (任意)',
+      connector: 'Office 365 ユーザー',
+      action: 'ユーザー プロファイル (V2) を取得 — Get user profile (V2)',
+      note: 'FromName 列に AD の displayName を入れたい場合のみ。匿名 Form では不要。',
+      params: [
+        { field: 'User (UPN)', value: "outputs('応答の詳細を取得')?['body/responder']", type: 'expression', hint: '応答者の UPN (メール) を渡すと AD から表示名・部署等を取得できる。' },
+      ],
+    }),
 
-    h('6. ConversationId の生成'),
-    pn('★ 最重要 — ', code('forms-'), ' プレフィクスは Spira の判別キーなので必ず含めること。'),
-    codeBlock("concat('forms-', triggerOutputs()?['body/formsId'], '-', triggerOutputs()?['body/responseId'])"),
-    pn('テナントによって動的コンテンツ名が異なる場合は ', code("triggerOutputs()?['body/responseId']"), ' を ', code("triggerOutputs()?['body/resourceData/responseId']"), ' に置き換えて試してください。'),
+    stepCard({
+      num: 4,
+      title: 'BodyHtml を組み立てる',
+      action: 'コントロール / 作成 (Compose)',
+      note: 'Q&A を HTML で整形。Spira が <strong>カテゴリ:</strong> / <strong>優先度:</strong> のラベルを正規表現で抽出するので、ラベルは厳密に日本語の「カテゴリ:」「優先度:」を使うこと。',
+      params: [
+        { field: '入力 (Inputs)', value: '(下記サンプル参照)', type: 'static' },
+      ],
+      extra: [
+        el('p', { style: 'margin:var(--s-3) 0 var(--s-2);font-size:var(--fs-sm);color:var(--ink-2)' }, ['BodyHtml サンプル (Compose の「入力」欄):']),
+        codeBlock(
+          '<p><strong>カテゴリ:</strong> @{outputs(\'応答の詳細を取得\')?[\'body/<カテゴリ質問の internal name>\']}</p>\n' +
+          '<p><strong>優先度:</strong> @{outputs(\'応答の詳細を取得\')?[\'body/<優先度質問の internal name>\']}</p>\n' +
+          '<p><strong>内容:</strong></p>\n' +
+          '<p>@{outputs(\'応答の詳細を取得\')?[\'body/<本文質問の internal name>\']}</p>'
+        ),
+        el('p', { style: 'margin:var(--s-2) 0;font-size:var(--fs-xs);color:var(--ink-3);line-height:1.6' }, [
+          '※ 質問の internal name は「応答の詳細を取得」アクションを一度テスト実行して、Outputs の JSON で確認するのが確実。',
+        ]),
+      ],
+    }),
 
-    h('7. 動作確認'),
+    stepCard({
+      num: 5,
+      title: 'InboxMails リストに行を作成',
+      connector: 'SharePoint',
+      action: '項目の作成 (Create item)',
+      params: [
+        { field: 'Site Address', value: 'https://<tenant>.sharepoint.com/sites/<site>', type: 'choose' },
+        { field: 'List Name', value: 'InboxMails', type: 'choose' },
+      ],
+      extra: [
+        el('h5', { style: 'margin:var(--s-3) 0 var(--s-2);font-size:var(--fs-sm);font-weight:600;color:var(--ink)' },
+          ['各列の入力値:']),
+        el('p', { style: 'margin:0 0 var(--s-2);font-size:var(--fs-xs);color:var(--ink-3)' }, [
+          '※ ★が付いた列は Spira の Forms 判別に必須 — 必ず値を入れること。',
+        ]),
+        formsTable,
+        el('h5', { style: 'margin:var(--s-3) 0 var(--s-2);font-size:var(--fs-sm);font-weight:600;color:var(--ink)' },
+          ['ConversationId の生成式 (最重要):']),
+        pn(code('forms-'), ' プレフィクスは Spira の判別キーなので必ず含めること。'),
+        codeBlock("concat('forms-', triggerOutputs()?['body/formsId'], '-', triggerOutputs()?['body/resourceData/responseId'])"),
+        pn('テナントによって動的コンテンツ名が異なる場合は ',
+          code("triggerOutputs()?['body/resourceData/responseId']"),
+          ' を ',
+          code("triggerOutputs()?['body/responseId']"),
+          ' に置き換えて試してください。'),
+      ],
+    }),
+
+    h('3. 動作確認'),
     ol([
       el('div', {}, ['対象 Forms フォームから 1 件テスト送信']),
       el('div', {}, ['PA の実行履歴で成功を確認 → SP の ', code('InboxMails'), ' リストに行が追加されているか確認']),
@@ -1602,7 +1776,7 @@ function openHelpModal(root: HTMLElement): void {
       el('div', {}, ['受信メールから「起票」をクリック → 起票モーダルでカテゴリ/優先度が自動選択されることを確認']),
     ]),
 
-    h('8. トラブルシューティング'),
+    h('4. トラブルシューティング'),
     el('ul', { style: 'margin:0;padding-left:1.2em;line-height:1.8;font-size:var(--fs-sm);color:var(--ink)' }, [
       el('li', {}, [
         el('strong', {}, ['カテゴリ/優先度が自動選択されない']),
