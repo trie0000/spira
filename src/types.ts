@@ -62,6 +62,14 @@ export interface Comment {
    *   - 'other' : any other manual entry (phone, in-person, etc.).
    *  Legacy comments without this field render with the mail icon. */
   source?: 'mail' | 'teams' | 'other';
+  /** スレッド種別:
+   *   - 'internal' : 内部スレッド (社内議論用、Tickets.internalThreadId 由来)
+   *   - 'external' : 外部スレッド (顧客/ユーザー向け、Tickets.userThreadId 由来、
+   *                  またはメール等の外部由来)
+   *  syncInbox の Teams auto-link 時に threadMap の hit.threadType をそのまま
+   *  入れる。手動「履歴を追加」では UI 上で選択。
+   *  未指定 (legacy) の場合は UI 側で source / fromEmail から推定 (デフォ external)。 */
+  threadKind?: 'internal' | 'external';
   /** SP の Author (登録者) と Editor (最終更新者)。SP 側の自動付与で、
    *  受信スレッドカードに「誰がいつ登録/更新したか」を表示するために使う。 */
   createdBy?: string;

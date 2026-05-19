@@ -274,6 +274,7 @@ function asComment(it: SpListItem): Comment {
     hasAttachments: it.HasAttachments != null ? Boolean(it.HasAttachments) : undefined,
     internetMessageId: it.InternetMessageId ? String(it.InternetMessageId) : undefined,
     source: normalizeSource(it.Source),
+    threadKind: normalizeThreadKind(it.ThreadKind),
     createdBy: author?.Title,
     updatedBy: editor?.Title,
     createdAt: it.Created ? String(it.Created) : undefined,
@@ -283,6 +284,11 @@ function asComment(it: SpListItem): Comment {
 
 function normalizeSource(v: unknown): 'mail' | 'teams' | 'other' | undefined {
   if (v === 'mail' || v === 'teams' || v === 'other') return v;
+  return undefined;
+}
+
+function normalizeThreadKind(v: unknown): 'internal' | 'external' | undefined {
+  if (v === 'internal' || v === 'external') return v;
   return undefined;
 }
 
@@ -898,6 +904,7 @@ export class SpRepository implements Repository {
       HasAttachments: input.hasAttachments ?? false,
       InternetMessageId: input.internetMessageId ?? null,
       Source: input.source ?? null,
+      ThreadKind: input.threadKind ?? null,
     };
     const created = await this.tx.req<SpListItem>(`${this.listPath(this.cfg.listComments)}/items`, {
       method: 'POST',
@@ -1030,6 +1037,9 @@ export class SpRepository implements Repository {
                 hasAttachments: m.hasAttachments,
                 internetMessageId: m.internetMessageId,
                 source: 'teams',
+                // threadMap.threadType (internal / user) を threadKind に変換。
+                // 'user' → 'external' (顧客向けスレッド)、'internal' → 'internal'。
+                threadKind: hit.threadType === 'user' ? 'external' : 'internal',
               });
               await this.deleteInboxMail(m.id);
               autoLinked++;
@@ -1080,6 +1090,8 @@ export class SpRepository implements Repository {
           hasAttachments: m.hasAttachments,
           internetMessageId: m.internetMessageId,
           source: 'mail',
+          // メール経由はすべて外部 (顧客/外部ユーザーとのやり取り) として扱う
+          threadKind: 'external',
         });
         // auto-link 完了したら受信箱から物理削除
         await this.deleteInboxMail(m.id);
@@ -1420,6 +1432,10 @@ function commentFieldSpecs(): FieldSpec[] {
     // card icon. Optional — legacy rows without this field default to
     // 'mail' in the renderer.
     { name: 'Source', type: 'Text' },
+    // 'internal' / 'external' — どちらのスレッドペインに表示するか。
+    // syncInbox の Teams auto-link 時に threadMap.threadType をそのまま入れる。
+    // 手動追加時は UI で選択。未指定 (legacy) は UI 側で external にフォールバック。
+    { name: 'ThreadKind', type: 'Text' },
   ];
 }
 

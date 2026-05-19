@@ -413,6 +413,7 @@ export class MockRepository implements Repository {
       hasAttachments: input.hasAttachments,
       internetMessageId: input.internetMessageId,
       source: input.source,
+      threadKind: input.threadKind,
       createdBy: me?.displayName ?? input.fromName,
       updatedBy: me?.displayName ?? input.fromName,
       createdAt: nowIso,
@@ -522,6 +523,7 @@ export class MockRepository implements Repository {
                 hasAttachments: m.hasAttachments,
                 internetMessageId: m.internetMessageId,
                 source: 'teams',
+                threadKind: hit.threadType === 'user' ? 'external' : 'internal',
               });
               await this.deleteInboxMail(m.id);
               autoLinked++;
@@ -570,6 +572,7 @@ export class MockRepository implements Repository {
           hasAttachments: m.hasAttachments,
           internetMessageId: m.internetMessageId,
           source: 'mail',
+          threadKind: 'external',
         });
         // auto-link 後は物理削除 (受信箱には auto-link 待ち or Forms のみ残る運用)
         await this.deleteInboxMail(m.id);

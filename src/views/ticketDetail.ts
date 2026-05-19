@@ -933,22 +933,94 @@ function renderSplitPanes(t: Ticket, comments: Comment[], lastSeen: number | nul
   const received = comments.filter(c => c.type === 'received');
   const notes = comments.filter(c => c.type === 'note');
 
-  const addHistoryBtn = el('button', {
-    class: 'spira-btn spira-btn--secondary spira-btn--sm',
-    style: 'margin-left:auto',
-    onclick: () => openAddHistoryModal(t, received),
-  }, [
-    el('span', { html: icon('plus'), style: 'display:inline-flex;width:14px;height:14px' }),
-    '履歴を追加',
-  ]);
+  // threadKind 未指定の legacy コメントは external にフォールバック。
+  // mail/その他は基本 external 寄りなので妥当。
+  const kindOf = (c: Comment): 'internal' | 'external' =>
+    c.threadKind === 'internal' ? 'internal' : 'external';
+  const internalComments = received.filter(c => kindOf(c) === 'internal');
+  const externalComments = received.filter(c => kindOf(c) === 'external');
+
+  // 表示/非表示の状態を localStorage に永続化。
+  const COLLAPSED_KEY_INT = `spira:thread-collapsed:internal:${t.id}`;
+  const COLLAPSED_KEY_EXT = `spira:thread-collapsed:external:${t.id}`;
+  // 既定: どちらも展開。各チケット毎の状態を覚える。
+  const isCollapsed = (key: string): boolean => {
+    try { return localStorage.getItem(key) === '1'; } catch { return false; }
+  };
+  const setCollapsed = (key: string, v: boolean): void => {
+    try { localStorage.setItem(key, v ? '1' : '0'); } catch { /* ignore */ }
+  };
+
+  const buildSubSection = (
+    label: string,
+    items: Comment[],
+    kind: 'internal' | 'external',
+    storageKey: string,
+  ): HTMLElement => {
+    const collapsed = isCollapsed(storageKey);
+    const addBtn = el('button', {
+      class: 'spira-btn spira-btn--secondary spira-btn--sm',
+      title: `${label}に履歴を追加`,
+      onclick: (e: Event) => {
+        e.stopPropagation();
+        openAddHistoryModal(t, received, kind);
+      },
+    }, [
+      el('span', { html: icon('plus'), style: 'display:inline-flex;width:14px;height:14px' }),
+      '追加',
+    ]);
+
+    const collapseArrow = el('span', {
+      style: `display:inline-block;width:14px;color:var(--ink-3);font-size:10px;line-height:1;text-align:center;transition:transform 0.15s;${collapsed ? '' : 'transform:rotate(90deg)'}`,
+    }, ['▶']);
+
+    const countBadge = el('span', {
+      style: 'font-size:var(--fs-xs);color:var(--ink-3);margin-left:6px',
+    }, [`${items.length} 件`]);
+
+    const header = el('div', {
+      style: 'display:flex;align-items:center;gap:6px;padding:var(--s-3) 0;cursor:pointer;user-select:none;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--paper);z-index:1',
+      onclick: () => {
+        const nowCollapsed = body.style.display === 'none';
+        body.style.display = nowCollapsed ? '' : 'none';
+        collapseArrow.style.transform = nowCollapsed ? 'rotate(90deg)' : '';
+        setCollapsed(storageKey, !nowCollapsed);
+      },
+    }, [
+      collapseArrow,
+      el('span', { style: 'font-size:var(--fs-md);font-weight:600;color:var(--ink)' }, [label]),
+      countBadge,
+      el('span', { style: 'flex:1' }),
+      addBtn,
+    ]);
+
+    const body = el('div', {
+      style: `padding:var(--s-3) 0;${collapsed ? 'display:none' : ''}`,
+    }, [
+      items.length === 0
+        ? el('div', { class: 'spira-empty', style: 'padding:var(--s-5) 0;color:var(--ink-3);font-size:var(--fs-sm)' }, [
+            `${label}の履歴はまだありません`,
+          ])
+        : el('div', { class: 'spira-th-list' }, items.map(c => renderReceivedCard(t, c, lastSeen))),
+    ]);
+
+    return el('div', {
+      class: 'spira-thread-section',
+      'data-thread-kind': kind,
+      style: 'margin-bottom:var(--s-4)',
+    }, [header, body]);
+  };
 
   const leftPane = el('div', {
     class: 'spira-split-pane',
     'data-bg': 'paper',
     style: 'flex:1 1 50%;min-width:0;overflow:auto;padding:0 var(--s-7) var(--s-7);background:var(--paper)',
   }, [
-    paneTitle('📋 スレッド', `${received.length} 件`, addHistoryBtn),
-    renderReceivedThread(t, received, lastSeen),
+    el('div', {
+      style: 'padding:var(--s-4) 0 var(--s-2);font-size:var(--fs-xs);color:var(--ink-3);text-transform:uppercase;letter-spacing:0.05em',
+    }, [`スレッド (${received.length} 件)`]),
+    buildSubSection('🏢 内部スレッド', internalComments, 'internal', COLLAPSED_KEY_INT),
+    buildSubSection('👥 外部スレッド', externalComments, 'external', COLLAPSED_KEY_EXT),
   ]);
 
   const addNoteBtn = el('button', {
@@ -1077,8 +1149,13 @@ function paneTitle(title: string, sub: string, action?: HTMLElement): HTMLElemen
 
 // ============================================================ add history modal
 
-function openAddHistoryModal(t: Ticket, existing: Comment[]): void {
+function openAddHistoryModal(
+  t: Ticket,
+  existing: Comment[],
+  defaultThreadKind: 'internal' | 'external' = 'external',
+): void {
   type Source = 'mail' | 'teams' | 'other';
+  type ThreadKind = 'internal' | 'external';
 
   // Truncate ISO timestamp to minute resolution so seconds-level seq
   // offsets (added by resolveTeamsTimeToISO to keep same-minute messages
@@ -1114,6 +1191,17 @@ function openAddHistoryModal(t: Ticket, existing: Comment[]): void {
     el('option', { value: 'teams' }, ['Teams']),
     el('option', { value: 'mail' }, ['メール']),
     el('option', { value: 'other' }, ['その他']),
+  ]);
+
+  // どちらのスレッドに追加するか。openAddHistoryModal を呼び出した側
+  // (内部/外部の「+ 追加」ボタン) から初期値を受け取り、ユーザは必要なら
+  // 切り替えられる。'received' Comment が threadKind 列を持つので保存時にセット。
+  const threadKindSel = el('select', {
+    class: 'spira-input',
+    style: 'width:200px;min-width:0',
+  }, [
+    el('option', { value: 'internal', ...(defaultThreadKind === 'internal' ? { selected: 'selected' } : {}) }, ['🏢 内部スレッド']),
+    el('option', { value: 'external', ...(defaultThreadKind === 'external' ? { selected: 'selected' } : {}) }, ['👥 外部スレッド']),
   ]);
 
   // Datalist for the 送信者 field — AD users + authors already seen
@@ -1355,6 +1443,7 @@ function openAddHistoryModal(t: Ticket, existing: Comment[]): void {
       'display:grid;grid-template-columns:72px minmax(0,1fr);' +
       'gap:var(--s-4) var(--s-4);align-items:center',
   }, [
+    el('label', { style: labelStyle }, ['追加先']),     threadKindSel,
     el('label', { style: labelStyle }, ['ソース']),     sourceSel,
     el('label', { style: labelStyle }, ['送信時間']),   dateTimeCell,
     el('label', { style: labelStyle }, ['送信者']),
@@ -1612,6 +1701,7 @@ function openAddHistoryModal(t: Ticket, existing: Comment[]): void {
                 isHtml: false,
                 sentAt: resolveTeamsTimeToISO(mm.time, baseDate, i),
                 source: 'teams',
+                threadKind: (threadKindSel as HTMLSelectElement).value as ThreadKind,
               });
               added++;
             } catch (e) {
@@ -1714,6 +1804,7 @@ function openAddHistoryModal(t: Ticket, existing: Comment[]): void {
             isHtml: !!useHtml,
             sentAt: sentISO,
             source: src,
+            threadKind: (threadKindSel as HTMLSelectElement).value as ThreadKind,
           });
           toast(getRoot(), useHtml ? 'HTML 形式で取り込みました' : 'スレッドに追加しました', 'ok');
         } catch (e) {
