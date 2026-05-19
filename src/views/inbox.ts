@@ -823,11 +823,14 @@ export function openNewTicketModal(m: InboxMail): void {
     autocomplete: 'off',
   }) as HTMLInputElement;
 
-  // 送信時間
-  const todayISO = new Date().toISOString().slice(0, 10);
+  // 送信時間 — Date オブジェクトを渡すと createDateTime が local 時間 (JST 等)
+  // の getter で各セグメントに展開してくれる。文字列で渡すと UTC のままに
+  // なるので必ず Date 経由で。受信メールがあればその sentAt/receivedAt を
+  // ベースに、なければ現在時刻 (JST) を初期値にする。
   const sentInitial = m.sentAt ?? m.receivedAt;
-  const initialDT = sentInitial ? sentInitial.slice(0, 16) : `${todayISO}T${new Date().toISOString().slice(11, 16)}`;
-  const dateTimePicker = createDateTime({ initial: initialDT });
+  const dateTimePicker = createDateTime({
+    initial: sentInitial ? new Date(sentInitial) : new Date(),
+  });
 
   // 本文 textarea (Teams/mail/other 共通)
   const bodyArea = el('textarea', {

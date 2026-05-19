@@ -2180,6 +2180,7 @@ function renderSidebar(): HTMLElement {
     const isActive = s.view === view;
     const node = el('div', {
       class: `spira-side-item${isActive ? ' active' : ''}`,
+      'data-side-item': view,                // silent 自動同期がバッジを直接書き換える際の目印
       role: 'button',
       tabindex: '0',
       onclick: () => setState({ view, selectedTicketId: null }),

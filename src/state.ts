@@ -49,9 +49,16 @@ const listeners = new Set<Listener>();
 
 export function getState(): Readonly<State> { return state; }
 
-export function setState(patch: Partial<State> | ((s: State) => Partial<State>)): void {
+export function setState(
+  patch: Partial<State> | ((s: State) => Partial<State>),
+  opts: { silent?: boolean } = {},
+): void {
   const next = typeof patch === 'function' ? patch(state) : patch;
   Object.assign(state, next);
+  // silent=true でリスナを呼ばずに state だけ更新する。自動同期 (auto-sync) の
+  // inbox カウント更新など、画面全体の再描画 (paintMain) を起こしたくない
+  // 軽微な更新で使う。値は次回の通常 setState や手動操作で UI に反映される。
+  if (opts.silent) return;
   for (const l of listeners) l();
 }
 

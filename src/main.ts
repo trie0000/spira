@@ -181,19 +181,47 @@ async function doSync(root: HTMLElement, silent = false): Promise<void> {
     repo.injectFakeReply?.(1);
   }
   const syncBtn = root.querySelector<HTMLElement>('[data-action="sync"]');
-  syncBtn?.classList.add('spira-spin');
+  // silent (= 定期自動同期) では同期ボタンを回さない。チラつきの一因。
+  if (!silent) syncBtn?.classList.add('spira-spin');
   try {
     const r = await repo.syncInbox();
     const inbox = await repo.listInbox({});
-    setState({ inboxCount: inboxRowsWithTag(inbox).length });
-    if (!silent) {
+    const newCount = inboxRowsWithTag(inbox).length;
+    if (silent) {
+      // 自動同期では画面全体の再描画 (paintMain) を起こしたくないので
+      // silent モードで state だけ更新し、サイドバーの inbox バッジは
+      // 直接 DOM 操作で書き換える。チケット詳細・受信一覧の差分反映は
+      // それぞれの polling / 次回手動操作で行われる。
+      setState({ inboxCount: newCount }, { silent: true });
+      updateInboxBadge(root, newCount);
+    } else {
+      setState({ inboxCount: newCount });
       const errs = r.errors.length ? ` · エラー ${r.errors.length}件` : '';
       toast(root, `同期完了 · 自動紐付け ${r.autoLinked} 件 / 未処理 ${r.remaining} 件${errs}`, r.errors.length ? 'warn' : 'ok');
     }
   } catch (e) {
-    toast(root, `同期失敗: ${(e as Error).message}`, 'error');
+    if (!silent) toast(root, `同期失敗: ${(e as Error).message}`, 'error');
+    else console.warn('[spira] silent sync failed:', (e as Error).message);
   } finally {
-    syncBtn?.classList.remove('spira-spin');
+    if (!silent) syncBtn?.classList.remove('spira-spin');
+  }
+}
+
+/** サイドバー「受信」項目のバッジ件数を DOM 直接更新。silent sync 用。 */
+function updateInboxBadge(root: HTMLElement, count: number): void {
+  const item = root.querySelector<HTMLElement>('[data-side-item="inbox"]');
+  if (!item) return;
+  let badge = item.querySelector<HTMLElement>('.spira-side-count');
+  if (count > 0) {
+    if (!badge) {
+      // バッジが無かったら作る (count が 0 → 1 のとき)。
+      badge = document.createElement('span');
+      badge.className = 'spira-side-count';
+      item.appendChild(badge);
+    }
+    badge.textContent = String(count);
+  } else if (badge) {
+    badge.remove();
   }
 }
 

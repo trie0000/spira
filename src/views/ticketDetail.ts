@@ -1131,12 +1131,30 @@ function renderSplitPanes(t: Ticket, comments: Comment[], lastSeen: number | nul
       style: 'flex:1;min-height:0;display:flex;overflow:hidden',
     }, [buildColumn('👥 外部スレッド', externalComments, 'external', true)]);
   } else {
+    // both モード: 内部 / 外部 を横並びにして、間にドラッグ可能なリサイザを挟む。
+    // 幅比率は localStorage に永続化、ダブルクリックで 50/50 に戻す。
+    const internalCol = buildColumn('🏢 内部スレッド', internalComments, 'internal', false);
+    const externalCol = buildColumn('👥 外部スレッド', externalComments, 'external', false);
+    const innerResizer = el('div', {
+      class: 'spira-split-resizer',
+      'aria-label': '内部/外部スレッドの幅を変更',
+      style: 'flex:0 0 6px;cursor:col-resize;background:var(--paper-3);transition:background 0.1s',
+    });
+
     columnsContainer = el('div', {
       style: 'flex:1;min-height:0;display:flex;overflow:hidden',
-    }, [
-      buildColumn('🏢 内部スレッド', internalComments, 'internal', false),
-      buildColumn('👥 外部スレッド', externalComments, 'external', false),
-    ]);
+    }, [internalCol, innerResizer, externalCol]);
+
+    // 永続化済み比率を復元 + ドラッグハンドラ装着
+    const RATIO_KEY = 'spira:thread-inner-split';
+    try {
+      const saved = parseFloat(localStorage.getItem(RATIO_KEY) ?? '');
+      if (Number.isFinite(saved) && saved > 0.1 && saved < 0.9) {
+        internalCol.style.flex = `0 0 ${(saved * 100).toFixed(2)}%`;
+        externalCol.style.flex = '1 1 0';
+      }
+    } catch { /* ignore */ }
+    attachInnerColumnResizer(innerResizer, internalCol, externalCol, RATIO_KEY);
   }
 
   const leftPane = el('div', {
@@ -1357,12 +1375,14 @@ function openAddHistoryModal(
     autocomplete: 'off',
   }) as HTMLInputElement;
 
-  // 送信時間 (YYYY/MM/DD HH:MM 連結ウィジェット)。初期値は今日 + 自動時刻。
-  // ユーザが手で変更したら usingDefaultLeadingTime=false で自動更新を止める。
+  // 送信時間 (YYYY/MM/DD HH:MM 連結ウィジェット)。初期値はモーダル表示時の
+  // 現在 JST。ユーザが手で変更したら usingDefaultLeadingTime=false で自動更新を止める。
+  // Date オブジェクトを渡すと createDateTime が local getter (getHours など)
+  // でセグメントに展開してくれるので、ブラウザのタイムゾーン (Japan なら JST)
+  // がそのまま反映される。
   let usingDefaultLeadingTime = true;
-  const todayISO = new Date().toISOString().slice(0, 10);
   const leadingDateTimePicker = createDateTime({
-    initial: `${todayISO}T00:00`,
+    initial: new Date(),
     onUserEdit: () => {
       usingDefaultLeadingTime = false;
       leadingTimeHint.style.display = 'none';
@@ -1469,7 +1489,9 @@ function openAddHistoryModal(
     const auto = computeDefaultLeadingTime(bodyArea.value); // 'HH:MM' or ''
     const cur = leadingDateTimePicker.getValue();
     const dateMatch = cur.match(/^(\d{4}-\d{2}-\d{2})/);
-    const date = dateMatch?.[1] ?? new Date().toISOString().slice(0, 10);
+    const now = new Date();
+    const todayLocal = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const date = dateMatch?.[1] ?? todayLocal;
     if (auto) {
       leadingDateTimePicker.setValueQuiet(`${date}T${auto}`);
       leadingTimeHint.style.display = '';
@@ -2213,6 +2235,58 @@ function attachResizer(resizer: HTMLElement, left: HTMLElement, right: HTMLEleme
     left.style.flex = `1 1 ${SPLIT_DEFAULT * 100}%`;
     right.style.flex = `1 1 ${(1 - SPLIT_DEFAULT) * 100}%`;
     try { localStorage.setItem(SPLIT_STORAGE_KEY, String(SPLIT_DEFAULT)); } catch { /* ignore */ }
+  });
+}
+
+/** 並列モードの内部 / 外部 カラム間リサイザ。attachResizer と同じ挙動だが
+ *  独自の localStorage キーを使い、ダブルクリックで 50/50 にリセット。 */
+function attachInnerColumnResizer(
+  resizer: HTMLElement,
+  left: HTMLElement,
+  right: HTMLElement,
+  storageKey: string,
+): void {
+  resizer.addEventListener('mouseenter', () => { resizer.style.background = 'var(--accent-soft)'; });
+  resizer.addEventListener('mouseleave', () => { resizer.style.background = 'var(--paper-3)'; });
+  resizer.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const parent = resizer.parentElement!;
+    const totalW = parent.clientWidth;
+    const startLeftW = left.getBoundingClientRect().width;
+    const prevCursor = document.body.style.cursor;
+    const prevSelect = document.body.style.userSelect;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    resizer.style.background = 'var(--accent)';
+
+    const MIN_PX = 180;
+    const onMove = (ev: MouseEvent) => {
+      const dx = ev.clientX - startX;
+      let newW = startLeftW + dx;
+      newW = Math.max(MIN_PX, Math.min(newW, totalW - MIN_PX - 6));
+      const ratio = newW / totalW;
+      left.style.flex = `0 0 ${(ratio * 100).toFixed(2)}%`;
+      right.style.flex = '1 1 0';
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      document.body.style.cursor = prevCursor;
+      document.body.style.userSelect = prevSelect;
+      resizer.style.background = 'var(--paper-3)';
+      const w = left.getBoundingClientRect().width;
+      const total = parent.clientWidth || 1;
+      const ratio = w / total;
+      try { localStorage.setItem(storageKey, String(ratio)); } catch { /* ignore */ }
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  });
+  resizer.addEventListener('dblclick', () => {
+    left.style.flex = '1 1 50%';
+    right.style.flex = '1 1 50%';
+    try { localStorage.setItem(storageKey, '0.5'); } catch { /* ignore */ }
   });
 }
 
