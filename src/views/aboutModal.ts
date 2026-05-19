@@ -4,6 +4,7 @@
 
 import { el } from '../utils/dom';
 import { openModal } from '../components/modal';
+import { buildPaFlowsHelpBody } from './shell';
 
 function getRoot(): HTMLElement {
   return (document.querySelector<HTMLElement>('#spira-root') ?? document.body);
@@ -25,9 +26,10 @@ const KBD = (s: string): HTMLElement => el('span', {
 
 // ── 利用者向けタブ ───────────────────────────────────────────────────
 function renderUserTab(): HTMLElement {
-  return el('div', { style: 'max-width:680px' }, [
+  return el('div', { style: 'max-width:760px' }, [
     el('p', { style: P }, [
-      'Spira は SharePoint / Power Automate / Microsoft Teams を組み合わせた、',
+      el('strong', {}, ['Spira (読み: エスピラ)']),
+      ' は SharePoint / Power Automate / Microsoft Teams を組み合わせた、',
       el('strong', {}, ['メール・Forms・Teams を 1 つのチケットに束ねる軽量な対応管理ツール']),
       ' です。専用サーバ不要、ブックマークレット 1 つで起動します。',
     ]),
@@ -224,9 +226,10 @@ function renderArchDiagram(): HTMLElement {
 
 // ── 技術者向けタブ ───────────────────────────────────────────────────
 function renderTechTab(): HTMLElement {
-  return el('div', { style: 'max-width:760px' }, [
+  return el('div', { style: 'max-width:920px' }, [
     el('p', { style: P }, [
-      'Spira のアーキ概要・データソース・管理者操作の解説。',
+      el('strong', {}, ['Spira (読み: エスピラ)']),
+      ' のアーキ概要・データソース・管理者操作の解説。',
       el('strong', {}, ['追加サーバ / 専用ライセンス不要']),
       ' で、SharePoint + Power Automate Standard tier のみで完結します。',
     ]),
@@ -407,16 +410,40 @@ function renderTechTab(): HTMLElement {
   ]);
 }
 
+// ── PA フロー手順タブ (shell.ts の buildPaFlowsHelpBody を埋め込み) ────
+function renderPaFlowsTab(): HTMLElement {
+  const root = getRoot();
+  const wrap = el('div', { style: 'min-height:300px' }, [
+    el('p', { style: P }, [
+      'メール / Forms / Teams からの自動取込と Teams スレッド投稿を担当する ',
+      el('strong', {}, ['4 つの Power Automate フロー']),
+      ' の作成手順です。すべて Standard tier (Premium / Graph API 不要) で動作します。',
+    ]),
+  ]);
+  try {
+    wrap.appendChild(buildPaFlowsHelpBody(root));
+  } catch (e) {
+    wrap.appendChild(el('div', { style: 'color:var(--danger);font-size:var(--fs-sm)' }, [
+      `PA フロー手順の読み込みに失敗: ${(e as Error).message}`,
+    ]));
+  }
+  return wrap;
+}
+
 // ── モーダル本体 ─────────────────────────────────────────────────────
+type AboutTab = 'user' | 'tech' | 'pa';
+
 export function openAboutModal(): void {
-  let activeTab: 'user' | 'tech' = 'user';
+  let activeTab: AboutTab = 'user';
 
   const content = el('div', { style: 'min-height:520px' }, []);
   const renderContent = (): void => {
-    content.replaceChildren(activeTab === 'user' ? renderUserTab() : renderTechTab());
+    if (activeTab === 'user') content.replaceChildren(renderUserTab());
+    else if (activeTab === 'tech') content.replaceChildren(renderTechTab());
+    else content.replaceChildren(renderPaFlowsTab());
   };
 
-  const tabBtn = (label: string, key: 'user' | 'tech'): HTMLElement => {
+  const tabBtn = (label: string, key: AboutTab): HTMLElement => {
     const isActive = activeTab === key;
     return el('button', {
       style:
@@ -427,7 +454,6 @@ export function openAboutModal(): void {
       onclick: () => {
         if (activeTab === key) return;
         activeTab = key;
-        // タブの見た目を更新するため tabs を再構築
         rebuildTabs();
         renderContent();
       },
@@ -442,18 +468,19 @@ export function openAboutModal(): void {
     tabBar.replaceChildren(
       tabBtn('👤 利用者向け', 'user'),
       tabBtn('🛠 技術者向け', 'tech'),
+      tabBtn('⚡ PA フロー作成手順', 'pa'),
     );
   };
   rebuildTabs();
   renderContent();
 
-  const body = el('div', { style: 'width:100%;max-height:75vh;overflow-y:auto' }, [
+  const body = el('div', { style: 'width:100%;height:100%;overflow-y:auto' }, [
     tabBar,
     content,
   ]);
 
   openModal(getRoot(), {
-    title: '📘 Spira について',
+    title: '📘 Spira (エスピラ) について',
     body,
     size: 'xl',
     primaryLabel: '閉じる',

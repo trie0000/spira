@@ -352,15 +352,7 @@ function openSettingsMenu(root: HTMLElement, anchor: HTMLElement): void {
     },
   }, [
     el('span', { html: icon('help'), style: 'display:inline-flex;width:14px;height:14px' }),
-    'Spira について (概要・アーキ図)',
-  ]);
-
-  const helpItem = el('div', {
-    class: 'spira-menu-item',
-    onclick: () => { menu.remove(); openHelpModal(root); },
-  }, [
-    el('span', { html: icon('help'), style: 'display:inline-flex;width:14px;height:14px' }),
-    'ヘルプ (PA フロー作成手順)',
+    'Spira について (概要・アーキ図・PA フロー手順)',
   ]);
 
   const modeLabel = el('div', {
@@ -391,7 +383,6 @@ function openSettingsMenu(root: HTMLElement, anchor: HTMLElement): void {
     el('div', { class: 'spira-menu-divider' }),
     settingsHubItem,
     aboutItem,
-    helpItem,
   ]);
 
   const rect = anchor.getBoundingClientRect();
@@ -1082,7 +1073,7 @@ export function openVersionModal(root: HTMLElement): void {
   });
 }
 
-function openHelpModal(root: HTMLElement): void {
+function buildPaFlowsBodyImpl(root: HTMLElement): HTMLElement {
   // The help modal covers 3 Power Automate flows that Spira relies on:
   //   ① Inbox Ingest        — Outlook mail → SP InboxMails list
   //   ② Teams Thread Create — SP TeamsPostRequests → Teams post → DeepLink writeback
@@ -2087,7 +2078,7 @@ function openHelpModal(root: HTMLElement): void {
   const flow1 = el('div', {}, [prereq, trigger, action, verify, trouble]);
 
   const body = el('div', {
-    style: 'max-width:720px;line-height:1.7',
+    style: 'max-width:920px;line-height:1.7',
   }, [
     intro,
     toggle('① メール取り込み', '(必須) Outlook → InboxMails', [flow1], true),
@@ -2096,10 +2087,20 @@ function openHelpModal(root: HTMLElement): void {
     toggle('④ Teams 返信同期', '(任意) チャネル返信 → InboxMails (自動でチケットに紐付け)', [teamsSyncFlow], false),
   ]);
 
+  return body;
+}
+
+/** PA フロー作成手順の HTMLElement を返す (aboutModal / 旧 openHelpModal が利用)。 */
+export function buildPaFlowsHelpBody(root: HTMLElement): HTMLElement {
+  return buildPaFlowsBodyImpl(root);
+}
+
+function openHelpModal(root: HTMLElement): void {
+  const body = buildPaFlowsBodyImpl(root);
   openModal(root, {
     title: 'ヘルプ — Power Automate フロー作成手順',
     body,
-    size: 'lg',
+    size: 'xl',
     primaryLabel: '閉じる',
     hideCancel: true,
   });

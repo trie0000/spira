@@ -28,11 +28,16 @@ import { buildAiSettingsPanel } from './aiSettingsModal';
 import { openAuditLogModal } from './auditLogModal';
 
 // ── 設定項目定義 ────────────────────────────────────────────────────
+interface SettingPanel {
+  body: HTMLElement;
+  /** モーダル右下の共通「保存」ボタンが呼ぶ。未指定なら保存ボタン非表示。 */
+  save?: () => Promise<void> | void;
+}
 interface SettingItem {
   key: string;
   label: string;
-  /** 右パネルに表示するインライン要素を返す。Promise 可。 */
-  render: (root: HTMLElement, onClose: () => void) => HTMLElement | Promise<HTMLElement>;
+  /** 右パネルに表示する panel (body + save) を返す。Promise 可。 */
+  render: (root: HTMLElement, onClose: () => void) => SettingPanel | Promise<SettingPanel>;
   danger?: boolean;
 }
 interface SettingGroup {
@@ -49,39 +54,32 @@ const TITLE = 'margin:0 0 var(--s-3);font-size:var(--fs-lg);font-weight:600;colo
 const DESC = 'margin:0 0 var(--s-4);font-size:var(--fs-sm);line-height:1.7;color:var(--ink-2);' +
   'background:var(--paper-2);border:1px solid var(--line);border-radius:var(--r-2);padding:var(--s-3) var(--s-4)';
 
-/** インラインパネル共通テンプレート。タイトル + 説明 + body + 保存ボタン。
- *  body 内のインタラクションはそのまま動き、保存ボタンが save を呼ぶ。 */
+/** インラインパネル共通テンプレート。タイトル + 説明 + body を返す。
+ *  保存ボタンはモーダル右下の共通ボタンに集約 (panel.save で渡す)。 */
 function inlinePanel(args: {
   title: string;
   hint?: string;
   body: HTMLElement;
   save?: () => Promise<void> | void;
-}): HTMLElement {
-  const saveBtn = args.save
-    ? el('button', {
-        class: 'spira-btn spira-btn--primary',
-        style: 'margin-top:var(--s-4)',
-        onclick: async () => { try { await args.save!(); } catch { /* toast already */ } },
-      }, ['保存'])
-    : null;
-  return el('div', {}, [
+}): SettingPanel {
+  const wrap = el('div', {}, [
     el('h2', { style: TITLE }, [args.title]),
     ...(args.hint ? [el('div', { style: DESC }, [args.hint])] : []),
     args.body,
-    ...(saveBtn ? [saveBtn] : []),
   ]);
+  return { body: wrap, save: args.save };
 }
 
 /** 既存モーダル直接起動セクション用の共通テンプレート。
  *  説明文 + 「編集 UI を開く」ボタンで、複雑な編集 UI に飛ばす。
- *  (現状: AuditLog 等の Composite 機能のみで使用) */
+ *  (現状: AuditLog / SP リセット 等の Composite 機能のみで使用) */
 function renderModalLauncherPanel(args: {
   title: string;
   description: HTMLElement | string;
   buttonLabel: string;
   onClick: () => void;
   danger?: boolean;
-}): HTMLElement {
+}): SettingPanel {
   const btn = el('button', {
     class: 'spira-btn ' + (args.danger ? '' : 'spira-btn--primary'),
     style: args.danger ? 'background:#dc2626;color:#fff;border:0' : '',
@@ -90,7 +88,7 @@ function renderModalLauncherPanel(args: {
     el('span', { html: icon(args.danger ? 'trash' : 'edit'), style: 'display:inline-flex;width:14px;height:14px' }),
     args.buttonLabel,
   ]);
-  return el('div', {}, [
+  const body = el('div', {}, [
     el('h2', { style: TITLE }, [args.title]),
     el('div', {
       style: args.danger
@@ -99,10 +97,11 @@ function renderModalLauncherPanel(args: {
     }, typeof args.description === 'string' ? [args.description] : [args.description]),
     btn,
   ]);
+  return { body };
 }
 
 // ── インライン: 受信同期間隔 ────────────────────────────────────────
-async function renderSyncIntervalPanel(): Promise<HTMLElement> {
+async function renderSyncIntervalPanel(): Promise<SettingPanel> {
   const SETTING_KEY = 'inboxSyncIntervalSec';
   const DEFAULT_SEC = 60;
   const MIN_SEC = 10;
@@ -130,39 +129,37 @@ async function renderSyncIntervalPanel(): Promise<HTMLElement> {
     onclick: () => { input.value = String(sec); },
   }, [label]);
 
-  const saveBtn = el('button', {
-    class: 'spira-btn spira-btn--primary',
-    onclick: async () => {
-      const raw = parseInt(input.value, 10);
-      if (!Number.isFinite(raw) || raw < 0) {
-        toast(getRoot(), '0 以上の数値を入力してください', 'error');
-        return;
-      }
-      if (raw > 0 && raw < MIN_SEC) {
-        toast(getRoot(), `最小 ${MIN_SEC} 秒以上を指定してください (0 = OFF)`, 'error');
-        return;
-      }
-      if (raw > MAX_SEC) {
-        toast(getRoot(), `最大 ${MAX_SEC} 秒以下にしてください`, 'error');
-        return;
-      }
-      try {
-        await repo.setSetting(SETTING_KEY, String(raw));
-        const { restartAutoSync } = await import('../main');
-        void restartAutoSync();
-        toast(getRoot(),
-          raw === 0
-            ? '自動更新を OFF にしました (起動時 + 手動同期のみ)'
-            : `自動更新を ${raw} 秒間隔に設定しました`,
-          'ok',
-        );
-      } catch (e) {
-        toast(getRoot(), `保存失敗: ${(e as Error).message}`, 'error');
-      }
-    },
-  }, ['保存']);
+  const save = async (): Promise<void> => {
+    const raw = parseInt(input.value, 10);
+    if (!Number.isFinite(raw) || raw < 0) {
+      toast(getRoot(), '0 以上の数値を入力してください', 'error');
+      throw new Error('invalid');
+    }
+    if (raw > 0 && raw < MIN_SEC) {
+      toast(getRoot(), `最小 ${MIN_SEC} 秒以上を指定してください (0 = OFF)`, 'error');
+      throw new Error('invalid');
+    }
+    if (raw > MAX_SEC) {
+      toast(getRoot(), `最大 ${MAX_SEC} 秒以下にしてください`, 'error');
+      throw new Error('invalid');
+    }
+    try {
+      await repo.setSetting(SETTING_KEY, String(raw));
+      const { restartAutoSync } = await import('../main');
+      void restartAutoSync();
+      toast(getRoot(),
+        raw === 0
+          ? '自動更新を OFF にしました (起動時 + 手動同期のみ)'
+          : `自動更新を ${raw} 秒間隔に設定しました`,
+        'ok',
+      );
+    } catch (e) {
+      toast(getRoot(), `保存失敗: ${(e as Error).message}`, 'error');
+      throw e;
+    }
+  };
 
-  return el('div', {}, [
+  const body = el('div', {}, [
     el('h2', { style: TITLE }, ['受信同期 — 自動更新間隔']),
     el('div', { style: DESC }, [
       '受信一覧を自動で再取得する間隔 (秒) を設定します。既定 60 秒。',
@@ -174,7 +171,7 @@ async function renderSyncIntervalPanel(): Promise<HTMLElement> {
       input,
       el('span', { style: 'color:var(--ink-3);font-size:var(--fs-sm)' }, ['秒']),
     ]),
-    el('div', { style: 'display:flex;flex-wrap:wrap;gap:4px;margin-bottom:var(--s-4)' }, [
+    el('div', { style: 'display:flex;flex-wrap:wrap;gap:4px' }, [
       el('span', { style: 'color:var(--ink-3);font-size:var(--fs-xs);margin-right:4px;align-self:center' }, ['プリセット:']),
       presetBtn('OFF', 0),
       presetBtn('30秒', 30),
@@ -183,12 +180,12 @@ async function renderSyncIntervalPanel(): Promise<HTMLElement> {
       presetBtn('5分', 300),
       presetBtn('15分', 900),
     ]),
-    saveBtn,
   ]);
+  return { body, save };
 }
 
 // ── インライン: 文字サイズ ─────────────────────────────────────────
-function renderFontSizePanel(): HTMLElement {
+function renderFontSizePanel(): SettingPanel {
   const current = getFontSize();
   const opt = (v: FontSize, label: string, sample: string): HTMLElement => {
     const id = `spira-font-${v}`;
@@ -215,39 +212,37 @@ function renderFontSizePanel(): HTMLElement {
       ]),
     ]);
   };
-  return el('div', {}, [
+  const body = el('div', {}, [
     el('h2', { style: TITLE }, ['文字サイズ']),
     el('div', { style: DESC }, [
-      'チケット一覧・詳細・設定モーダル・ヘルプ等、Spira 全画面で共通の文字サイズスケールを切り替えます。',
+      'Spira 全画面で共通の文字サイズスケールを切り替えます。',
       el('br'),
-      '選択した瞬間に反映され、本設定は端末ローカル (localStorage) に保存されます。',
+      'ラジオを選択した瞬間に反映され、端末ローカル (localStorage) に保存されます。',
     ]),
     opt('sm', '小', '小さめ — 一覧で多くの行を一度に表示したい場合'),
     opt('md', '中 (既定)', '標準サイズ — バランス重視'),
     opt('lg', '大', '大きめ — 視認性重視・長時間作業向け'),
   ]);
+  return { body }; // 即時反映なので保存ボタン不要
 }
 
 // ── インライン: 開発者モード ────────────────────────────────────────
-function renderDeveloperModePanel(): HTMLElement {
+function renderDeveloperModePanel(): SettingPanel {
   const checkbox = el('input', {
     type: 'checkbox',
     style: 'width:16px;height:16px;cursor:pointer',
     ...(isDeveloperMode() ? { checked: 'checked' } : {}),
   }) as HTMLInputElement;
 
-  const saveBtn = el('button', {
-    class: 'spira-btn spira-btn--primary',
-    onclick: () => {
-      setDeveloperMode(checkbox.checked);
-      toast(getRoot(),
-        checkbox.checked ? '開発者モードを有効にしました' : '開発者モードを無効にしました',
-        'ok',
-      );
-    },
-  }, ['保存']);
+  const save = async (): Promise<void> => {
+    setDeveloperMode(checkbox.checked);
+    toast(getRoot(),
+      checkbox.checked ? '開発者モードを有効にしました' : '開発者モードを無効にしました',
+      'ok',
+    );
+  };
 
-  return el('div', {}, [
+  const body = el('div', {}, [
     el('h2', { style: TITLE }, ['開発者モード']),
     el('div', { style: DESC }, [
       '実験的機能・直接 API 接続オプションを有効化するためのフラグです。',
@@ -257,13 +252,13 @@ function renderDeveloperModePanel(): HTMLElement {
     ]),
     el('label', {
       style: 'display:inline-flex;align-items:center;gap:var(--s-3);cursor:pointer;' +
-             'padding:var(--s-3);background:var(--paper-2);border-radius:var(--r-2);margin-bottom:var(--s-4)',
+             'padding:var(--s-3);background:var(--paper-2);border-radius:var(--r-2)',
     }, [
       checkbox,
       el('span', { style: 'font-size:var(--fs-sm);color:var(--ink)' }, ['開発者モードを有効にする']),
     ]),
-    el('div', { style: 'margin-bottom:var(--s-3)' }, [saveBtn]),
   ]);
+  return { body, save };
 }
 
 // (旧 renderVersionPanel は buildVersionPanel 直利用に置き換え済み)
@@ -448,8 +443,9 @@ export function openSettingsHubModal(root: HTMLElement): void {
   }, []);
 
   let activeKey = groups[0]!.items[0]!.key;
+  // 現在アクティブなパネルの save。openModal の onPrimary がこれを呼ぶ。
+  let currentSave: (() => Promise<void> | void) | null = null;
 
-  // close handle (filled in once openModal returns)
   let closeModal: (() => void) | null = null;
   const onClose = (): void => { closeModal?.(); };
 
@@ -462,8 +458,9 @@ export function openSettingsHubModal(root: HTMLElement): void {
     const item = findItem(activeKey);
     if (!item) return;
     detailPane.replaceChildren(el('div', { style: 'color:var(--ink-3);font-size:var(--fs-sm)' }, ['読み込み中…']));
-    const content = await item.render(root, onClose);
-    detailPane.replaceChildren(content);
+    const panel = await item.render(root, onClose);
+    currentSave = panel.save ?? null;
+    detailPane.replaceChildren(panel.body);
     detailPane.scrollTop = 0;
   };
 
@@ -501,15 +498,23 @@ export function openSettingsHubModal(root: HTMLElement): void {
   void renderDetail();
 
   const body = el('div', {
-    style: 'display:flex;height:min(660px,72vh);min-height:420px;width:100%;margin:0;overflow:hidden;border-radius:var(--r-2)',
+    style: 'display:flex;height:100%;width:100%;margin:0;overflow:hidden;border-radius:var(--r-2)',
   }, [sideNav, detailPane]);
 
   const handle = openModal(getRoot(), {
     title: '⚙ 設定',
     body,
     size: 'xl',
-    primaryLabel: '閉じる',
-    onPrimary: async () => { /* close only */ },
+    // モーダル右下の共通保存ボタン。アクティブパネルの save を呼ぶ。
+    // 保存ボタンを 1 つに集約 (キャンセルボタンは非表示、× / Esc で閉じる)。
+    primaryLabel: '保存',
+    hideCancel: true,
+    onPrimary: async () => {
+      if (currentSave) {
+        try { await currentSave(); }
+        catch { throw new Error('validation-failed'); }
+      }
+    },
   });
   closeModal = () => handle.close();
 }
