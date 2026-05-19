@@ -963,18 +963,6 @@ function renderSplitPanes(t: Ticket, comments: Comment[], lastSeen: number | nul
   const EXTERNAL_TINT = 'rgba(245, 158, 11, 0.08)';   // amber
   const EXTERNAL_BORDER = '#f59e0b';
 
-  /** カードを kind に応じて左ボーダ + 淡い背景で装飾するラッパー。
-   *  merged モードで「どちら由来か」を一目で示すためだけのもの。
-   *  両方並べモード (both / internal-only / external-only) では使わない。 */
-  const tintWrap = (card: HTMLElement, kind: 'internal' | 'external'): HTMLElement => {
-    return el('div', {
-      'data-thread-kind': kind,
-      style: `border-left:3px solid ${kind === 'internal' ? INTERNAL_BORDER : EXTERNAL_BORDER};` +
-             `background:${kind === 'internal' ? INTERNAL_TINT : EXTERNAL_TINT};` +
-             `border-radius:var(--r-2);padding:var(--s-2);margin-bottom:var(--s-3)`,
-    }, [card]);
-  };
-
   /** 1 サブカラム (内部 or 外部 専用)。「both」「internal」「external」モードで使う。
    *  独立スクロール対応 (overflow:auto)。ヘッダは sticky。 */
   const buildColumn = (
@@ -983,16 +971,6 @@ function renderSplitPanes(t: Ticket, comments: Comment[], lastSeen: number | nul
     kind: 'internal' | 'external',
     fullWidth: boolean,
   ): HTMLElement => {
-    const addBtn = el('button', {
-      class: 'spira-btn spira-btn--secondary spira-btn--sm',
-      style: 'margin-left:auto',
-      title: `${label}に履歴を追加`,
-      onclick: () => openAddHistoryModal(t, received, kind),
-    }, [
-      el('span', { html: icon('plus'), style: 'display:inline-flex;width:14px;height:14px' }),
-      '追加',
-    ]);
-
     const accentBorder = kind === 'internal' ? INTERNAL_BORDER : EXTERNAL_BORDER;
     const header = el('div', {
       style: `display:flex;align-items:center;gap:8px;padding:var(--s-3) var(--s-4);` +
@@ -1001,7 +979,6 @@ function renderSplitPanes(t: Ticket, comments: Comment[], lastSeen: number | nul
     }, [
       el('span', { style: 'font-size:var(--fs-md);font-weight:600;color:var(--ink)' }, [label]),
       el('span', { style: 'font-size:var(--fs-xs);color:var(--ink-3)' }, [`${items.length} 件`]),
-      addBtn,
     ]);
 
     const list = items.length === 0
@@ -1019,30 +996,53 @@ function renderSplitPanes(t: Ticket, comments: Comment[], lastSeen: number | nul
     }, [header, list]);
   };
 
-  /** 時系列マージモード: 全件を 1 リストに並べ、カード装飾で kind 区別。 */
+  /** 時系列マージモード: 連続する同 kind のカードを 1 つの外側カードにまとめる。
+   *  - 外側カードに kind 色のボーダ + 淡背景 + ヘッダ (kind ラベル + 件数)
+   *  - 中身は通常の renderReceivedCard を並べる
+   *  これで「内部のやり取り 3 件 → 外部のやり取り 5 件 → ...」が視覚的に
+   *  かたまりとして読みやすくなる。 */
   const buildMergedColumn = (): HTMLElement => {
     const all = received.slice().sort((a, b) => (a.sentAt ?? '').localeCompare(b.sentAt ?? ''));
 
-    const addInternalBtn = el('button', {
-      class: 'spira-btn spira-btn--secondary spira-btn--sm',
-      title: '内部スレッドに履歴を追加',
-      onclick: () => openAddHistoryModal(t, received, 'internal'),
-    }, [
-      el('span', {
-        style: `display:inline-block;width:8px;height:8px;border-radius:50%;background:${INTERNAL_BORDER};margin-right:6px`,
-      }),
-      '内部に追加',
-    ]);
-    const addExternalBtn = el('button', {
-      class: 'spira-btn spira-btn--secondary spira-btn--sm',
-      title: '外部スレッドに履歴を追加',
-      onclick: () => openAddHistoryModal(t, received, 'external'),
-    }, [
-      el('span', {
-        style: `display:inline-block;width:8px;height:8px;border-radius:50%;background:${EXTERNAL_BORDER};margin-right:6px`,
-      }),
-      '外部に追加',
-    ]);
+    // 連続する同 kind をグループ化
+    type Group = { kind: 'internal' | 'external'; items: Comment[] };
+    const groups: Group[] = [];
+    for (const c of all) {
+      const k = kindOf(c);
+      const last = groups[groups.length - 1];
+      if (last && last.kind === k) {
+        last.items.push(c);
+      } else {
+        groups.push({ kind: k, items: [c] });
+      }
+    }
+
+    const renderGroup = (g: Group): HTMLElement => {
+      const border = g.kind === 'internal' ? INTERNAL_BORDER : EXTERNAL_BORDER;
+      const tint = g.kind === 'internal' ? INTERNAL_TINT : EXTERNAL_TINT;
+      const label = g.kind === 'internal' ? '🏢 内部' : '👥 外部';
+      const groupHeader = el('div', {
+        style: `display:flex;align-items:center;gap:6px;padding:6px var(--s-3);` +
+               `font-size:var(--fs-xs);color:var(--ink-3);` +
+               `border-bottom:1px solid ${border};margin-bottom:var(--s-2)`,
+      }, [
+        el('span', {
+          style: `display:inline-block;width:8px;height:8px;border-radius:50%;background:${border}`,
+        }),
+        el('span', { style: 'font-weight:600;color:var(--ink-2)' }, [label]),
+        el('span', {}, [`${g.items.length} 件`]),
+      ]);
+
+      const inner = el('div', { class: 'spira-th-list' },
+        g.items.map(c => renderReceivedCard(t, c, lastSeen)));
+
+      return el('div', {
+        'data-thread-kind': g.kind,
+        style: `border-left:3px solid ${border};background:${tint};` +
+               `border-radius:var(--r-2);padding:var(--s-2) var(--s-3);` +
+               `margin-bottom:var(--s-4)`,
+      }, [groupHeader, inner]);
+    };
 
     const header = el('div', {
       style: 'display:flex;align-items:center;gap:8px;padding:var(--s-3) var(--s-4);' +
@@ -1052,17 +1052,13 @@ function renderSplitPanes(t: Ticket, comments: Comment[], lastSeen: number | nul
       el('span', { style: 'font-size:var(--fs-xs);color:var(--ink-3)' }, [
         `内部 ${internalComments.length} / 外部 ${externalComments.length} 件 (時系列)`,
       ]),
-      el('span', { style: 'flex:1' }),
-      addInternalBtn,
-      addExternalBtn,
     ]);
 
-    const list = all.length === 0
+    const list = groups.length === 0
       ? el('div', { class: 'spira-empty', style: 'padding:var(--s-5);color:var(--ink-3);font-size:var(--fs-sm)' }, [
           '履歴はまだありません',
         ])
-      : el('div', { style: 'padding:var(--s-3) var(--s-4)' },
-          all.map(c => tintWrap(renderReceivedCard(t, c, lastSeen), kindOf(c))));
+      : el('div', { style: 'padding:var(--s-3) var(--s-4)' }, groups.map(renderGroup));
 
     return el('div', {
       class: 'spira-thread-column',
@@ -1088,6 +1084,21 @@ function renderSplitPanes(t: Ticket, comments: Comment[], lastSeen: number | nul
   };
 
   const currentMode = getMode();
+
+  // 「履歴を追加」の初期 threadKind は表示モードから自動決定:
+  // - internal → 内部 / external → 外部 / both (並列) → 内部 / merged → 内部
+  const defaultKindForMode = (m: ThreadMode): 'internal' | 'external' =>
+    m === 'external' ? 'external' : 'internal';
+
+  const addHistoryBtn = el('button', {
+    class: 'spira-btn spira-btn--secondary spira-btn--sm',
+    title: '履歴を追加 (モーダル内で内部/外部を切り替え可能)',
+    onclick: () => openAddHistoryModal(t, received, defaultKindForMode(currentMode)),
+  }, [
+    el('span', { html: icon('plus'), style: 'display:inline-flex;width:14px;height:14px' }),
+    '履歴を追加',
+  ]);
+
   const modeBar = el('div', {
     style: 'display:flex;align-items:center;gap:6px;padding:var(--s-3) var(--s-4);' +
            'background:var(--paper);border-bottom:1px solid var(--line)',
@@ -1099,6 +1110,7 @@ function renderSplitPanes(t: Ticket, comments: Comment[], lastSeen: number | nul
     modeBtn('🔀 マージ', 'merged', currentMode),
     el('span', { style: 'flex:1' }),
     el('span', { style: 'font-size:var(--fs-xs);color:var(--ink-3)' }, [`合計 ${received.length} 件`]),
+    addHistoryBtn,
   ]);
 
   // 現在モードに応じてカラム構成を決める。
