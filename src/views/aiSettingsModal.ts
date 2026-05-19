@@ -28,7 +28,9 @@ const LABEL_STYLE =
   'align-self:center;justify-self:end;text-align:right;white-space:nowrap';
 const LABEL_TOP_STYLE = LABEL_STYLE + ';align-self:start;padding-top:8px';
 
-export function openAiSettingsModal(): void {
+/** ボディ要素 + 保存ハンドラを返す。openAiSettingsModal と 設定ハブの
+ *  両方から利用するための builder。 */
+export function buildAiSettingsPanel(): { body: HTMLElement; save: () => Promise<void> } {
   let initialProvider = getProvider();
   const devMode = isDeveloperMode();
   // 開発者モード OFF のときは Claude 直接利用を隠す (社内利用ポリシー)。
@@ -156,7 +158,7 @@ export function openAiSettingsModal(): void {
   providerSelect.addEventListener('change', syncVisibility);
   syncVisibility();
 
-  const body = el('div', { style: 'max-width:600px' }, [
+  const body = el('div', { style: 'max-width:720px' }, [
     el('p', { style: 'margin:0 0 var(--s-4);font-size:var(--fs-sm);color:var(--ink-3);line-height:1.6' }, [
       'チケット詳細の右ペインで使う AI チャットの設定です。プロバイダ・モデル・API キーをここで管理します。',
     ]),
@@ -167,32 +169,38 @@ export function openAiSettingsModal(): void {
     blockArea,
   ]);
 
+  const save = async (): Promise<void> => {
+    try {
+      const raw = corpOverrideTa.value.trim();
+      if (raw) {
+        try { JSON.parse(raw); }
+        catch { throw new Error('オーバーライド JSON が不正です'); }
+      }
+      setProvider(providerSelect.value as Provider);
+      setClaudeApiKey(claudeKeyInput.value);
+      setClaudeModel(claudeModelSel.value);
+      setCorpAiKey(corpKeyInput.value);
+      setCorpAiBaseUrl(corpBaseUrlInput.value);
+      setCorpAiDeploymentPrefix(corpPrefixInput.value);
+      setCorpAiModel(corpModelSel.value);
+      setCorpAiOverridesRaw(raw);
+      toast(getRoot(), 'AI 設定を保存しました', 'ok');
+    } catch (e) {
+      toast(getRoot(), `保存失敗: ${(e as Error).message}`, 'error');
+      throw e;
+    }
+  };
+
+  return { body, save };
+}
+
+export function openAiSettingsModal(): void {
+  const { body, save } = buildAiSettingsPanel();
   openModal(getRoot(), {
     title: 'AI 設定',
     body,
     size: 'lg',
     primaryLabel: '保存',
-    onPrimary: async () => {
-      try {
-        // Validate corp JSON if user typed something
-        const raw = corpOverrideTa.value.trim();
-        if (raw) {
-          try { JSON.parse(raw); }
-          catch { throw new Error('オーバーライド JSON が不正です'); }
-        }
-        setProvider(providerSelect.value as Provider);
-        setClaudeApiKey(claudeKeyInput.value);
-        setClaudeModel(claudeModelSel.value);
-        setCorpAiKey(corpKeyInput.value);
-        setCorpAiBaseUrl(corpBaseUrlInput.value);
-        setCorpAiDeploymentPrefix(corpPrefixInput.value);
-        setCorpAiModel(corpModelSel.value);
-        setCorpAiOverridesRaw(raw);
-        toast(getRoot(), 'AI 設定を保存しました', 'ok');
-      } catch (e) {
-        toast(getRoot(), `保存失敗: ${(e as Error).message}`, 'error');
-        throw e;
-      }
-    },
+    onPrimary: save,
   });
 }

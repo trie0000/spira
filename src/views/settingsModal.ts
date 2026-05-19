@@ -17,14 +17,14 @@ import { getFontSize, setFontSize, type FontSize } from '../utils/fontSize';
 
 // 既存設定モーダル群
 import {
-  openInternalMembersModal,
-  openTicketIdFormatModal,
-  openTeamsChannelsModal,
-  openVersionModal,
-  openOptionsModal,
+  buildTicketIdFormatPanel,
+  buildTeamsChannelsPanel,
+  buildInternalMembersPanel,
+  buildVersionPanel,
+  buildOptionsPanel,
   openResetConfirmModal,
 } from './shell';
-import { openAiSettingsModal } from './aiSettingsModal';
+import { buildAiSettingsPanel } from './aiSettingsModal';
 import { openAuditLogModal } from './auditLogModal';
 
 // ── 設定項目定義 ────────────────────────────────────────────────────
@@ -49,8 +49,32 @@ const TITLE = 'margin:0 0 var(--s-3);font-size:var(--fs-lg);font-weight:600;colo
 const DESC = 'margin:0 0 var(--s-4);font-size:var(--fs-sm);line-height:1.7;color:var(--ink-2);' +
   'background:var(--paper-2);border:1px solid var(--line);border-radius:var(--r-2);padding:var(--s-3) var(--s-4)';
 
+/** インラインパネル共通テンプレート。タイトル + 説明 + body + 保存ボタン。
+ *  body 内のインタラクションはそのまま動き、保存ボタンが save を呼ぶ。 */
+function inlinePanel(args: {
+  title: string;
+  hint?: string;
+  body: HTMLElement;
+  save?: () => Promise<void> | void;
+}): HTMLElement {
+  const saveBtn = args.save
+    ? el('button', {
+        class: 'spira-btn spira-btn--primary',
+        style: 'margin-top:var(--s-4)',
+        onclick: async () => { try { await args.save!(); } catch { /* toast already */ } },
+      }, ['保存'])
+    : null;
+  return el('div', {}, [
+    el('h2', { style: TITLE }, [args.title]),
+    ...(args.hint ? [el('div', { style: DESC }, [args.hint])] : []),
+    args.body,
+    ...(saveBtn ? [saveBtn] : []),
+  ]);
+}
+
 /** 既存モーダル直接起動セクション用の共通テンプレート。
- *  説明文 + 「編集 UI を開く」ボタンで、複雑な編集 UI に飛ばす。 */
+ *  説明文 + 「編集 UI を開く」ボタンで、複雑な編集 UI に飛ばす。
+ *  (現状: AuditLog 等の Composite 機能のみで使用) */
 function renderModalLauncherPanel(args: {
   title: string;
   description: HTMLElement | string;
@@ -242,17 +266,7 @@ function renderDeveloperModePanel(): HTMLElement {
   ]);
 }
 
-// ── インライン: バージョン情報 (読み取り専用) ───────────────────────
-function renderVersionPanel(root: HTMLElement, onClose: () => void): HTMLElement {
-  return renderModalLauncherPanel({
-    title: 'バージョン管理',
-    description:
-      '現在ロード中の Spira ビルドと SP 上に登録された最新版を比較します。' +
-      '新規ビルドを配布後はここで「最新として登録」を実行し、古いブックマーク利用者に更新案内を出します。',
-    buttonLabel: 'バージョン管理を開く',
-    onClick: () => { onClose(); openVersionModal(root); },
-  });
-}
+// (旧 renderVersionPanel は buildVersionPanel 直利用に置き換え済み)
 
 // ── パネル群定義 ────────────────────────────────────────────────────
 function buildGroups(): SettingGroup[] {
@@ -273,45 +287,55 @@ function buildGroups(): SettingGroup[] {
         {
           key: 'id-format',
           label: 'チケット ID 形式',
-          render: (root, onClose) => renderModalLauncherPanel({
-            title: 'チケット ID 形式',
-            description:
-              '件名タグ (例: #ABC-0001) の接頭辞と桁数を設定します。' +
-              '起票時の自動付与・メール件名のタグ解析・Teams スレッド連携の全箇所で使われます。',
-            buttonLabel: '編集 UI を開く',
-            onClick: () => { onClose(); openTicketIdFormatModal(root); },
-          }),
+          render: (root) => {
+            const { body, save } = buildTicketIdFormatPanel(root);
+            const saveBtn = el('button', {
+              class: 'spira-btn spira-btn--primary',
+              style: 'margin-top:var(--s-4)',
+              onclick: async () => { try { await save(); } catch { /* */ } },
+            }, ['保存']);
+            return el('div', {}, [
+              el('h2', { style: TITLE }, ['チケット ID 形式']),
+              body,
+              saveBtn,
+            ]);
+          },
         },
         {
           key: 'members',
           label: '内部メンバー',
-          render: (root, onClose) => renderModalLauncherPanel({
-            title: '内部メンバー設定',
-            description:
-              '社内ドメインや AD ユーザを登録します。ここに登録した送信者のカードは「内部」バッジで表示されます。',
-            buttonLabel: '編集 UI を開く',
-            onClick: () => { onClose(); openInternalMembersModal(root); },
-          }),
+          render: (root) => {
+            const { body, save } = buildInternalMembersPanel(root);
+            return inlinePanel({
+              title: '内部メンバー設定',
+              hint: '社内ドメインや AD ユーザを登録します。ここに登録した送信者のカードは「内部」バッジで表示されます。',
+              body, save,
+            });
+          },
         },
         {
           key: 'dept',
           label: '部門の選択肢',
-          render: (root, onClose) => renderModalLauncherPanel({
-            title: '部門の選択肢',
-            description: 'チケット属性「部門」のプルダウン候補を編集します。Forms 取り込みの振り分けにも使われます。',
-            buttonLabel: '編集 UI を開く',
-            onClick: () => { onClose(); openOptionsModal(root, 'dept'); },
-          }),
+          render: (root) => {
+            const { body, save } = buildOptionsPanel(root, 'dept');
+            return inlinePanel({
+              title: '部門の選択肢',
+              hint: 'チケット属性「部門」のプルダウン候補を編集します。Forms 取り込みの振り分けにも使われます。',
+              body, save,
+            });
+          },
         },
         {
           key: 'category',
           label: '問い合わせ種別の選択肢',
-          render: (root, onClose) => renderModalLauncherPanel({
-            title: '問い合わせ種別の選択肢',
-            description: 'チケット属性「問い合わせ種別」のプルダウン候補を編集します。',
-            buttonLabel: '編集 UI を開く',
-            onClick: () => { onClose(); openOptionsModal(root, 'category'); },
-          }),
+          render: (root) => {
+            const { body, save } = buildOptionsPanel(root, 'category');
+            return inlinePanel({
+              title: '問い合わせ種別の選択肢',
+              hint: 'チケット属性「問い合わせ種別」のプルダウン候補を編集します。',
+              body, save,
+            });
+          },
         },
       ],
     },
@@ -321,14 +345,15 @@ function buildGroups(): SettingGroup[] {
         {
           key: 'teams-channels',
           label: 'Teams チャネル',
-          render: (root, onClose) => renderModalLauncherPanel({
-            title: 'Teams チャネル設定',
-            description:
-              'Spira が Teams に親メッセージを投稿する宛先チャネル群を登録します。' +
-              'PA フロー②/④ もここに登録した channelId / teamId を参照します。',
-            buttonLabel: '編集 UI を開く',
-            onClick: () => { onClose(); openTeamsChannelsModal(root); },
-          }),
+          render: (root) => {
+            const { body, save } = buildTeamsChannelsPanel(root);
+            return inlinePanel({
+              title: 'Teams チャネル設定',
+              hint: 'Spira が Teams に親メッセージを投稿する宛先チャネル群を登録します。' +
+                'PA フロー②/④ もここに登録した channelId / teamId を参照します。',
+              body, save,
+            });
+          },
         },
         {
           key: 'sync-interval',
@@ -343,13 +368,14 @@ function buildGroups(): SettingGroup[] {
         {
           key: 'ai',
           label: 'AI 設定',
-          render: (_root, onClose) => renderModalLauncherPanel({
-            title: 'AI 設定',
-            description:
-              'チケット詳細右ペインの AI チャットで使う社内 AI ゲートウェイの API キー・ベース URL・モデルを設定します。',
-            buttonLabel: '編集 UI を開く',
-            onClick: () => { onClose(); openAiSettingsModal(); },
-          }),
+          render: () => {
+            const { body, save } = buildAiSettingsPanel();
+            return inlinePanel({
+              title: 'AI 設定',
+              hint: 'チケット詳細右ペインの AI チャットで使う社内 AI ゲートウェイ (Azure OpenAI 互換) の API キー・ベース URL・モデルを設定します。',
+              body, save,
+            });
+          },
         },
       ],
     },
@@ -359,7 +385,14 @@ function buildGroups(): SettingGroup[] {
         {
           key: 'version',
           label: 'バージョン管理',
-          render: (root, onClose) => renderVersionPanel(root, onClose),
+          render: (root) => {
+            const { body, save } = buildVersionPanel(root);
+            return inlinePanel({
+              title: 'バージョン管理',
+              hint: '現在ロード中の Spira ビルドと SP に登録された最新版を比較します。新規ビルド配布後はここで「最新として登録」を実行し、古いブックマーク利用者に更新案内を出します。',
+              body, save,
+            });
+          },
         },
         {
           key: 'audit',
@@ -468,7 +501,7 @@ export function openSettingsHubModal(root: HTMLElement): void {
   void renderDetail();
 
   const body = el('div', {
-    style: 'display:flex;height:min(620px,75vh);width:100%;margin:0;overflow:hidden;border-radius:var(--r-2)',
+    style: 'display:flex;height:min(660px,72vh);min-height:420px;width:100%;margin:0;overflow:hidden;border-radius:var(--r-2)',
   }, [sideNav, detailPane]);
 
   const handle = openModal(getRoot(), {

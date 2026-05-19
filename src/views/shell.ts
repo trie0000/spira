@@ -421,7 +421,7 @@ function openSettingsMenu(root: HTMLElement, anchor: HTMLElement): void {
   }, 0);
 }
 
-export function openInternalMembersModal(root: HTMLElement): void {
+export function buildInternalMembersPanel(root: HTMLElement): { body: HTMLElement; save: () => Promise<void> } {
   const adUsers = getState().users; // already loaded on bootstrap
   let members = getInternalMembers();
   let names = getInternalDisplayNames();
@@ -547,23 +547,28 @@ export function openInternalMembersModal(root: HTMLElement): void {
     ]),
   ]);
 
+  const save = async (): Promise<void> => {
+    setInternalMembers(members);
+    setInternalDisplayNames(names);
+    toast(root, `内部メンバー ${members.length} 件 / 表示名 ${names.length} 件を保存しました`, 'ok');
+    setState({});
+  };
+
+  return { body, save };
+}
+
+export function openInternalMembersModal(root: HTMLElement): void {
+  const { body, save } = buildInternalMembersPanel(root);
   openModal(root, {
     title: '内部メンバー設定',
     body,
     primaryLabel: '保存',
-    onPrimary: () => {
-      setInternalMembers(members);
-      setInternalDisplayNames(names);
-      toast(root, `内部メンバー ${members.length} 件 / 表示名 ${names.length} 件を保存しました`, 'ok');
-      setState({}); // re-render to apply colors
-    },
+    onPrimary: save,
   });
 }
 
-export function openTicketIdFormatModal(root: HTMLElement): void {
-  // Format is fixed as `[<prefix>#NNNNN]`. Only the prefix is editable
-  // (e.g. "CASE", "SUP", or empty). Everything else — brackets, hash,
-  // 5-digit padding — is locked.
+/** 設定ハブ inline 用 body builder。openTicketIdFormatModal が内部利用。 */
+export function buildTicketIdFormatPanel(root: HTMLElement): { body: HTMLElement; save: () => Promise<void> } {
   let prefix = getTicketIdPrefix();
 
   const previewSubject = el('div', {
@@ -625,16 +630,23 @@ export function openTicketIdFormatModal(root: HTMLElement): void {
     ]),
   ]);
 
+  const save = async (): Promise<void> => {
+    setTicketIdPrefix(prefix);
+    const tag = formatTicketTagWith(1, prefix);
+    toast(root, `ID 形式を ${tag} に変更しました`, 'ok');
+    setState({});
+  };
+
+  return { body, save };
+}
+
+export function openTicketIdFormatModal(root: HTMLElement): void {
+  const { body, save } = buildTicketIdFormatPanel(root);
   openModal(root, {
     title: 'チケット ID 形式',
     body,
     primaryLabel: '保存',
-    onPrimary: () => {
-      setTicketIdPrefix(prefix);
-      const tag = formatTicketTagWith(1, prefix);
-      toast(root, `ID 形式を ${tag} に変更しました`, 'ok');
-      setState({});
-    },
+    onPrimary: save,
   });
 }
 
@@ -642,7 +654,7 @@ export function openTicketIdFormatModal(root: HTMLElement): void {
  *  内部用 / 外部用の Teams チャネル URL を入力させ、URL から Channel ID /
  *  Team ID をパース。保存先は SP の SpiraSettings リスト (Spira 全体共有)。
  *  レイアウトは「履歴を追加」「チケットプロパティ」と同じ 2 列グリッド。 */
-export function openTeamsChannelsModal(root: HTMLElement): void {
+export function buildTeamsChannelsPanel(root: HTMLElement): { body: HTMLElement; save: () => Promise<void> } {
   // 編集中ドラフト (保存ボタンで一括 commit)。SP から読込中は null。
   let internalDraft: TeamsChannelConfig | null = null;
   let externalDraft: TeamsChannelConfig | null = null;
@@ -807,33 +819,40 @@ export function openTeamsChannelsModal(root: HTMLElement): void {
       toast(root, `設定読込失敗: ${err.message}`, 'error');
     });
 
+  const save = async (): Promise<void> => {
+    try {
+      await Promise.all([
+        setInternalChannelConfig(internalDraft),
+        setExternalChannelConfig(externalDraft),
+      ]);
+      const msgs: string[] = [];
+      msgs.push(`内部: ${internalDraft ? '✅ 設定済み' : '(未設定)'}`);
+      msgs.push(`外部: ${externalDraft ? '✅ 設定済み' : '(未設定)'}`);
+      toast(root, `チャネル設定を保存しました — ${msgs.join(' / ')}`, 'ok', 5000);
+    } catch (e) {
+      toast(root, `保存失敗: ${(e as Error).message}`, 'error');
+      throw e;
+    }
+  };
+
+  return { body: grid, save };
+}
+
+export function openTeamsChannelsModal(root: HTMLElement): void {
+  const { body, save } = buildTeamsChannelsPanel(root);
   openModal(root, {
     title: 'Teams チャネル設定',
-    body: grid,
+    body,
     size: 'lg',
     primaryLabel: '保存',
-    onPrimary: async () => {
-      try {
-        await Promise.all([
-          setInternalChannelConfig(internalDraft),
-          setExternalChannelConfig(externalDraft),
-        ]);
-        const msgs: string[] = [];
-        msgs.push(`内部: ${internalDraft ? '✅ 設定済み' : '(未設定)'}`);
-        msgs.push(`外部: ${externalDraft ? '✅ 設定済み' : '(未設定)'}`);
-        toast(root, `チャネル設定を保存しました — ${msgs.join(' / ')}`, 'ok', 5000);
-      } catch (e) {
-        toast(root, `保存失敗: ${(e as Error).message}`, 'error');
-        throw e; // openModal 側で再有効化
-      }
-    },
+    onPrimary: save,
   });
 }
 
 /** 選択肢編集モーダル (部門 / 問い合わせ種別 共通)。
  *  リスト表示 + 行ごとの削除ボタン + 末尾に追加入力。並び順は保持。
  *  保存先は SpiraSettings (全ユーザー共有)。 */
-export function openOptionsModal(root: HTMLElement, kind: 'dept' | 'category'): void {
+export function buildOptionsPanel(root: HTMLElement, kind: 'dept' | 'category'): { body: HTMLElement; save: () => Promise<void>; title: string } {
   const title = kind === 'dept' ? '部門の選択肢' : '問い合わせ種別の選択肢';
   const getter = kind === 'dept' ? getDepartmentOptions : getInquiryCategoryOptions;
   const setter = kind === 'dept' ? setDepartmentOptions : setInquiryCategoryOptions;
@@ -947,21 +966,28 @@ export function openOptionsModal(root: HTMLElement, kind: 'dept' | 'category'): 
   });
   renderList(); // 初期 (ロード中)
 
+  const save = async (): Promise<void> => {
+    try {
+      await setter(draft);
+      toast(root, `${title}を保存しました (${draft.length} 件)`, 'ok', 4000);
+      setState({});
+    } catch (e) {
+      toast(root, `保存失敗: ${(e as Error).message}`, 'error');
+      throw e;
+    }
+  };
+
+  return { body, save, title };
+}
+
+export function openOptionsModal(root: HTMLElement, kind: 'dept' | 'category'): void {
+  const { body, save, title } = buildOptionsPanel(root, kind);
   openModal(root, {
     title,
     body,
     size: 'lg',
     primaryLabel: '保存',
-    onPrimary: async () => {
-      try {
-        await setter(draft);
-        toast(root, `${title}を保存しました (${draft.length} 件)`, 'ok', 4000);
-        setState({});
-      } catch (e) {
-        toast(root, `保存失敗: ${(e as Error).message}`, 'error');
-        throw e;
-      }
-    },
+    onPrimary: save,
   });
 }
 
@@ -971,7 +997,7 @@ export function openOptionsModal(root: HTMLElement, kind: 'dept' | 'category'): 
  *  - 更新先 URL (SpiraSettings に登録)
  *  - 「現バージョンを最新に登録」ショートカット (dev / 管理者用)
  *  レイアウトは履歴追加・チケットプロパティと同じ 2 列グリッド。 */
-export function openVersionModal(root: HTMLElement): void {
+export function buildVersionPanel(root: HTMLElement): { body: HTMLElement; save: () => Promise<void> } {
   const LABEL_STYLE =
     'color:var(--ink-3);font-size:var(--fs-sm);' +
     'align-self:center;justify-self:end;text-align:right;white-space:nowrap';
@@ -1032,20 +1058,27 @@ export function openVersionModal(root: HTMLElement): void {
     latestDisplay.textContent = info.latest ?? '(未登録)';
   });
 
+  const save = async (): Promise<void> => {
+    try {
+      await saveUpdateUrl(urlDraft.trim() || null);
+      toast(root, '更新先 URL を保存しました', 'ok', 4000);
+    } catch (e) {
+      toast(root, `保存失敗: ${(e as Error).message}`, 'error');
+      throw e;
+    }
+  };
+
+  return { body: grid, save };
+}
+
+export function openVersionModal(root: HTMLElement): void {
+  const { body, save } = buildVersionPanel(root);
   openModal(root, {
     title: 'バージョン管理',
-    body: grid,
+    body,
     size: 'lg',
     primaryLabel: '保存',
-    onPrimary: async () => {
-      try {
-        await saveUpdateUrl(urlDraft.trim() || null);
-        toast(root, '更新先 URL を保存しました', 'ok', 4000);
-      } catch (e) {
-        toast(root, `保存失敗: ${(e as Error).message}`, 'error');
-        throw e;
-      }
-    },
+    onPrimary: save,
   });
 }
 

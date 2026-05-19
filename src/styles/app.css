@@ -665,8 +665,18 @@
   max-height: calc(100vh - var(--s-10));
   overflow: auto;
 }
-.spira-modal--lg { max-width: 880px; }
-.spira-modal--xl { max-width: 1120px; padding: var(--s-5); }
+.spira-modal--lg { max-width: 1000px; }
+.spira-modal--xl {
+  /* xl = リサイズ可能な大型モーダル (設定ハブ・概要)。
+     ユーザーが右下からドラッグで縦横の幅を自由に調整可能。 */
+  max-width: min(1400px, calc(100vw - var(--s-6)));
+  width: min(1280px, calc(100vw - var(--s-6)));
+  min-width: 720px;
+  min-height: 480px;
+  padding: var(--s-5);
+  resize: both;
+  overflow: auto;
+}
 .spira-modal-header {
   display: flex;
   align-items: center;
