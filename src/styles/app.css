@@ -637,7 +637,8 @@
   max-height: calc(100vh - var(--s-10));
   overflow: auto;
 }
-.spira-modal--lg { max-width: 720px; }
+.spira-modal--lg { max-width: 880px; }
+.spira-modal--xl { max-width: 1120px; padding: var(--s-5); }
 .spira-modal-header {
   display: flex;
   align-items: center;

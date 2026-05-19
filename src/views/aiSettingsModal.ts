@@ -17,6 +17,7 @@ import {
   CLAUDE_MODELS, CORP_AI_MODELS,
   type Provider,
 } from '../api/aiSettings';
+import { isDeveloperMode } from '../utils/devMode';
 
 function getRoot(): HTMLElement {
   return (document.querySelector<HTMLElement>('#spira-root') ?? document.body);
@@ -28,13 +29,24 @@ const LABEL_STYLE =
 const LABEL_TOP_STYLE = LABEL_STYLE + ';align-self:start;padding-top:8px';
 
 export function openAiSettingsModal(): void {
-  const initialProvider = getProvider();
+  let initialProvider = getProvider();
+  const devMode = isDeveloperMode();
+  // 開発者モード OFF のときは Claude 直接利用を隠す (社内利用ポリシー)。
+  // 既存設定が claude だった場合は corp にフォールバック表示。
+  if (!devMode && initialProvider === 'claude') {
+    initialProvider = 'corp';
+  }
 
-  // Provider radio
-  const providerSelect = el('select', { class: 'spira-input', style: 'width:200px' }, [
-    el('option', { value: 'claude', ...(initialProvider === 'claude' ? { selected: 'selected' } : {}) }, ['Claude (Anthropic)']),
-    el('option', { value: 'corp',   ...(initialProvider === 'corp'   ? { selected: 'selected' } : {}) }, ['社内 AI (Azure OpenAI 互換)']),
-  ]) as HTMLSelectElement;
+  // Provider selector — Claude オプションは開発者モードのときだけ表示。
+  const providerOptions: HTMLElement[] = [
+    el('option', { value: 'corp', ...(initialProvider === 'corp' ? { selected: 'selected' } : {}) }, ['社内 AI (Azure OpenAI 互換)']),
+  ];
+  if (devMode) {
+    providerOptions.unshift(
+      el('option', { value: 'claude', ...(initialProvider === 'claude' ? { selected: 'selected' } : {}) }, ['Claude (Anthropic) — 開発者モード']),
+    );
+  }
+  const providerSelect = el('select', { class: 'spira-input', style: 'width:260px' }, providerOptions) as HTMLSelectElement;
 
   // ── Claude block ─────────────────────────────────────────────────────
   const claudeKeyInput = el('input', {
@@ -129,11 +141,16 @@ export function openAiSettingsModal(): void {
     ]),
   ]);
 
-  // Toggle visibility based on provider select
-  const blockArea = el('div', { style: 'margin-top:var(--s-5)' }, [claudeBlock, corpBlock]);
+  // Toggle visibility based on provider select.
+  // 開発者モード OFF のときは Claude ブロック自体 DOM に組み込まない。
+  const blockArea = el('div', { style: 'margin-top:var(--s-5)' },
+    devMode ? [claudeBlock, corpBlock] : [corpBlock],
+  );
   const syncVisibility = (): void => {
     const p = providerSelect.value;
-    claudeBlock.style.display = (p === 'claude') ? '' : 'none';
+    if (devMode) {
+      claudeBlock.style.display = (p === 'claude') ? '' : 'none';
+    }
     corpBlock.style.display = (p === 'corp') ? '' : 'none';
   };
   providerSelect.addEventListener('change', syncVisibility);

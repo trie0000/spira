@@ -40,7 +40,7 @@ function renderUserTab(): HTMLElement {
       el('li', {}, ['🏢👥 1 チケット内で「内部スレッド (社内議論)」と「外部スレッド (顧客向け)」を並列管理']),
       el('li', {}, ['🔍 全文検索・ステータス/担当者/優先度フィルタ・CSV エクスポート']),
       el('li', {}, ['📊 ダッシュボード (オープン件数・担当別ワークロード・経過日数等)']),
-      el('li', {}, ['🤖 AI チャット (Claude / 社内 Azure OpenAI) でチケット内容について質問・要約']),
+      el('li', {}, ['🤖 AI チャット (社内 Azure OpenAI ゲートウェイ) でチケット内容について質問・要約']),
       el('li', {}, ['🗑 ゴミ箱から復元可能なソフトデリート + 監査ログ']),
     ]),
 
@@ -79,7 +79,7 @@ function renderUserTab(): HTMLElement {
       'すべての情報 (チケット・履歴・受信メール・設定) は ',
       el('strong', {}, ['会社の SharePoint Online サイト上の専用リスト']),
       ' に保存されます。外部クラウドへの送信は一切ありません ',
-      '(AI チャットを利用する場合のみ、選択したプロバイダ (Claude / 社内 AI) にチケット本文が送信されます。AI 設定で OFF 可能)。',
+      '(AI チャットを利用する場合のみ、社内 AI ゲートウェイ経由でチケット本文が送信されます。AI 設定で OFF 可能)。',
     ]),
 
     el('h2', { style: H2 }, ['🔐 誰がアクセスできる?']),
@@ -280,7 +280,7 @@ function renderTechTab(): HTMLElement {
       el('tr', {}, [
         el('td', { style: 'padding:6px 8px' }, ['AI ゲートウェイ (任意)']),
         el('td', { style: 'padding:6px 8px' }, [
-          'Claude API 直 or 社内 Azure OpenAI 互換ゲートウェイ。',
+          '社内 Azure OpenAI 互換ゲートウェイ。',
           'チケット詳細の AI チャットでのみ使用。',
         ]),
       ]),
@@ -398,7 +398,7 @@ function renderTechTab(): HTMLElement {
     el('p', { style: P }, [
       '通常運用で ', el('strong', {}, ['¥0']),
       ' (既存の Microsoft 365 ライセンス枠内)。Power Automate Standard tier の Premium connector は使用していないため、追加ライセンス不要。',
-      'AI チャットを使う場合のみ、Claude API 直なら従量課金 (1 チケットあたり 〜数円)、社内 AI 経由なら社内インフラ料金 (通常 ¥0)。',
+      'AI チャットを利用する場合は社内 AI ゲートウェイ経由 (通常 ¥0、社内インフラ料金内)。',
     ]),
   ]);
 }
@@ -443,7 +443,7 @@ export function openAboutModal(): void {
   rebuildTabs();
   renderContent();
 
-  const body = el('div', { style: 'width:min(820px,90vw);max-height:75vh;overflow-y:auto' }, [
+  const body = el('div', { style: 'width:100%;max-height:75vh;overflow-y:auto' }, [
     tabBar,
     content,
   ]);
@@ -451,7 +451,7 @@ export function openAboutModal(): void {
   openModal(getRoot(), {
     title: '📘 Spira について',
     body,
-    size: 'lg',
+    size: 'xl',
     primaryLabel: '閉じる',
     onPrimary: async () => { /* close only */ },
   });

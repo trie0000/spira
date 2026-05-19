@@ -4,7 +4,7 @@ import { icon } from '../icons';
 interface ModalOptions {
   title: string;
   body: HTMLElement;
-  size?: 'default' | 'lg';
+  size?: 'default' | 'lg' | 'xl';
   primaryLabel?: string;
   primaryVariant?: 'primary' | 'danger' | 'dark';
   onPrimary?: () => void | Promise<void>;
@@ -51,7 +51,8 @@ export function openModal(root: HTMLElement, opts: ModalOptions): ModalHandle {
     html: icon('x'),
   });
 
-  const modal = el('div', { class: `spira-modal${opts.size === 'lg' ? ' spira-modal--lg' : ''}`, role: 'dialog', 'aria-modal': 'true' }, [
+  const sizeClass = opts.size === 'xl' ? ' spira-modal--xl' : opts.size === 'lg' ? ' spira-modal--lg' : '';
+  const modal = el('div', { class: `spira-modal${sizeClass}`, role: 'dialog', 'aria-modal': 'true' }, [
     el('div', { class: 'spira-modal-header' }, [
       el('h2', { class: 'spira-modal-title' }, [opts.title]),
       closeBtn,
