@@ -16,6 +16,43 @@ declare global {
   var __SPIRA_MOUNTED__: boolean | undefined;
 }
 
+// ── 受信自動更新タイマー (SpiraSettings.inboxSyncIntervalSec で制御) ───────
+// startAutoSync() で起動、restartAutoSync() で設定変更後に再構築する。
+let autoSyncTimer: number | null = null;
+let autoSyncRoot: HTMLElement | null = null;
+
+async function startAutoSync(root: HTMLElement): Promise<void> {
+  autoSyncRoot = root;
+  if (autoSyncTimer != null) {
+    window.clearInterval(autoSyncTimer);
+    autoSyncTimer = null;
+  }
+  try {
+    const { getSyncIntervalSec } = await import('./views/syncIntervalModal');
+    const sec = await getSyncIntervalSec();
+    if (sec === 0) {
+      console.log('[spira] auto-sync: OFF');
+      return;
+    }
+    autoSyncTimer = window.setInterval(() => {
+      if (!getState().ready) return;
+      // タブが裏側のときは結果が反映できないので silent でも回さない方が良い
+      // ように見えるが、SP 側の更新は走らせて inboxCount だけは更新したいので
+      // そのまま実行する (visibilitychange は将来検討)。
+      void doSync(autoSyncRoot!, /* silent */ true);
+    }, sec * 1000);
+    console.log(`[spira] auto-sync: every ${sec}s`);
+  } catch (e) {
+    console.warn('[spira] auto-sync setup failed:', (e as Error).message);
+  }
+}
+
+/** 設定変更時に外部から呼び出してタイマーを再構築する。 */
+export async function restartAutoSync(): Promise<void> {
+  if (!autoSyncRoot) return;
+  await startAutoSync(autoSyncRoot);
+}
+
 export async function mount(): Promise<void> {
   if (window.__SPIRA_MOUNTED__) {
     document.querySelector<HTMLElement>('.spira-root')?.remove();
@@ -96,6 +133,9 @@ export async function mount(): Promise<void> {
 
     // first-load auto sync
     setTimeout(() => doSync(root, /* silent */ true), 100);
+
+    // 定期自動更新タイマーを起動 (SpiraSettings の inboxSyncIntervalSec で制御)
+    setTimeout(() => { void startAutoSync(root); }, 500);
 
     // 監査ログのクリーンアップ (24h 経過時のみ実行)。失敗してもサイレント。
     setTimeout(() => {
