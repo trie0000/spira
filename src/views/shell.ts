@@ -86,6 +86,9 @@ async function paintMain(main: HTMLElement): Promise<void> {
     } else if (s.view === 'dashboard') {
       const { renderDashboard } = await import('./dashboard');
       view = await renderDashboard();
+    } else if (s.view === 'help') {
+      const { renderHelp } = await import('./help');
+      view = renderHelp();
     } else {
       view = await renderTrash();
     }
@@ -341,6 +344,17 @@ function openSettingsMenu(root: HTMLElement, anchor: HTMLElement): void {
     '設定',
   ]);
 
+  const aboutItem = el('div', {
+    class: 'spira-menu-item',
+    onclick: () => {
+      menu.remove();
+      void import('./aboutModal').then(({ openAboutModal }) => openAboutModal());
+    },
+  }, [
+    el('span', { html: icon('help'), style: 'display:inline-flex;width:14px;height:14px' }),
+    'Spira について (概要・アーキ図)',
+  ]);
+
   const helpItem = el('div', {
     class: 'spira-menu-item',
     onclick: () => { menu.remove(); openHelpModal(root); },
@@ -376,6 +390,7 @@ function openSettingsMenu(root: HTMLElement, anchor: HTMLElement): void {
     buildLabel,
     el('div', { class: 'spira-menu-divider' }),
     settingsHubItem,
+    aboutItem,
     helpItem,
   ]);
 
@@ -2086,7 +2101,7 @@ function onResetLists(root: HTMLElement): void {
 function renderSidebar(): HTMLElement {
   const s = getState();
 
-  const item = (label: string, view: 'tickets' | 'inbox' | 'trash' | 'dashboard', iconName: string, count?: number) => {
+  const item = (label: string, view: 'tickets' | 'inbox' | 'trash' | 'dashboard' | 'help', iconName: string, count?: number) => {
     const isActive = s.view === view;
     const node = el('div', {
       class: `spira-side-item${isActive ? ' active' : ''}`,
@@ -2134,6 +2149,7 @@ function renderSidebar(): HTMLElement {
     ]),
     el('div', { class: 'spira-side-group' }, [
       el('div', { class: 'spira-side-group-title' }, ['その他']),
+      item('ヘルプ', 'help', 'help'),
       item('ゴミ箱', 'trash', 'trash', s.trashCount),
     ]),
     el('div', { class: 'spira-side-bottom' }, [

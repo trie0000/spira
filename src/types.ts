@@ -113,7 +113,7 @@ export interface SiteUser {
   displayName: string;
 }
 
-export type ViewName = 'tickets' | 'inbox' | 'trash' | 'dashboard';
+export type ViewName = 'tickets' | 'inbox' | 'trash' | 'dashboard' | 'help';
 
 // ─── 監査ログ (AuditLog リスト) ─────────────────────────────────────────
 // 「いつ・誰が・何を更新したか」を保管する追記専用 (Append-only) ログ。
