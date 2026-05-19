@@ -940,88 +940,198 @@ function renderSplitPanes(t: Ticket, comments: Comment[], lastSeen: number | nul
   const internalComments = received.filter(c => kindOf(c) === 'internal');
   const externalComments = received.filter(c => kindOf(c) === 'external');
 
-  // 表示/非表示の状態を localStorage に永続化。
-  const COLLAPSED_KEY_INT = `spira:thread-collapsed:internal:${t.id}`;
-  const COLLAPSED_KEY_EXT = `spira:thread-collapsed:external:${t.id}`;
-  // 既定: どちらも展開。各チケット毎の状態を覚える。
-  const isCollapsed = (key: string): boolean => {
-    try { return localStorage.getItem(key) === '1'; } catch { return false; }
+  // ── 表示モード ──────────────────────────────────────────────────────
+  // 'both'     : 内部・外部を横並びで独立スクロール (既定)
+  // 'internal' : 内部のみフル幅
+  // 'external' : 外部のみフル幅
+  // 'merged'   : 時系列マージ、カードの左ボーダで内部/外部を区別
+  type ThreadMode = 'both' | 'internal' | 'external' | 'merged';
+  const MODE_KEY = 'spira:thread-view-mode';
+  const getMode = (): ThreadMode => {
+    try {
+      const v = localStorage.getItem(MODE_KEY);
+      if (v === 'both' || v === 'internal' || v === 'external' || v === 'merged') return v;
+    } catch { /* ignore */ }
+    return 'both';
   };
-  const setCollapsed = (key: string, v: boolean): void => {
-    try { localStorage.setItem(key, v ? '1' : '0'); } catch { /* ignore */ }
+  const setMode = (m: ThreadMode): void => {
+    try { localStorage.setItem(MODE_KEY, m); } catch { /* ignore */ }
   };
 
-  const buildSubSection = (
+  const INTERNAL_TINT = 'rgba(59, 130, 246, 0.08)';   // blue
+  const INTERNAL_BORDER = '#3b82f6';
+  const EXTERNAL_TINT = 'rgba(245, 158, 11, 0.08)';   // amber
+  const EXTERNAL_BORDER = '#f59e0b';
+
+  /** カードを kind に応じて左ボーダ + 淡い背景で装飾するラッパー。
+   *  merged モードで「どちら由来か」を一目で示すためだけのもの。
+   *  両方並べモード (both / internal-only / external-only) では使わない。 */
+  const tintWrap = (card: HTMLElement, kind: 'internal' | 'external'): HTMLElement => {
+    return el('div', {
+      'data-thread-kind': kind,
+      style: `border-left:3px solid ${kind === 'internal' ? INTERNAL_BORDER : EXTERNAL_BORDER};` +
+             `background:${kind === 'internal' ? INTERNAL_TINT : EXTERNAL_TINT};` +
+             `border-radius:var(--r-2);padding:var(--s-2);margin-bottom:var(--s-3)`,
+    }, [card]);
+  };
+
+  /** 1 サブカラム (内部 or 外部 専用)。「both」「internal」「external」モードで使う。
+   *  独立スクロール対応 (overflow:auto)。ヘッダは sticky。 */
+  const buildColumn = (
     label: string,
     items: Comment[],
     kind: 'internal' | 'external',
-    storageKey: string,
+    fullWidth: boolean,
   ): HTMLElement => {
-    const collapsed = isCollapsed(storageKey);
     const addBtn = el('button', {
       class: 'spira-btn spira-btn--secondary spira-btn--sm',
+      style: 'margin-left:auto',
       title: `${label}に履歴を追加`,
-      onclick: (e: Event) => {
-        e.stopPropagation();
-        openAddHistoryModal(t, received, kind);
-      },
+      onclick: () => openAddHistoryModal(t, received, kind),
     }, [
       el('span', { html: icon('plus'), style: 'display:inline-flex;width:14px;height:14px' }),
       '追加',
     ]);
 
-    const collapseArrow = el('span', {
-      style: `display:inline-block;width:14px;color:var(--ink-3);font-size:10px;line-height:1;text-align:center;transition:transform 0.15s;${collapsed ? '' : 'transform:rotate(90deg)'}`,
-    }, ['▶']);
-
-    const countBadge = el('span', {
-      style: 'font-size:var(--fs-xs);color:var(--ink-3);margin-left:6px',
-    }, [`${items.length} 件`]);
-
+    const accentBorder = kind === 'internal' ? INTERNAL_BORDER : EXTERNAL_BORDER;
     const header = el('div', {
-      style: 'display:flex;align-items:center;gap:6px;padding:var(--s-3) 0;cursor:pointer;user-select:none;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--paper);z-index:1',
-      onclick: () => {
-        const nowCollapsed = body.style.display === 'none';
-        body.style.display = nowCollapsed ? '' : 'none';
-        collapseArrow.style.transform = nowCollapsed ? 'rotate(90deg)' : '';
-        setCollapsed(storageKey, !nowCollapsed);
-      },
+      style: `display:flex;align-items:center;gap:8px;padding:var(--s-3) var(--s-4);` +
+             `position:sticky;top:0;background:var(--paper);z-index:1;` +
+             `border-bottom:2px solid ${accentBorder}`,
     }, [
-      collapseArrow,
       el('span', { style: 'font-size:var(--fs-md);font-weight:600;color:var(--ink)' }, [label]),
-      countBadge,
-      el('span', { style: 'flex:1' }),
+      el('span', { style: 'font-size:var(--fs-xs);color:var(--ink-3)' }, [`${items.length} 件`]),
       addBtn,
     ]);
 
-    const body = el('div', {
-      style: `padding:var(--s-3) 0;${collapsed ? 'display:none' : ''}`,
-    }, [
-      items.length === 0
-        ? el('div', { class: 'spira-empty', style: 'padding:var(--s-5) 0;color:var(--ink-3);font-size:var(--fs-sm)' }, [
-            `${label}の履歴はまだありません`,
-          ])
-        : el('div', { class: 'spira-th-list' }, items.map(c => renderReceivedCard(t, c, lastSeen))),
-    ]);
+    const list = items.length === 0
+      ? el('div', { class: 'spira-empty', style: 'padding:var(--s-5);color:var(--ink-3);font-size:var(--fs-sm)' }, [
+          `${label}の履歴はまだありません`,
+        ])
+      : el('div', { class: 'spira-th-list', style: 'padding:var(--s-3) var(--s-4)' },
+          items.map(c => renderReceivedCard(t, c, lastSeen)));
 
     return el('div', {
-      class: 'spira-thread-section',
+      class: 'spira-thread-column',
       'data-thread-kind': kind,
-      style: 'margin-bottom:var(--s-4)',
-    }, [header, body]);
+      style: `${fullWidth ? 'flex:1 1 100%' : 'flex:1 1 50%'};min-width:0;overflow:auto;` +
+             `display:flex;flex-direction:column;${fullWidth ? '' : 'border-right:1px solid var(--line)'}`,
+    }, [header, list]);
   };
+
+  /** 時系列マージモード: 全件を 1 リストに並べ、カード装飾で kind 区別。 */
+  const buildMergedColumn = (): HTMLElement => {
+    const all = received.slice().sort((a, b) => (a.sentAt ?? '').localeCompare(b.sentAt ?? ''));
+
+    const addInternalBtn = el('button', {
+      class: 'spira-btn spira-btn--secondary spira-btn--sm',
+      title: '内部スレッドに履歴を追加',
+      onclick: () => openAddHistoryModal(t, received, 'internal'),
+    }, [
+      el('span', {
+        style: `display:inline-block;width:8px;height:8px;border-radius:50%;background:${INTERNAL_BORDER};margin-right:6px`,
+      }),
+      '内部に追加',
+    ]);
+    const addExternalBtn = el('button', {
+      class: 'spira-btn spira-btn--secondary spira-btn--sm',
+      title: '外部スレッドに履歴を追加',
+      onclick: () => openAddHistoryModal(t, received, 'external'),
+    }, [
+      el('span', {
+        style: `display:inline-block;width:8px;height:8px;border-radius:50%;background:${EXTERNAL_BORDER};margin-right:6px`,
+      }),
+      '外部に追加',
+    ]);
+
+    const header = el('div', {
+      style: 'display:flex;align-items:center;gap:8px;padding:var(--s-3) var(--s-4);' +
+             'position:sticky;top:0;background:var(--paper);z-index:1;border-bottom:1px solid var(--line)',
+    }, [
+      el('span', { style: 'font-size:var(--fs-md);font-weight:600;color:var(--ink)' }, ['🔀 マージ表示']),
+      el('span', { style: 'font-size:var(--fs-xs);color:var(--ink-3)' }, [
+        `内部 ${internalComments.length} / 外部 ${externalComments.length} 件 (時系列)`,
+      ]),
+      el('span', { style: 'flex:1' }),
+      addInternalBtn,
+      addExternalBtn,
+    ]);
+
+    const list = all.length === 0
+      ? el('div', { class: 'spira-empty', style: 'padding:var(--s-5);color:var(--ink-3);font-size:var(--fs-sm)' }, [
+          '履歴はまだありません',
+        ])
+      : el('div', { style: 'padding:var(--s-3) var(--s-4)' },
+          all.map(c => tintWrap(renderReceivedCard(t, c, lastSeen), kindOf(c))));
+
+    return el('div', {
+      class: 'spira-thread-column',
+      'data-thread-mode': 'merged',
+      style: 'flex:1 1 100%;min-width:0;overflow:auto;display:flex;flex-direction:column',
+    }, [header, list]);
+  };
+
+  // ── モード切り替えバー (左ペイン上部) ──────────────────────────────────
+  const modeBtn = (label: string, m: ThreadMode, current: ThreadMode): HTMLElement => {
+    const isActive = m === current;
+    return el('button', {
+      class: `spira-btn spira-btn--sm ${isActive ? '' : 'spira-btn--secondary'}`,
+      style: `${isActive ? '' : 'background:transparent;'}font-size:var(--fs-xs)`,
+      title: label,
+      onclick: () => {
+        if (m === current) return;
+        setMode(m);
+        // 再描画 (状態は変わってないので setState({}) で全再構築)
+        setState({});
+      },
+    }, [label]);
+  };
+
+  const currentMode = getMode();
+  const modeBar = el('div', {
+    style: 'display:flex;align-items:center;gap:6px;padding:var(--s-3) var(--s-4);' +
+           'background:var(--paper);border-bottom:1px solid var(--line)',
+  }, [
+    el('span', { style: 'font-size:var(--fs-xs);color:var(--ink-3);margin-right:4px' }, ['表示:']),
+    modeBtn('🏢 内部のみ', 'internal', currentMode),
+    modeBtn('👥 外部のみ', 'external', currentMode),
+    modeBtn('⫻ 並列', 'both', currentMode),
+    modeBtn('🔀 マージ', 'merged', currentMode),
+    el('span', { style: 'flex:1' }),
+    el('span', { style: 'font-size:var(--fs-xs);color:var(--ink-3)' }, [`合計 ${received.length} 件`]),
+  ]);
+
+  // 現在モードに応じてカラム構成を決める。
+  // - both: 内部+外部 を横並び (それぞれ独立スクロール)
+  // - internal / external: 該当のみフル幅
+  // - merged: 時系列 1 リスト (色分け)
+  let columnsContainer: HTMLElement;
+  if (currentMode === 'merged') {
+    columnsContainer = el('div', {
+      style: 'flex:1;min-height:0;display:flex;overflow:hidden',
+    }, [buildMergedColumn()]);
+  } else if (currentMode === 'internal') {
+    columnsContainer = el('div', {
+      style: 'flex:1;min-height:0;display:flex;overflow:hidden',
+    }, [buildColumn('🏢 内部スレッド', internalComments, 'internal', true)]);
+  } else if (currentMode === 'external') {
+    columnsContainer = el('div', {
+      style: 'flex:1;min-height:0;display:flex;overflow:hidden',
+    }, [buildColumn('👥 外部スレッド', externalComments, 'external', true)]);
+  } else {
+    columnsContainer = el('div', {
+      style: 'flex:1;min-height:0;display:flex;overflow:hidden',
+    }, [
+      buildColumn('🏢 内部スレッド', internalComments, 'internal', false),
+      buildColumn('👥 外部スレッド', externalComments, 'external', false),
+    ]);
+  }
 
   const leftPane = el('div', {
     class: 'spira-split-pane',
     'data-bg': 'paper',
-    style: 'flex:1 1 50%;min-width:0;overflow:auto;padding:0 var(--s-7) var(--s-7);background:var(--paper)',
-  }, [
-    el('div', {
-      style: 'padding:var(--s-4) 0 var(--s-2);font-size:var(--fs-xs);color:var(--ink-3);text-transform:uppercase;letter-spacing:0.05em',
-    }, [`スレッド (${received.length} 件)`]),
-    buildSubSection('🏢 内部スレッド', internalComments, 'internal', COLLAPSED_KEY_INT),
-    buildSubSection('👥 外部スレッド', externalComments, 'external', COLLAPSED_KEY_EXT),
-  ]);
+    style: 'flex:1 1 50%;min-width:0;display:flex;flex-direction:column;background:var(--paper);overflow:hidden',
+  }, [modeBar, columnsContainer]);
 
   const addNoteBtn = el('button', {
     class: 'spira-btn spira-btn--secondary spira-btn--sm',
