@@ -25,8 +25,9 @@ export interface SiteSelectionResult {
 }
 
 /** モーダルを開いて、ユーザーが選択した SP サイトの URL を Promise で返す。
- *  キャンセル不可 (Spira は SP サイトなしでは動かないため、必ず選ばせる)。 */
-export function openSiteSelectionModal(): Promise<SiteSelectionResult> {
+ *  ユーザーがキャンセルした場合は null を返す (呼び出し側は Spira の起動を
+ *  停止して何もせず終了する想定)。 */
+export function openSiteSelectionModal(): Promise<SiteSelectionResult | null> {
   return new Promise((resolve) => {
     const current = detectCurrentSiteUrl();
     const saved = getSelectedSiteUrl();
@@ -141,14 +142,36 @@ export function openSiteSelectionModal(): Promise<SiteSelectionResult> {
 
       setSelectedSiteUrl(url);
       backdrop.remove();
+      document.removeEventListener('keydown', onKey);
       resolve({ siteUrl: url, initialized });
     });
+
+    const cancelBtn = el('button', {
+      style:
+        'padding:8px 18px;background:#fff;color:#555;border:1px solid #d4d4d4;' +
+        'border-radius:4px;cursor:pointer;font-size:14px',
+    }, ['キャンセル']);
+    const onCancel = (): void => {
+      backdrop.remove();
+      document.removeEventListener('keydown', onKey);
+      resolve(null);
+    };
+    cancelBtn.addEventListener('click', onCancel);
+
+    // Esc キーでもキャンセル可能に。背景クリックは誤操作防止のため無効。
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        onCancel();
+      }
+    };
+    document.addEventListener('keydown', onKey);
 
     const foot = el('div', {
       style:
         'padding:12px 20px;border-top:1px solid #e5e5e5;background:#fff;' +
         'display:flex;justify-content:flex-end;gap:8px',
-    }, [decideBtn]);
+    }, [cancelBtn, decideBtn]);
 
     modal.append(head, note, listHost, errorLine, manualBox, foot);
     backdrop.appendChild(modal);

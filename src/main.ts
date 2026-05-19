@@ -100,9 +100,16 @@ export async function mount(): Promise<void> {
   try {
     // SP モードの場合、起動時にサイト選択モーダルを表示。前回選択サイトが
     // localStorage にあれば初期選択。決定後に repo を作成する。
+    // ユーザーがキャンセルした場合は Spira を起動せずクリーンに撤退する。
     let overrideSiteUrl: string | undefined;
     if (detectMode() === 'sp') {
       const sel = await openSiteSelectionModal();
+      if (sel == null) {
+        // キャンセル → mount したルートを撤去して終了 (ブックマーク再実行で再表示)
+        root.remove();
+        window.__SPIRA_MOUNTED__ = false;
+        return;
+      }
       overrideSiteUrl = sel.siteUrl;
     }
     const initRes = await initRepo({ overrideSiteUrl });
