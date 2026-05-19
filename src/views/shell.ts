@@ -329,63 +329,16 @@ function openSettingsMenu(root: HTMLElement, anchor: HTMLElement): void {
   const existing = document.querySelector('.spira-settings-menu');
   if (existing) { existing.remove(); return; }
 
-  const membersItem = el('div', {
-    class: 'spira-menu-item',
-    onclick: () => { menu.remove(); openInternalMembersModal(root); },
-  }, [
-    el('span', { html: icon('user'), style: 'display:inline-flex;width:14px;height:14px' }),
-    '内部メンバー設定',
-  ]);
-
-  const idFormatItem = el('div', {
-    class: 'spira-menu-item',
-    onclick: () => { menu.remove(); openTicketIdFormatModal(root); },
-  }, [
-    el('span', { html: icon('hash'), style: 'display:inline-flex;width:14px;height:14px' }),
-    'チケット ID 形式',
-  ]);
-
-  const channelsItem = el('div', {
-    class: 'spira-menu-item',
-    onclick: () => { menu.remove(); openTeamsChannelsModal(root); },
-  }, [
-    el('span', { html: icon('chat'), style: 'display:inline-flex;width:14px;height:14px' }),
-    'Teams チャネル設定',
-  ]);
-
-  const syncIntervalItem = el('div', {
+  // 設定ハブを開くだけのシンプルなメニュー (旧 10+ 項目を 1 つに集約)
+  const settingsHubItem = el('div', {
     class: 'spira-menu-item',
     onclick: () => {
       menu.remove();
-      void import('./syncIntervalModal').then(({ openSyncIntervalModal }) => openSyncIntervalModal());
+      void import('./settingsModal').then(({ openSettingsHubModal }) => openSettingsHubModal(root));
     },
   }, [
-    el('span', { html: icon('sync'), style: 'display:inline-flex;width:14px;height:14px' }),
-    '受信同期 — 自動更新間隔',
-  ]);
-
-  const versionItem = el('div', {
-    class: 'spira-menu-item',
-    onclick: () => { menu.remove(); openVersionModal(root); },
-  }, [
-    el('span', { html: icon('sync'), style: 'display:inline-flex;width:14px;height:14px' }),
-    'バージョン管理',
-  ]);
-
-  const deptItem = el('div', {
-    class: 'spira-menu-item',
-    onclick: () => { menu.remove(); openOptionsModal(root, 'dept'); },
-  }, [
-    el('span', { html: icon('list'), style: 'display:inline-flex;width:14px;height:14px' }),
-    '部門の選択肢',
-  ]);
-
-  const categoryItem = el('div', {
-    class: 'spira-menu-item',
-    onclick: () => { menu.remove(); openOptionsModal(root, 'category'); },
-  }, [
-    el('span', { html: icon('list'), style: 'display:inline-flex;width:14px;height:14px' }),
-    '問い合わせ種別の選択肢',
+    el('span', { html: icon('gear'), style: 'display:inline-flex;width:14px;height:14px' }),
+    '設定',
   ]);
 
   const helpItem = el('div', {
@@ -394,40 +347,6 @@ function openSettingsMenu(root: HTMLElement, anchor: HTMLElement): void {
   }, [
     el('span', { html: icon('help'), style: 'display:inline-flex;width:14px;height:14px' }),
     'ヘルプ (PA フロー作成手順)',
-  ]);
-
-  const aiSettingsItem = el('div', {
-    class: 'spira-menu-item',
-    onclick: () => {
-      menu.remove();
-      void import('./aiSettingsModal').then(({ openAiSettingsModal }) => openAiSettingsModal());
-    },
-  }, [
-    el('span', { html: icon('sparkles'), style: 'display:inline-flex;width:14px;height:14px' }),
-    'AI 設定',
-  ]);
-
-  const auditLogItem = el('div', {
-    class: 'spira-menu-item',
-    onclick: () => {
-      menu.remove();
-      void import('./auditLogModal').then(({ openAuditLogModal }) => openAuditLogModal());
-    },
-  }, [
-    el('span', { html: icon('clock'), style: 'display:inline-flex;width:14px;height:14px' }),
-    '監査ログ (操作履歴)',
-  ]);
-
-  const resetItem = el('div', {
-    class: 'spira-menu-item',
-    style: 'color:var(--danger)',
-    onclick: () => {
-      menu.remove();
-      onResetLists(root);
-    },
-  }, [
-    el('span', { html: icon('trash'), style: 'display:inline-flex;width:14px;height:14px' }),
-    'SP リストをリセット',
   ]);
 
   const modeLabel = el('div', {
@@ -451,23 +370,13 @@ function openSettingsMenu(root: HTMLElement, anchor: HTMLElement): void {
 
   const menu = el('div', {
     class: 'spira-menu spira-settings-menu',
-    style: 'position:fixed;z-index:var(--z-modal);min-width:280px',
+    style: 'position:fixed;z-index:var(--z-modal);min-width:240px',
   }, [
     modeLabel,
     buildLabel,
     el('div', { class: 'spira-menu-divider' }),
-    membersItem,
-    idFormatItem,
-    channelsItem,
-    syncIntervalItem,
-    deptItem,
-    categoryItem,
-    versionItem,
-    aiSettingsItem,
-    auditLogItem,
+    settingsHubItem,
     helpItem,
-    el('div', { class: 'spira-menu-divider' }),
-    resetItem,
   ]);
 
   const rect = anchor.getBoundingClientRect();
@@ -497,7 +406,7 @@ function openSettingsMenu(root: HTMLElement, anchor: HTMLElement): void {
   }, 0);
 }
 
-function openInternalMembersModal(root: HTMLElement): void {
+export function openInternalMembersModal(root: HTMLElement): void {
   const adUsers = getState().users; // already loaded on bootstrap
   let members = getInternalMembers();
   let names = getInternalDisplayNames();
@@ -636,7 +545,7 @@ function openInternalMembersModal(root: HTMLElement): void {
   });
 }
 
-function openTicketIdFormatModal(root: HTMLElement): void {
+export function openTicketIdFormatModal(root: HTMLElement): void {
   // Format is fixed as `[<prefix>#NNNNN]`. Only the prefix is editable
   // (e.g. "CASE", "SUP", or empty). Everything else — brackets, hash,
   // 5-digit padding — is locked.
@@ -718,7 +627,7 @@ function openTicketIdFormatModal(root: HTMLElement): void {
  *  内部用 / 外部用の Teams チャネル URL を入力させ、URL から Channel ID /
  *  Team ID をパース。保存先は SP の SpiraSettings リスト (Spira 全体共有)。
  *  レイアウトは「履歴を追加」「チケットプロパティ」と同じ 2 列グリッド。 */
-function openTeamsChannelsModal(root: HTMLElement): void {
+export function openTeamsChannelsModal(root: HTMLElement): void {
   // 編集中ドラフト (保存ボタンで一括 commit)。SP から読込中は null。
   let internalDraft: TeamsChannelConfig | null = null;
   let externalDraft: TeamsChannelConfig | null = null;
@@ -909,7 +818,7 @@ function openTeamsChannelsModal(root: HTMLElement): void {
 /** 選択肢編集モーダル (部門 / 問い合わせ種別 共通)。
  *  リスト表示 + 行ごとの削除ボタン + 末尾に追加入力。並び順は保持。
  *  保存先は SpiraSettings (全ユーザー共有)。 */
-function openOptionsModal(root: HTMLElement, kind: 'dept' | 'category'): void {
+export function openOptionsModal(root: HTMLElement, kind: 'dept' | 'category'): void {
   const title = kind === 'dept' ? '部門の選択肢' : '問い合わせ種別の選択肢';
   const getter = kind === 'dept' ? getDepartmentOptions : getInquiryCategoryOptions;
   const setter = kind === 'dept' ? setDepartmentOptions : setInquiryCategoryOptions;
@@ -1047,7 +956,7 @@ function openOptionsModal(root: HTMLElement, kind: 'dept' | 'category'): void {
  *  - 更新先 URL (SpiraSettings に登録)
  *  - 「現バージョンを最新に登録」ショートカット (dev / 管理者用)
  *  レイアウトは履歴追加・チケットプロパティと同じ 2 列グリッド。 */
-function openVersionModal(root: HTMLElement): void {
+export function openVersionModal(root: HTMLElement): void {
   const LABEL_STYLE =
     'color:var(--ink-3);font-size:var(--fs-sm);' +
     'align-self:center;justify-self:end;text-align:right;white-space:nowrap';
@@ -2144,6 +2053,7 @@ function openHelpModal(root: HTMLElement): void {
   });
 }
 
+export function openResetConfirmModal(root: HTMLElement): void { onResetLists(root); }
 function onResetLists(root: HTMLElement): void {
   const isMock = getRepoMode() === 'mock';
   const message = isMock
