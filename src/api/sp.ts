@@ -818,11 +818,17 @@ export class SpRepository implements Repository {
 
   async listComments(ticketId: number): Promise<Comment[]> {
     // Author / Editor を expand して登録者・最終更新者の表示名も取得。
+    // ★ orderby=desc + top=500 で「最新の 500 件」を取得し、クライアントで
+    //   asc (古い順) に並べ直す。500 件超のチケットでは古い方が打ち切られる
+    //   挙動になり、最新コメントが消えない (UI の意図に合致)。
     const url = `${this.listPath(this.cfg.listComments)}/items` +
-      `?$top=500&$orderby=SentAt asc&$filter=TicketId eq ${ticketId}` +
+      `?$top=500&$orderby=SentAt desc&$filter=TicketId eq ${ticketId}` +
       `&$expand=Author,Editor&$select=*,Author/Title,Editor/Title`;
     const res = await this.tx.req<ListItemsResp<SpListItem>>(url);
-    return (res.value ?? []).map(asComment);
+    const items = (res.value ?? []).map(asComment);
+    // SentAt asc に戻す (display 側は古い順を期待)
+    items.sort((a, b) => (a.sentAt ?? '').localeCompare(b.sentAt ?? ''));
+    return items;
   }
 
   async updateComment(
