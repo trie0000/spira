@@ -258,6 +258,13 @@ function renderAi(): HTMLElement {
       'AI 設定でプロバイダを使用しなければ送信は発生しません。',
     ]),
 
+    el('h2', { style: H2 }, ['コスト']),
+    el('p', { style: P }, [
+      '社内 AI ゲートウェイ経由でも ', el('strong', {}, ['モデル毎の従量課金']),
+      ' (トークン消費量で計上) が発生します。コストを抑えるには',
+      'AI 設定で安価なモデルを選択する、もしくは利用シーンを限定してください。',
+    ]),
+
     el('h2', { style: H2 }, ['設定場所']),
     el('p', { style: P }, [
       CODE('歯車 → 設定 → AI 設定'),
@@ -333,7 +340,9 @@ function renderPaFlows(): HTMLElement {
       el('tr', {}, [
         el('td', { style: 'padding:6px 8px;border-bottom:1px solid var(--line)' }, [el('strong', {}, ['① メール'])]),
         el('td', { style: 'padding:6px 8px;border-bottom:1px solid var(--line)' }, ['必須']),
-        el('td', { style: 'padding:6px 8px;border-bottom:1px solid var(--line)' }, ['共有メールボックスの新着メール → InboxMails に行追加']),
+        el('td', { style: 'padding:6px 8px;border-bottom:1px solid var(--line)' }, [
+          '個人メールボックスへの新着メールのうち、To/Cc に特定の ML を含むものだけ → InboxMails に行追加',
+        ]),
       ]),
       el('tr', {}, [
         el('td', { style: 'padding:6px 8px;border-bottom:1px solid var(--line)' }, [el('strong', {}, ['② Teams 投稿'])]),
@@ -356,7 +365,7 @@ function renderPaFlows(): HTMLElement {
     el('ul', { style: UL }, [
       el('li', {}, ['Microsoft 365 環境 (SharePoint Online / Teams / Outlook が同テナント)']),
       el('li', {}, ['Power Automate のアクセス権 (フロー作成可能なライセンス)']),
-      el('li', {}, ['共有メールボックス (PA フロー① 用)']),
+      el('li', {}, ['担当者個人の Outlook メールボックス (PA フロー① 用)。問い合わせ対応の ML を To/Cc 受信できる設定であること']),
       el('li', {}, ['Microsoft Forms (PA フロー③ 用、任意)']),
       el('li', {}, ['Spira 専用 Teams チャネル (PA フロー②④ 用、任意)']),
     ]),
@@ -420,7 +429,10 @@ function renderFaq(): HTMLElement {
 
     el('h3', { style: H3 }, ['Q. 月額費用は?']),
     el('p', { style: P }, [
-      'A. 通常運用は ¥0 (既存の Microsoft 365 ライセンス枠内)。AI チャットは社内 AI ゲートウェイ経由のため、利用は社内インフラ料金内。',
+      'A. Spira 本体は ¥0 (既存の Microsoft 365 ライセンス枠内)。',
+      el('strong', {}, ['AI チャットは社内 AI ゲートウェイ経由でもモデル毎の従量課金']),
+      ' (使用したトークン数で計上) があります。',
+      'コストを抑えたい場合は安価なモデル (例: GPT-4.1 mini 系) を選択するか、AI 機能を使用しない運用にしてください。',
     ]),
 
     el('h3', { style: H3 }, ['Q. 何人まで使えますか?']),

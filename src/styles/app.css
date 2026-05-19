@@ -55,6 +55,34 @@
   --fs-h3:   22px;
   --fs-h2:   28px;
   --fs-h1:   36px;
+}
+/* 文字サイズスケール — 設定 → 表示 → 文字サイズ で切り替え。
+   既定 (中) は上の値、data-font-size 属性で上書きする。 */
+.spira-root[data-font-size="sm"] {
+  --fs-xs:   10px;
+  --fs-sm:   11px;
+  --fs-md:   12px;
+  --fs-base: 13px;
+  --fs-lg:   14px;
+  --fs-xl:   16px;
+  --fs-h3:   19px;
+  --fs-h2:   24px;
+  --fs-h1:   30px;
+}
+.spira-root[data-font-size="lg"] {
+  --fs-xs:   13px;
+  --fs-sm:   14px;
+  --fs-md:   15px;
+  --fs-base: 17px;
+  --fs-lg:   19px;
+  --fs-xl:   22px;
+  --fs-h3:   26px;
+  --fs-h2:   32px;
+  --fs-h1:   40px;
+}
+.spira-root {
+  /* 上のスケール宣言で `}` を出してしまったので空ブロックで本来の token を継続。
+     (CSS の cascade 的には先の宣言が活きるので問題なし) */
 
   --lh-base:  1.75;
   --lh-tight: 1.35;

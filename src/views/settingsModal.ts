@@ -13,6 +13,7 @@ import { openModal } from '../components/modal';
 import { toast } from '../components/toast';
 import { getRepo } from '../api/repo';
 import { isDeveloperMode, setDeveloperMode } from '../utils/devMode';
+import { getFontSize, setFontSize, type FontSize } from '../utils/fontSize';
 
 // 既存設定モーダル群
 import {
@@ -162,6 +163,47 @@ async function renderSyncIntervalPanel(): Promise<HTMLElement> {
   ]);
 }
 
+// ── インライン: 文字サイズ ─────────────────────────────────────────
+function renderFontSizePanel(): HTMLElement {
+  const current = getFontSize();
+  const opt = (v: FontSize, label: string, sample: string): HTMLElement => {
+    const id = `spira-font-${v}`;
+    const radio = el('input', {
+      type: 'radio', name: 'spira-font-size', id, value: v,
+      ...(v === current ? { checked: 'checked' } : {}),
+      style: 'margin:0;flex-shrink:0',
+      onchange: () => {
+        if ((radio as HTMLInputElement).checked) {
+          setFontSize(v);
+        }
+      },
+    }) as HTMLInputElement;
+    return el('label', {
+      for: id,
+      style: 'display:flex;align-items:center;gap:var(--s-3);cursor:pointer;' +
+             'padding:var(--s-3) var(--s-4);background:var(--paper-2);border:1px solid var(--line);' +
+             'border-radius:var(--r-2);margin-bottom:var(--s-2)',
+    }, [
+      radio,
+      el('div', { style: 'flex:1' }, [
+        el('div', { style: 'font-size:var(--fs-sm);color:var(--ink);font-weight:600' }, [label]),
+        el('div', { style: 'font-size:var(--fs-xs);color:var(--ink-3);margin-top:2px' }, [sample]),
+      ]),
+    ]);
+  };
+  return el('div', {}, [
+    el('h2', { style: TITLE }, ['文字サイズ']),
+    el('div', { style: DESC }, [
+      'チケット一覧・詳細・設定モーダル・ヘルプ等、Spira 全画面で共通の文字サイズスケールを切り替えます。',
+      el('br'),
+      '選択した瞬間に反映され、本設定は端末ローカル (localStorage) に保存されます。',
+    ]),
+    opt('sm', '小', '小さめ — 一覧で多くの行を一度に表示したい場合'),
+    opt('md', '中 (既定)', '標準サイズ — バランス重視'),
+    opt('lg', '大', '大きめ — 視認性重視・長時間作業向け'),
+  ]);
+}
+
 // ── インライン: 開発者モード ────────────────────────────────────────
 function renderDeveloperModePanel(): HTMLElement {
   const checkbox = el('input', {
@@ -215,6 +257,16 @@ function renderVersionPanel(root: HTMLElement, onClose: () => void): HTMLElement
 // ── パネル群定義 ────────────────────────────────────────────────────
 function buildGroups(): SettingGroup[] {
   return [
+    {
+      title: '表示',
+      items: [
+        {
+          key: 'font-size',
+          label: '文字サイズ',
+          render: () => renderFontSizePanel(),
+        },
+      ],
+    },
     {
       title: '基本',
       items: [

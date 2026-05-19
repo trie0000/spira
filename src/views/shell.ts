@@ -1228,7 +1228,9 @@ function openHelpModal(root: HTMLElement): void {
     ol([
       el('div', {}, ['SharePoint サイト (Spira を入れたサイトと同じテナント)']),
       el('div', {}, [
-        '取り込み対象のメールが届くメールボックス: 共有メールボックス、グループ メール、または個人メール',
+        '取り込み対象のメールが届く ',
+        el('strong', {}, ['担当者個人の Outlook メールボックス']),
+        ' (問い合わせ用 ML を To/Cc で受信できる設定であること)。共有メールボックス前提ではない。',
       ]),
       el('div', {}, ['Power Automate のフロー作成権限']),
       el('div', {}, [
@@ -1247,9 +1249,11 @@ function openHelpModal(root: HTMLElement): void {
       title: '受信メールをトリガーする',
       connector: 'Microsoft 365 Outlook',
       action: 'When a new email arrives (V3)',
-      note: '共有メールボックスの場合は「共有メールボックスに新しいメールが届いたとき (V2)」を選択 (パラメータはほぼ同じ)。',
+      note: '★ 個人メールボックスを対象。To/Cc 条件で問い合わせ用 ML 宛のものだけ通すこと。',
       params: [
         { field: 'Folder', value: 'Inbox', type: 'choose', hint: '取り込み対象のフォルダ。サブフォルダ運用なら該当パスを選択。' },
+        { field: 'To', value: '<対応 ML のメールアドレス>', type: 'static', hint: '★ 重要。問い合わせ受付 ML のアドレスを指定。空欄にすると全メールが流れ込む。' },
+        { field: 'CC', value: '<同上 (To と OR で通したい場合)>', type: 'static', hint: 'To だけだと CC で来た問い合わせを取りこぼすので、可能なら CC にも同じ ML を指定。' },
         { field: 'Importance', value: 'Any', type: 'choose' },
         { field: 'Include Attachments', value: 'No', type: 'choose', hint: '添付の中身までは SP に保存しないため No 推奨。HasAttachments フラグだけ立つ。' },
         { field: 'Only with Attachments', value: 'No', type: 'choose' },
@@ -1317,7 +1321,7 @@ function openHelpModal(root: HTMLElement): void {
           ['補足情報']),
         pn('OwaLink の式 (動的コンテンツに「Web Link」が出ないため): '),
         codeBlock("concat('https://outlook.office.com/mail/inbox/id/', encodeUriComponent(triggerOutputs()?['body/Id']))"),
-        pn('共有メールボックス トリガー (V2) や、ユーザ別 OWA を開きたい場合: '),
+        pn('別形式の OWA リンクを使いたい場合: '),
         codeBlock("concat('https://outlook.office365.com/owa/?ItemID=', encodeUriComponent(triggerOutputs()?['body/Id']), '&exvsurl=1&viewmodel=ReadMessageItem')"),
         pn('SentAt の動的コンテンツに「Sent Time」が見える場合はそれをバインド可。見えない場合は ',
           code("triggerOutputs()?['body/sentDateTime']"),

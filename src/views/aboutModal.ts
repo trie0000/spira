@@ -34,7 +34,7 @@ function renderUserTab(): HTMLElement {
 
     el('h2', { style: H2 }, ['🎯 このツールでできること']),
     el('ul', { style: UL }, [
-      el('li', {}, ['📧 受信メール (Outlook 共有メールボックス) を起票画面に自動取り込み']),
+      el('li', {}, ['📧 受信メール (個人 Outlook の To/Cc に特定 ML が含まれるものだけ PA で選別) を起票画面に自動取り込み']),
       el('li', {}, ['📋 Microsoft Forms の回答を起票画面に自動取り込み']),
       el('li', {}, ['💬 Teams スレッドでの議論・返信をチケット履歴に自動反映']),
       el('li', {}, ['🏢👥 1 チケット内で「内部スレッド (社内議論)」と「外部スレッド (顧客向け)」を並列管理']),
@@ -341,7 +341,7 @@ function renderTechTab(): HTMLElement {
       el('tr', {}, [
         el('td', { style: 'padding:6px 8px;border-bottom:1px solid var(--line)' }, [el('strong', {}, ['① メール取込'])]),
         el('td', { style: 'padding:6px 8px;border-bottom:1px solid var(--line)' }, [
-          'Outlook 共有メールボックスの新着メール → InboxMails に行追加 (件名にチケット ID タグがあれば自動紐付け、なければ起票待ち)',
+          '個人 Outlook の新着メールから To/Cc に特定 ML を含むものを PA 側で条件選別 → InboxMails に行追加 (件名にチケット ID タグがあれば自動紐付け、なければ起票待ち)',
         ]),
       ]),
       el('tr', {}, [
@@ -374,7 +374,7 @@ function renderTechTab(): HTMLElement {
       el('li', {}, [
         el('strong', {}, ['PA 側: ']),
         '各コネクタ (Outlook / SP / Teams / Forms) は PA フロー作成者のアカウントで認証。',
-        '共有メールボックスは事前に共有設定が必要。',
+        '個人メールボックスを対象にする運用 (共有メールボックスは使用しない)。フロー作成者が ML の受信者である必要あり。',
       ]),
       el('li', {}, [
         el('strong', {}, ['SP 権限: ']),
@@ -396,9 +396,13 @@ function renderTechTab(): HTMLElement {
 
     el('h2', { style: H2 }, ['💰 ランニングコスト']),
     el('p', { style: P }, [
-      '通常運用で ', el('strong', {}, ['¥0']),
+      'Spira 本体 (Bookmarklet + SP リスト + PA フロー) は ',
+      el('strong', {}, ['¥0']),
       ' (既存の Microsoft 365 ライセンス枠内)。Power Automate Standard tier の Premium connector は使用していないため、追加ライセンス不要。',
-      'AI チャットを利用する場合は社内 AI ゲートウェイ経由 (通常 ¥0、社内インフラ料金内)。',
+      el('br'),
+      el('strong', {}, ['AI チャット利用時のみ別途コスト発生: ']),
+      '社内 AI ゲートウェイ経由でもモデル毎の従量課金 (使用したトークン量で計上)。',
+      'コストを抑えたい場合は AI 機能を使用しないか、AI 設定で安価なモデル (例: GPT-4.1 mini 系) を選択。',
     ]),
   ]);
 }

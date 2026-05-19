@@ -76,6 +76,12 @@ export async function mount(): Promise<void> {
     if (saved === 'dark' || saved === 'light') root.setAttribute('data-theme', saved);
   } catch { /* noop */ }
 
+  // 文字サイズ設定の復元 (data-font-size 属性経由で CSS スケール切替)
+  try {
+    const { applyFontSize } = await import('./utils/fontSize');
+    applyFontSize();
+  } catch { /* noop */ }
+
   // Click delegation for [data-action]
   root.addEventListener('click', (e) => {
     const target = e.target as HTMLElement;
