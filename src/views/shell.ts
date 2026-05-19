@@ -1854,7 +1854,8 @@ function openHelpModal(root: HTMLElement): void {
     pn('内部スレッド / ユーザースレッドの両方が同じ管理チャネル群に居る前提。'),
     pn('動作の流れ:'),
     el('ol', { style: 'margin:0 0 var(--s-3);padding-left:1.2em;line-height:1.8;font-size:var(--fs-sm);color:var(--ink)' }, [
-      el('li', {}, ['Teams チャネルで誰かが返信 → PA フロー④ が起動']),
+      el('li', {}, ['Teams チャネルにメッセージ投稿 → PA フロー④ が起動 (統合トリガー)']),
+      el('li', {}, ['条件で「返信メッセージかつ aadUser」のみに絞り込み (親メッセージ / Bot / DM は除外)']),
       el('li', {}, ['返信を InboxMails に 1 行 INSERT (ConversationId = ', code("teams-<parentMessageId>"), ')']),
       el('li', {}, ['Spira の syncInbox が InternalThreadId / UserThreadId と照合']),
       el('li', {}, ['ヒット → Comments に追加 + InboxMails 行を物理削除 (= 受信一覧に出ない、自動でチケット詳細に反映)']),
@@ -1875,10 +1876,12 @@ function openHelpModal(root: HTMLElement): void {
 
     stepCard({
       num: 1,
-      title: 'Teams チャネル返信をトリガーする',
+      title: 'Teams メッセージをトリガーする',
       connector: 'Microsoft Teams',
-      action: '新しい返信がチャネルに追加されたとき (When a new reply is added to a channel) (V2)',
+      action: 'チャットまたはチャネルに新しいメッセージが作成されたとき (When a new message is added to a chat or channel)',
+      note: '★ 旧コネクタにあった「新しい返信がチャネルに追加されたとき」が見当たらない環境ではこの統合トリガーを使う。親メッセージ + 返信 + DM がすべて入ってくるので、次の STEP 2 (条件) で「チャネル内の返信のみ」に絞り込む。',
       params: [
+        { field: 'Message type', value: 'Channel', type: 'choose', hint: 'Chat は対象外。必ず Channel を選ぶ。' },
         { field: 'Team', value: '(監視対象の Team を選択)', type: 'choose' },
         { field: 'Channel', value: '(監視対象のチャネルを選択)', type: 'choose', hint: '例: #spira-internal。1 チャネル = 1 フロー。' },
       ],
@@ -1886,10 +1889,21 @@ function openHelpModal(root: HTMLElement): void {
 
     stepCard({
       num: 2,
+      title: '条件 — 返信メッセージのみ通す (親 / Bot / Spira 自身の投稿を除外)',
+      connector: 'Control',
+      action: '条件 (Condition)',
+      note: '統合トリガーは親メッセージでも発火するので、ここで `replyToId` が非空 (= 返信) かつ aadUser (= Bot/Spira 投稿ではない) のときだけ Yes ブランチへ進める。No ブランチは何もしない (= フロー終了)。',
+      params: [
+        { field: '式 (詳細モードで貼り付け)', value: "@and(not(empty(triggerOutputs()?['body/replyToId'])), equals(triggerOutputs()?['body/from/user/userIdentityType'], 'aadUser'))", type: 'expression', hint: '「詳細モードで編集」を開いて条件式に直接貼り付け。' },
+      ],
+    }),
+
+    stepCard({
+      num: 3,
       title: 'InboxMails に行を作成 — Spira 側で自動振り分け',
       connector: 'SharePoint',
       action: '項目の作成 (Create item)',
-      note: 'Spira は ConversationId が "teams-..." で始まる行を Teams 返信と認識し、parentMessageId 部分を Tickets の InternalThreadId / UserThreadId と照合して自動紐付けする。',
+      note: '★ このカードは STEP 2 の条件の "Yes (はい)" ブランチの中に配置すること。Spira は ConversationId が "teams-..." で始まる行を Teams 返信と認識し、parentMessageId 部分を Tickets の InternalThreadId / UserThreadId と照合して自動紐付けする。',
       params: [
         { field: 'Site Address', value: 'https://<tenant>.sharepoint.com/sites/<site>', type: 'choose' },
         { field: 'List Name', value: 'InboxMails', type: 'choose' },
@@ -1934,14 +1948,23 @@ function openHelpModal(root: HTMLElement): void {
       ]),
       el('li', {}, [
         el('strong', {}, ['Spira からの自動投稿 (PA フロー②) が自分自身を起こす']),
-        ': PA フロー②の投稿は「親メッセージ」なので返信トリガー (このフロー④) は発火しない。' +
-        'もし返信トリガーが Spira の親メッセージで誤発火する場合はチャネル設定 / Teams コネクタの世代を確認。',
+        ': PA フロー②の投稿は「親メッセージ」なので、STEP 2 の条件 ',
+        code("not(empty(triggerOutputs()?['body/replyToId']))"),
+        ' が False になり No ブランチ送り (= 無視) されるはず。もし誤発火する場合は条件式の貼り付けミスを疑う。',
       ]),
       el('li', {}, [
-        el('strong', {}, ['Bot や Spira 自体の返信を除外したい']),
-        ': 必要なら ',
-        code("triggerOutputs()?['body/from/user/userIdentityType']"),
-        " が 'aadUser' のときだけ続行する条件を 2 と 3 の間に挟む。",
+        el('strong', {}, ['Bot やワークフロー由来の投稿を除外したい']),
+        ': 既に STEP 2 で ',
+        code("equals(triggerOutputs()?['body/from/user/userIdentityType'], 'aadUser')"),
+        ' を入れて aadUser のみ通している。さらに絞りたい場合 (例: 特定アカウントを除外) は条件式に `not(equals(...userPrincipalName..., \'bot@...\'))` を AND で足す。',
+      ]),
+      el('li', {}, [
+        el('strong', {}, ['親メッセージや DM が誤って取り込まれる']),
+        ': STEP 1 の Message type を ',
+        code('Channel'),
+        ' に設定したか、STEP 2 の条件式に ',
+        code("not(empty(...replyToId))"),
+        ' が入っているか確認。両方そろっていれば親メッセージ・チャット DM は除外される。',
       ]),
       el('li', {}, [
         el('strong', {}, ["InvalidTemplate: length / substring parameter to be ... 'Null'"]),
