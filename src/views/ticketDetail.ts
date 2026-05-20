@@ -37,58 +37,6 @@ export function requestScrollToComment(commentId: number): void {
   pendingScrollCommentId = commentId;
 }
 
-/** Forms 起票チケット用の「回答一覧を開く」バナーを生成する。
- *  conversationId から responseId を抽出して表示。設定済み URL があれば
- *  リンク化、未設定なら設定への案内を表示。 */
-async function buildFormsLinkBanner(t: Ticket): Promise<HTMLElement | null> {
-  const conv = t.initialConversationId ?? '';
-  // forms-<formId>-<responseId> 形式から各 ID を抽出 (responseId が無い古い
-  // データでも壊れないように optional 化)
-  let responseId = '';
-  if (conv.startsWith('forms-')) {
-    const rest = conv.slice('forms-'.length);
-    const lastDash = rest.lastIndexOf('-');
-    if (lastDash > 0) responseId = rest.slice(lastDash + 1);
-  }
-  const analyticsUrl = await getFormsAnalyticsUrl();
-
-  const respIdSpan = responseId
-    ? el('span', { style: 'color:var(--ink-3);font-size:var(--fs-xs);font-family:ui-monospace,Menlo,monospace' }, [`回答 ID: ${responseId}`])
-    : null;
-
-  if (analyticsUrl) {
-    return el('div', {
-      style: 'display:flex;align-items:center;gap:var(--s-3);padding:var(--s-2) var(--s-5);' +
-             'background:rgba(160,90,140,0.08);border-bottom:1px solid var(--line);font-size:var(--fs-sm)',
-    }, [
-      el('span', {}, ['📋']),
-      el('a', {
-        href: analyticsUrl,
-        target: '_blank',
-        rel: 'noopener noreferrer',
-        style: 'color:var(--accent-strong);text-decoration:underline',
-      }, ['Forms 回答一覧を開く']),
-      ...(respIdSpan ? [respIdSpan] : []),
-      el('span', { style: 'flex:1' }),
-      el('span', { style: 'color:var(--ink-3);font-size:var(--fs-xs)' }, ['※ 管理者ビューで該当 ID の行を検索してください']),
-    ]);
-  }
-
-  // 未設定 → 設定への誘導
-  return el('div', {
-    style: 'display:flex;align-items:center;gap:var(--s-3);padding:var(--s-2) var(--s-5);' +
-           'background:var(--paper-2);border-bottom:1px solid var(--line);font-size:var(--fs-sm);color:var(--ink-3)',
-  }, [
-    el('span', {}, ['📋']),
-    el('span', {}, ['Forms 起票チケット']),
-    ...(respIdSpan ? [respIdSpan] : []),
-    el('span', { style: 'flex:1' }),
-    el('span', { style: 'font-size:var(--fs-xs)' }, [
-      '※ 「設定 → Forms 連携」で URL を登録すると回答一覧リンクを表示できます',
-    ]),
-  ]);
-}
-
 export async function renderTicketDetail(ticketId: number): Promise<HTMLElement> {
   const repo = getRepo();
   const [t, comments] = await Promise.all([
@@ -131,15 +79,8 @@ export async function renderTicketDetail(ticketId: number): Promise<HTMLElement>
     }, ['更新']),
   ]);
 
-  // Forms 起票チケットなら回答一覧へのリンクを表示 (設定済みなら直リンク、
-  // 未設定なら設定への誘導)。source が forms か、ConversationId 規約から判定。
-  const isFormsTicket =
-    t.source === 'forms' ||
-    !!(t.initialConversationId && t.initialConversationId.startsWith('forms-'));
-  const formsBanner = el('div', { style: 'display:none' });
-  if (isFormsTicket) {
-    void buildFormsLinkBanner(t).then((b) => { if (b) formsBanner.replaceWith(b); });
-  }
+  // (Forms 回答一覧リンクはヘッダーの「外部スレッド起票」ボタンの右隣に
+  //  ボタンとして配置するため、ここで独立バナーは出さない)
 
   const wrap = el('div', {
     class: 'spira-main-wrap',
@@ -148,7 +89,6 @@ export async function renderTicketDetail(ticketId: number): Promise<HTMLElement>
     await renderTabStrip(t, latestReceived),
     renderTicketHeader(t, latestReceived),
     refreshBanner,
-    formsBanner,
     renderSplitPanes(t, comments, prevLastSeen),
   ]);
 
@@ -702,11 +642,17 @@ function buildTicketActions(activeT: Ticket, latestReceived: Comment | undefined
     el('span', { html: icon('trash'), style: 'display:inline-flex;width:14px;height:14px' }),
   ]);
 
-  // Teams スレッド起票ボタン (内部用 / ユーザー用)
+  // Teams スレッド起票ボタン (内部用 / 外部用)
   // - 未起票なら TeamsPostRequests に 1 行 INSERT → PA が拾って Teams 投稿
   // - 起票済みなら DeepLink を新規タブで開く
   const internalThreadBtn = buildTeamsThreadButton(activeT, 'internal');
   const userThreadBtn = buildTeamsThreadButton(activeT, 'user');
+
+  // Forms 起票チケットなら回答一覧へのリンクボタン (外部スレッド起票ボタンの右隣に配置)
+  const isFormsTicket =
+    activeT.source === 'forms' ||
+    !!(activeT.initialConversationId && activeT.initialConversationId.startsWith('forms-'));
+  const formsBtn = isFormsTicket ? buildFormsLinkButton(activeT) : null;
 
   // プロパティ (Teams スレッドの解除・手動紐付け等)
   const propertiesBtn = el('button', {
@@ -728,19 +674,54 @@ function buildTicketActions(activeT: Ticket, latestReceived: Comment | undefined
     'AI',
   ]);
 
-  return [aiBtn, copySubjectBtn, replyBtn, internalThreadBtn, userThreadBtn, propertiesBtn, deleteBtn];
+  const buttons: HTMLElement[] = [aiBtn, copySubjectBtn, replyBtn, internalThreadBtn, userThreadBtn];
+  if (formsBtn) buttons.push(formsBtn);
+  buttons.push(propertiesBtn, deleteBtn);
+  return buttons;
 }
 
-/** 内部/ユーザースレッド起票・遷移ボタン。状態に応じて表記が変わる:
- *  - DeepLink 未設定 → 「🏢 内部スレッド起票」「👥 ユーザースレッド起票」
- *  - DeepLink あり    → 「🏢 内部スレッドを開く」「👥 ユーザースレッドを開く」
+/** Forms 回答一覧へのリンクボタン。クリックで設定済み URL を新規タブで開く。
+ *  URL 未設定の場合は設定誘導 toast を出す。 */
+function buildFormsLinkButton(activeT: Ticket): HTMLElement {
+  // responseId は ConversationId 規約から抽出 (forms-<formId>-<responseId>)
+  let responseId = '';
+  const conv = activeT.initialConversationId ?? '';
+  if (conv.startsWith('forms-')) {
+    const rest = conv.slice('forms-'.length);
+    const lastDash = rest.lastIndexOf('-');
+    if (lastDash > 0) responseId = rest.slice(lastDash + 1);
+  }
+  const titleSuffix = responseId ? `\n回答 ID: ${responseId}` : '';
+  return el('button', {
+    class: 'spira-btn spira-btn--ghost spira-btn--sm',
+    title: `Forms 回答一覧を新規タブで開く${titleSuffix}\n(設定 → Forms 連携で URL を 1 件登録)`,
+    onclick: async () => {
+      const url = await getFormsAnalyticsUrl();
+      if (url) {
+        window.open(url, '_blank', 'noopener');
+      } else {
+        toast(getRoot(),
+          'Forms 回答一覧 URL が未登録です。歯車 → 設定 → Forms 連携 で URL を登録してください',
+          'warn', 6000);
+      }
+    },
+  }, [
+    el('span', { style: 'font-size:14px' }, ['📋']),
+    'Forms 回答一覧',
+  ]);
+}
+
+/** 内部/外部スレッド起票・遷移ボタン。状態に応じて表記が変わる:
+ *  - DeepLink 未設定 → 「🏢 内部スレッド起票」「👥 外部スレッド起票」
+ *  - DeepLink あり    → 「🏢 内部スレッドを開く」「👥 外部スレッドを開く」
+ *  (threadType の値は内部的に 'user' のままだが、UI 表記は外部に統一)
  *  起票時は SP の TeamsPostRequests に Pending 行を INSERT するだけ。
  *  実際の Teams 投稿は PA フロー 2 が拾って実行する。 */
 function buildTeamsThreadButton(activeT: Ticket, threadType: 'internal' | 'user'): HTMLElement {
   const isInternal = threadType === 'internal';
   const deepLink = isInternal ? activeT.internalDeepLink : activeT.userDeepLink;
   const emoji = isInternal ? '🏢' : '👥';
-  const label = isInternal ? '内部スレッド' : 'ユーザースレッド';
+  const label = isInternal ? '内部スレッド' : '外部スレッド';
   const created = !!deepLink;
 
   const btn = el('button', {

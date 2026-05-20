@@ -162,7 +162,7 @@ export interface Repository {
   addSampleInbox(): Promise<{ count: number }>;
 
   // Teams 連携 (Forms → Spira → Teams 運用案)
-  // チケット詳細から「内部スレッド起票」「ユーザースレッド起票」ボタンを
+  // チケット詳細から「内部スレッド起票」「外部スレッド起票」ボタンを
   // 押すと、TeamsPostRequests リストに 1 行 INSERT される。
   // 実際の Teams 投稿は PA フロー 2 が SP のアイテム作成トリガーで拾って
   // 処理する。Spira はキューに積むだけ。

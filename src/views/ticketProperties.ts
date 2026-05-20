@@ -1,7 +1,7 @@
 // Ticket properties modal — Teams スレッド設定の編集が主目的。
 //
 // 機能:
-//   - 内部スレッド / ユーザースレッドの「解除」(リンク情報をクリア)
+//   - 内部スレッド / 外部スレッドの「解除」(リンク情報をクリア)
 //   - Teams メッセージ URL を貼り付けて手動でスレッド紐付け
 //
 // レイアウト方針: 「履歴を追加」モーダルと統一感を出すため、
@@ -69,7 +69,7 @@ function appendThreadRows(
   onChanged: (patch: Partial<Ticket>) => Promise<void>,
 ): void {
   const isInternal = threadType === 'internal';
-  const sectionLabel = isInternal ? '🏢 内部スレッド' : '👥 ユーザースレッド';
+  const sectionLabel = isInternal ? '🏢 内部スレッド' : '👥 外部スレッド';
   const deepLink = isInternal ? ticket.internalDeepLink : ticket.userDeepLink;
   const channelId = isInternal ? ticket.internalChannelId : ticket.userChannelId;
   const messageId = isInternal ? ticket.internalThreadId : ticket.userThreadId;
@@ -253,7 +253,7 @@ export function openTicketPropertiesModal(ticket: Ticket): void {
       sourceSel,
     );
 
-    // 内部スレッド / ユーザースレッド
+    // 内部スレッド / 外部スレッド
     appendThreadRows(grid, current, 'internal', applyPatch);
     appendThreadRows(grid, current, 'user', applyPatch);
 

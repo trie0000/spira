@@ -46,7 +46,8 @@ export interface Ticket {
   internalThreadId?: string;
   internalChannelId?: string;
   internalDeepLink?: string;
-  /** ユーザースレッド (顧客向け) の Teams messageId / channelId / DeepLink */
+  /** 外部スレッド (顧客向け) の Teams messageId / channelId / DeepLink。
+   *  内部フィールド名は userThreadId / userChannelId / userDeepLink のまま (DB 互換)。 */
   userThreadId?: string;
   userChannelId?: string;
   userDeepLink?: string;

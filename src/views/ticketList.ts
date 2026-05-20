@@ -223,7 +223,7 @@ function exportTicketsCsv(tickets: Ticket[]): void {
     'ID', 'タイトル', 'ステータス', '優先度', '担当者', '担当者メール',
     '部門', '問い合わせ種別', '起票者', '起票者メール',
     '期限', '作成日', '最終更新',
-    'Teams 内部スレッド', 'Teams ユーザースレッド',
+    'Teams 内部スレッド', 'Teams 外部スレッド',
     '説明 (先頭 200 文字)',
   ];
   const rows = tickets.map(t => [
@@ -854,7 +854,7 @@ function renderRow(t: Ticket, meta?: TicketMeta): HTMLElement {
     ]);
   };
   const internalCell = threadLinkCell(t.internalDeepLink, '🏢', '内部スレッドを開く');
-  const userCell = threadLinkCell(t.userDeepLink, '👥', 'ユーザースレッドを開く');
+  const userCell = threadLinkCell(t.userDeepLink, '👥', '外部スレッドを開く');
 
   // 部門 / 種別 セル (テキスト表示、未設定は灰色)
   const textCell = (val: string | undefined): HTMLElement =>

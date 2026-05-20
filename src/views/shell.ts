@@ -1604,7 +1604,7 @@ function buildPaFlowsBodyImpl(root: HTMLElement): HTMLElement {
 
     h('4. 動作確認'),
     ol([
-      el('div', {}, ['Spira でチケットを開き「🏢 内部スレッド起票」または「👥 ユーザースレッド起票」をクリック']),
+      el('div', {}, ['Spira でチケットを開き「🏢 内部スレッド起票」または「👥 外部スレッド起票」をクリック']),
       el('div', {}, ['PA の実行履歴で成功を確認 → Teams チャネルに投稿が出る']),
       el('div', {}, ['Spira のボタン表示が「スレッドを開く」に変われば DeepLink 書き戻し成功']),
     ]),
@@ -1815,7 +1815,7 @@ function buildPaFlowsBodyImpl(root: HTMLElement): HTMLElement {
        el('strong', {}, ['返信']), ' を、',
        el('strong', {}, ['同じチャネルから自動収集']), ' して該当チケットの ',
        '受信スレッドに反映するフロー。'),
-    pn('内部スレッド / ユーザースレッドの両方が同じ管理チャネル群に居る前提。'),
+    pn('内部スレッド / 外部スレッドの両方が同じ管理チャネル群に居る前提。'),
     pn('動作の流れ:'),
     el('ol', { style: 'margin:0 0 var(--s-3);padding-left:1.2em;line-height:1.8;font-size:var(--fs-sm);color:var(--ink)' }, [
       el('li', {}, ['Teams チャネルにメッセージ投稿 → PA フロー④ が起動 (統合トリガー、Graph 変更通知のメタデータのみ受信)']),
@@ -1983,7 +1983,7 @@ function buildPaFlowsBodyImpl(root: HTMLElement): HTMLElement {
 
     h('3. 動作確認'),
     ol([
-      el('div', {}, ['Spira でチケット起票 → 「🏢 内部スレッド起票」or 「👥 ユーザースレッド起票」をクリック']),
+      el('div', {}, ['Spira でチケット起票 → 「🏢 内部スレッド起票」or 「👥 外部スレッド起票」をクリック']),
       el('div', {}, ['対象 Teams チャネル に親メッセージが投稿される']),
       el('div', {}, ['そのメッセージへ ', el('strong', {}, ['返信']), ' を投稿']),
       el('div', {}, ['1〜3 分以内に Spira 側のチケット詳細スレッドに返信内容が反映される']),
