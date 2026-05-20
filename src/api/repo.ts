@@ -194,6 +194,12 @@ export interface Repository {
   createTeamsPostRequest(params: {
     ticketId: number;
     threadType: 'internal' | 'user';
+    /** Teams 親メッセージの件名 (subject)。省略時は PA フローの既定テンプレ。 */
+    subject?: string;
+    /** 投稿本文 (HTML 可)。省略時は PA フローの既定テンプレ。 */
+    bodyHtml?: string;
+    /** メンション対象のメールアドレス。PA 側で AAD id 解決 → <at> タグに展開。 */
+    mentionedEmails?: string[];
   }): Promise<{ id: number }>;
 
   // 設定 (Spira 全体で共有)

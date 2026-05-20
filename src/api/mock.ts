@@ -775,6 +775,9 @@ export class MockRepository implements Repository {
   async createTeamsPostRequest(params: {
     ticketId: number;
     threadType: 'internal' | 'user';
+    subject?: string;
+    bodyHtml?: string;
+    mentionedEmails?: string[];
   }): Promise<{ id: number }> {
     const settingKey = params.threadType === 'internal'
       ? 'teams-channel:internal'
@@ -809,7 +812,12 @@ export class MockRepository implements Repository {
       ticketId: params.ticketId,
       targetType: 'teams',
       targetId: reqId,
-      details: { threadType: params.threadType, channelId },
+      details: {
+        threadType: params.threadType, channelId,
+        hasSubject: !!params.subject,
+        hasBody: !!params.bodyHtml,
+        mentions: (params.mentionedEmails ?? []).length,
+      },
     });
     return { id: reqId };
   }

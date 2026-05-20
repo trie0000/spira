@@ -811,9 +811,9 @@ function buildTeamsThreadButton(activeT: Ticket, threadType: 'internal' | 'user'
         window.open(deepLink, '_blank', 'noopener');
         return;
       }
-      // 確認モーダル: 投稿先チャネル / タイトル / 本文 を見せた上で
-      // ユーザの明示確認を取ってから createTeamsPostRequest を実行する。
-      openTeamsPostConfirmModal(activeT, threadType, async () => {
+      // 確認モーダル: 投稿先チャネル / タイトル / 本文 / メンションを編集して
+      // 「起票する」で createTeamsPostRequest に渡す。
+      openTeamsPostConfirmModal(activeT, threadType, async (input) => {
         // 連打防止
         btn.setAttribute('disabled', 'true');
         btn.classList.add('spira-spin');
@@ -821,6 +821,9 @@ function buildTeamsThreadButton(activeT: Ticket, threadType: 'internal' | 'user'
           await getRepo().createTeamsPostRequest({
             ticketId: activeT.id,
             threadType,
+            subject: input.subject,
+            bodyHtml: input.bodyHtml,
+            mentionedEmails: input.mentionedEmails,
           });
           toast(
             getRoot(),
@@ -847,30 +850,115 @@ function buildTeamsThreadButton(activeT: Ticket, threadType: 'internal' | 'user'
 }
 
 /** Teams スレッド起票の事前確認モーダル。
- *  投稿先チャネル (設定済みの teams-channel:{internal|external} から解決)、
- *  PA が投稿する想定のタイトル ([#NNN] + チケットタイトル) と本文
- *  (チケット description、なければプレースホルダ) を表示し、
- *  ユーザの「起票する」クリックでコールバックを実行する。
+ *  投稿先チャネル (設定済みの teams-channel:{internal|external} から解決) と、
+ *  Teams 親メッセージの「タイトル / 本文 / メンション対象」を編集できる
+ *  フォームを表示し、ユーザの「起票する」クリックで入力値を onConfirm に渡す。
+ *
+ *  - タイトル/本文: 初期値はチケットの ID タグ + タイトル / description。
+ *  - メンション: AD ユーザから複数選択。チップ表示。PA 側で email →
+ *    AAD ObjectId を解決して <at> タグ + mentions[] を組み立てる。
  *
  *  チャネル未設定の場合: 警告を出し「起票する」を disable。設定画面への
  *  動線を案内する (歯車 → Teams チャネル)。 */
 function openTeamsPostConfirmModal(
   activeT: Ticket,
   threadType: 'internal' | 'user',
-  onConfirm: () => void | Promise<void>,
+  onConfirm: (input: {
+    subject: string;
+    bodyHtml: string;
+    mentionedEmails: string[];
+  }) => void | Promise<void>,
 ): void {
   const isInternal = threadType === 'internal';
   const emoji = isInternal ? '🏢' : '👥';
   const label = isInternal ? '内部スレッド' : '外部スレッド';
 
-  // PA がポストする想定の Title / Body。フロントでは厳密な再現は不可だが、
-  // ユーザが「何が Teams に流れるか」を理解できる粒度のプレビューを示す。
-  // Title 例: "[#00012] 印刷できない"
-  const titleText = `${formatTicketTag(activeT.id)} ${activeT.title}`;
-  const bodyText = (activeT.description ?? '').trim();
+  // 初期値: チケットから組み立て。ユーザは編集可能。
+  const initialSubject = `${formatTicketTag(activeT.id)} ${activeT.title}`;
+  const initialBody = (activeT.description ?? '').trim();
+
+  // 入力フィールド
+  const subjectInput = el('input', {
+    type: 'text',
+    class: 'spira-input',
+    style: 'width:100%',
+    value: initialSubject,
+    placeholder: 'Teams 親メッセージの件名',
+  }) as HTMLInputElement;
+
+  const bodyTextarea = el('textarea', {
+    class: 'spira-input',
+    rows: '8',
+    style: 'width:100%;resize:vertical;font:var(--fs-sm)/1.55 ui-sans-serif,system-ui,sans-serif',
+    placeholder: '本文を入力 (改行可)。<br> や <strong> 等の HTML タグも使えます。',
+  }) as HTMLTextAreaElement;
+  bodyTextarea.value = initialBody;
+
+  // メンションするユーザの選択状態 (email キー)。
+  const mentionEmails = new Set<string>();
+  const mentionChipsWrap = el('div', {
+    style: 'display:flex;flex-wrap:wrap;gap:6px;min-height:28px;align-items:center',
+  });
+  const renderChips = (): void => {
+    mentionChipsWrap.innerHTML = '';
+    if (mentionEmails.size === 0) {
+      mentionChipsWrap.appendChild(el('span', {
+        style: 'font-size:var(--fs-xs);color:var(--ink-3)',
+      }, ['(まだ選択されていません)']));
+      return;
+    }
+    const users = getState().users;
+    for (const email of mentionEmails) {
+      const u = users.find(x => x.email.toLowerCase() === email);
+      const name = u?.displayName ?? email;
+      const chip = el('span', {
+        style:
+          'display:inline-flex;align-items:center;gap:6px;padding:2px 8px;' +
+          'background:var(--accent-soft);color:var(--ink);' +
+          'border:1px solid var(--accent);border-radius:999px;font-size:var(--fs-xs)',
+        title: email,
+      }, [
+        el('span', {}, [`@${name}`]),
+        el('button', {
+          type: 'button',
+          class: 'spira-chip-remove',
+          style: 'background:transparent;border:0;color:var(--ink-3);cursor:pointer;line-height:1;padding:0',
+          'aria-label': `${name} を外す`,
+          onclick: () => { mentionEmails.delete(email); renderChips(); },
+        }, ['×']),
+      ]);
+      mentionChipsWrap.appendChild(chip);
+    }
+  };
+  renderChips();
+
+  const mentionSelect = el('select', {
+    class: 'spira-select',
+    style: 'flex:1;min-width:200px',
+  }, [
+    el('option', { value: '' }, ['＋ メンションを追加…']),
+    ...getState().users
+      .filter(u => !mentionEmails.has(u.email.toLowerCase()))
+      .map(u => el('option', { value: u.email }, [`${u.displayName} <${u.email}>`])),
+  ]) as HTMLSelectElement;
+  const refreshMentionSelect = (): void => {
+    mentionSelect.innerHTML = '';
+    mentionSelect.appendChild(el('option', { value: '' }, ['＋ メンションを追加…']));
+    for (const u of getState().users) {
+      if (mentionEmails.has(u.email.toLowerCase())) continue;
+      mentionSelect.appendChild(el('option', { value: u.email }, [`${u.displayName} <${u.email}>`]));
+    }
+    mentionSelect.value = '';
+  };
+  mentionSelect.addEventListener('change', () => {
+    const v = mentionSelect.value.trim().toLowerCase();
+    if (!v) return;
+    mentionEmails.add(v);
+    renderChips();
+    refreshMentionSelect();
+  });
 
   // チャネル情報は非同期で取得 → 取得完了後に preview セクションを差し替え。
-  // 初期表示は「読込中」プレースホルダ。
   const channelInfoSlot = el('div', {
     style: 'font-size:var(--fs-sm);color:var(--ink-3)',
   }, ['チャネル情報を読み込み中…']);
@@ -901,7 +989,6 @@ function openTeamsPostConfirmModal(
       ['チャネル名', cfg.channelName ?? '(URL に名前なし)'],
       ['チャネル ID', cfg.channelId],
       ['チーム ID', cfg.teamId],
-      ['URL', cfg.url],
     ];
     const table = el('div', {
       style: 'display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:var(--fs-sm)',
@@ -921,20 +1008,21 @@ function openTeamsPostConfirmModal(
     .then(cfg => renderChannelInfo(cfg))
     .catch(() => renderChannelInfo(null));
 
-  const sectionTitle = (text: string): HTMLElement => el('div', {
-    style: 'font-size:var(--fs-xs);font-weight:600;color:var(--ink-2);' +
-           'text-transform:uppercase;letter-spacing:0.04em;margin-bottom:var(--s-2)',
-  }, [text]);
-
-  const previewBox = (content: string, placeholder = '(空)'): HTMLElement => el('div', {
-    style: 'background:var(--paper-2);border:1px solid var(--line);border-radius:var(--r-2);' +
-           'padding:var(--s-3) var(--s-4);font-size:var(--fs-sm);line-height:1.55;' +
-           'white-space:pre-wrap;word-break:break-word;max-height:240px;overflow:auto',
-  }, [content || placeholder]);
+  const sectionTitle = (text: string, hint?: string): HTMLElement => el('div', {
+    style: 'margin-bottom:var(--s-2)',
+  }, [
+    el('div', {
+      style: 'font-size:var(--fs-xs);font-weight:600;color:var(--ink-2);' +
+             'text-transform:uppercase;letter-spacing:0.04em',
+    }, [text]),
+    ...(hint ? [el('div', {
+      style: 'font-size:var(--fs-xs);color:var(--ink-3);margin-top:2px',
+    }, [hint])] : []),
+  ]);
 
   const body = el('div', { style: 'display:flex;flex-direction:column;gap:var(--s-4);line-height:1.6' }, [
     el('div', { style: 'font-size:var(--fs-sm);color:var(--ink-2)' }, [
-      `${emoji} ${label} を Teams に起票します。以下の内容で投稿してよいか確認してください。`,
+      `${emoji} ${label} を Teams に起票します。以下の内容を確認・編集してから「起票する」を押してください。`,
       el('br'),
       el('span', { style: 'color:var(--ink-3);font-size:var(--fs-xs)' }, [
         '※ 実際の投稿は PA フローが行います。送信後に DeepLink がチケットに反映されます。',
@@ -942,10 +1030,21 @@ function openTeamsPostConfirmModal(
     ]),
 
     el('div', {}, [sectionTitle('投稿先チャネル'), channelInfoSlot]),
-    el('div', {}, [sectionTitle('タイトル (Teams 親メッセージの subject)'), previewBox(titleText)]),
+
     el('div', {}, [
-      sectionTitle('本文 (チケット詳細の本文)'),
-      previewBox(bodyText, '(本文未設定 — チケット詳細から description を編集できます)'),
+      sectionTitle('タイトル (Teams 親メッセージの subject)'),
+      subjectInput,
+    ]),
+
+    el('div', {}, [
+      sectionTitle('本文', '改行や簡単な HTML タグ (<br>, <strong>, <em>, <a>) が使えます。'),
+      bodyTextarea,
+    ]),
+
+    el('div', {}, [
+      sectionTitle('メンション (任意)', 'PA フロー側で AAD ユーザに解決して @ メンション化します。'),
+      mentionChipsWrap,
+      el('div', { style: 'display:flex;gap:8px;margin-top:6px' }, [mentionSelect]),
     ]),
   ]);
 
@@ -960,7 +1059,18 @@ function openTeamsPostConfirmModal(
         // 念のため (UI で disabled でも、何らかの抜け道で押された場合の保険)
         throw new Error('channel-not-configured');
       }
-      await onConfirm();
+      const subject = subjectInput.value.trim();
+      const bodyText = bodyTextarea.value;
+      // textarea プレーンテキスト → HTML への最低限の変換:
+      //   - 既に <p>/<br>/<strong> 等の HTML タグを含んでいればそのまま投稿
+      //     (ユーザが意図して書いた HTML を尊重)
+      //   - そうでなければ改行を <br> に置換、全体を <p> で包む
+      const hasHtml = /<\/?(?:p|br|strong|em|a|ul|ol|li|h\d|div|span)\b/i.test(bodyText);
+      const bodyHtml = hasHtml
+        ? bodyText
+        : `<p>${bodyText.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>')}</p>`;
+      const mentionedEmails = Array.from(mentionEmails);
+      await onConfirm({ subject, bodyHtml, mentionedEmails });
     },
   });
 

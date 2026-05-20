@@ -1899,6 +1899,9 @@ function buildPaFlowsBodyImpl(root: HTMLElement): HTMLElement {
       row('RequestedAt', '起票時刻 (DateTime)', '監視・タイムアウト判定用。'),
       row('Status', "'Pending' / 'Completed' / 'Failed'", '初期は Pending。PA 完了で Completed (= 行削除) または Failed に。'),
       row('ErrorMessage', 'Note', 'Failed 時に Teams API のエラーメッセージを記録。'),
+      row('Subject', '起票モーダルで編集した件名', 'Teams 親メッセージの subject に直接渡す。空なら PA 側のテンプレ任せ。'),
+      row('BodyHtml', '起票モーダルで編集した本文 (HTML)', 'Teams 親メッセージの body にそのまま使う。空なら PA 側のテンプレ任せ。'),
+      row('MentionedEmails', "メンション対象のメール (CSV)", '例: alice@example.com,bob@example.com。PA は「Get user profile (V2)」で AAD ObjectId を解決し、 <at> タグ + mentions[] を組み立てる。'),
     ]),
   ]);
 
@@ -1958,6 +1961,49 @@ function buildPaFlowsBodyImpl(root: HTMLElement): HTMLElement {
     }),
 
     stepCard({
+      num: '3b',
+      title: 'メンション対象 (MentionedEmails) を配列化 — 任意',
+      connector: 'Data Operation',
+      action: '作成 (Compose) — 名前は「MentionEmails」にリネーム推奨',
+      note: 'Spira が MentionedEmails 列にメール CSV を入れてくる。後段の Apply to each で配列展開するために、ここで split() しておく。\n\n空のときは空配列を返すので、メンション無しの場合も安全に処理が進む。',
+      params: [
+        { field: 'アクション名 (リネーム推奨)', value: 'MentionEmails', type: 'static' },
+        { field: '入力 (fx)', value: "if(empty(triggerOutputs()?['body/MentionedEmails']), createArray(), split(triggerOutputs()?['body/MentionedEmails'], ','))", type: 'expression', hint: 'カンマ区切り文字列 → 配列。空文字なら空配列。' },
+      ],
+    }),
+
+    stepCard({
+      num: '3c',
+      title: '各メンション対象を AAD ObjectId に解決 — 任意',
+      connector: 'コントロール / Office 365 ユーザー',
+      action: 'Apply to each + 「ユーザー プロファイル (V2) の取得」',
+      note: 'Apply to each で MentionEmails の各要素について「Get user profile (V2)」を呼び、displayName と id (AAD ObjectId) を集める。\n\n配列の組み立ては内側の Compose で行う。',
+      params: [
+        { field: 'Apply to each 入力', value: "outputs('MentionEmails')", type: 'expression' },
+        { field: '内側 STEP: User (UPN)', value: "items('Apply_to_each')", type: 'expression', hint: '「ユーザー プロファイル (V2) の取得」の User 欄に貼る。' },
+      ],
+      extra: [
+        el('p', { style: 'margin:var(--s-3) 0 var(--s-2);font-size:var(--fs-sm);color:var(--ink-2)' }, ['Apply to each の中で組み立てる「ユーザ別 mention オブジェクト」 (内側 Compose、名前: MentionObj):']),
+        codeBlock(
+          "{\n" +
+          "  \"id\": @{add(0, length(variables('mentionsArray')))},\n" +
+          "  \"mentionText\": \"@{body('ユーザー_プロファイル__V2__の取得')?['displayName']}\",\n" +
+          "  \"mentioned\": {\n" +
+          "    \"user\": {\n" +
+          "      \"id\": \"@{body('ユーザー_プロファイル__V2__の取得')?['id']}\",\n" +
+          "      \"displayName\": \"@{body('ユーザー_プロファイル__V2__の取得')?['displayName']}\",\n" +
+          "      \"userIdentityType\": \"aadUser\"\n" +
+          "    }\n" +
+          "  }\n" +
+          "}"
+        ),
+        el('p', { style: 'margin:var(--s-2) 0;font-size:var(--fs-xs);color:var(--ink-3);line-height:1.6' }, [
+          '※ 簡略化: id を 0, 1, 2... と振るために「変数」を使う必要があります。フロー先頭で variables(\'mentionsArray\') = []、変数 \'idx\' = 0 を初期化し、各ループで MentionObj を append + idx を increment、本文中の <at id="0"> も idx に合わせる方式が一般的。詳細はサンプルフローを参照。',
+        ]),
+      ],
+    }),
+
+    stepCard({
       num: 4,
       title: 'Teams チャネルにメッセージ投稿',
       connector: 'Microsoft Teams',
@@ -1967,16 +2013,26 @@ function buildPaFlowsBodyImpl(root: HTMLElement): HTMLElement {
         { field: 'Post in', value: 'Channel', type: 'choose' },
         { field: 'Team', value: "triggerOutputs()?['body/TeamId']", type: 'expression', hint: 'チームの一覧から選ぶのではなく、「カスタム値を入力」タブで TeamId を直接渡す。' },
         { field: 'Channel', value: "triggerOutputs()?['body/ChannelId']", type: 'expression', hint: '同上 — カスタム値タブで ChannelId を渡す。' },
-        { field: 'Subject', value: "concat('[#', triggerOutputs()?['body/TicketId'], '] ', body('項目の取得')?['Title'])", type: 'expression', hint: '「式」タブから入力。"項目の取得" の部分はアクション名と一致させる。' },
-        { field: 'Message (HTML)', value: '(下記サンプル参照)', type: 'static', hint: 'メッセージ欄を HTML 入力モードに切り替え、下のサンプルを貼り付け。' },
+        { field: 'Subject', value: "if(empty(triggerOutputs()?['body/Subject']), concat('[#', triggerOutputs()?['body/TicketId'], '] ', body('項目の取得')?['Title']), triggerOutputs()?['body/Subject'])", type: 'expression', hint: 'Spira 起票モーダルで入力された Subject 列があればそれを優先、空ならチケットタイトルからテンプレ生成。fx タブから入力。' },
+        { field: 'Message (HTML)', value: "if(empty(triggerOutputs()?['body/BodyHtml']), '<下記サンプル参照>', concat(variables('mentionsHtml'), triggerOutputs()?['body/BodyHtml']))", type: 'expression', hint: 'BodyHtml 列 (起票モーダルで編集された本文) を使い、先頭に mentionsHtml (<at> タグ列) を連結する。空のときは下のサンプル HTML をテンプレに使う構成も可。' },
+        { field: 'Mentions (詳細オプション)', value: "variables('mentionsArray')", type: 'expression', hint: 'STEP 3c で組み立てた mentions オブジェクトの配列。空配列でも OK。' },
       ],
       extra: [
-        el('p', { style: 'margin:var(--s-3) 0 var(--s-2);font-size:var(--fs-sm);color:var(--ink-2)' }, ['投稿本文 HTML サンプル:']),
+        el('p', { style: 'margin:var(--s-3) 0 var(--s-2);font-size:var(--fs-sm);color:var(--ink-2)' }, [
+          '投稿本文 HTML サンプル (BodyHtml が空のときのフォールバック):',
+        ]),
         codeBlock(
           '<h3>[#@{triggerOutputs()?[\'body/TicketId\']}] @{body(\'項目の取得\')?[\'Title\']}</h3>\n' +
           '<p><b>影響度:</b> @{body(\'項目の取得\')?[\'Priority\']} / <b>ステータス:</b> @{body(\'項目の取得\')?[\'Status\']}</p>\n' +
           '<p>@{body(\'項目の取得\')?[\'Description\']}</p>\n' +
           '<hr><p><i>このメッセージは Spira から自動投稿されています。</i></p>'
+        ),
+        el('p', { style: 'margin:var(--s-3) 0 var(--s-2);font-size:var(--fs-sm);color:var(--ink-2)' }, [
+          'mentionsHtml の組み立て (フロー先頭で文字列変数として初期化、STEP 3c のループ内で <at> タグを追記):',
+        ]),
+        codeBlock(
+          '<!-- variables(\'mentionsHtml\') の中身イメージ -->\n' +
+          '<at id="0">山田 太郎</at> <at id="1">佐藤 花子</at> '
         ),
       ],
     }),

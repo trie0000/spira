@@ -1578,6 +1578,12 @@ export class SpRepository implements Repository {
   async createTeamsPostRequest(params: {
     ticketId: number;
     threadType: 'internal' | 'user';
+    /** Teams 親メッセージの件名 (subject)。省略時は PA 側のテンプレート任せ。 */
+    subject?: string;
+    /** 投稿本文 (HTML)。省略時は PA 側のテンプレート任せ。 */
+    bodyHtml?: string;
+    /** メンション対象のメールアドレス。PA 側で AAD ObjectId に解決して <at> 化。 */
+    mentionedEmails?: string[];
   }): Promise<{ id: number }> {
     // 起票時点でチャネル設定を解決。未設定でも行は作る (PA 側で空文字で
     // 失敗 → エラー通知という流れに乗せる方がデバッグしやすい)。
@@ -1595,6 +1601,11 @@ export class SpRepository implements Repository {
       }
     } catch { /* fall through with empty ids */ }
 
+    const mentionsCsv = (params.mentionedEmails ?? [])
+      .map(e => e.trim().toLowerCase())
+      .filter(Boolean)
+      .join(',');
+
     const body: Record<string, unknown> = {
       Title: `teams-post-${params.ticketId}-${params.threadType}-${Date.now()}`,
       TicketId: params.ticketId,
@@ -1603,6 +1614,9 @@ export class SpRepository implements Repository {
       TeamId: teamId,
       RequestedAt: new Date().toISOString(),
       Status: 'Pending',
+      Subject: params.subject ?? null,
+      BodyHtml: params.bodyHtml ? encodeSpContent(params.bodyHtml) : null,
+      MentionedEmails: mentionsCsv || null,
     };
     const created = await this.tx.req<SpListItem>(
       `${this.listPath(this.cfg.listTeamsPostRequests)}/items`,
@@ -1613,7 +1627,12 @@ export class SpRepository implements Repository {
       ticketId: params.ticketId,
       targetType: 'teams',
       targetId: created.Id,
-      details: { threadType: params.threadType, channelId, teamId },
+      details: {
+        threadType: params.threadType, channelId, teamId,
+        hasSubject: !!params.subject,
+        hasBody: !!params.bodyHtml,
+        mentions: (params.mentionedEmails ?? []).length,
+      },
     });
     return { id: created.Id };
   }
@@ -1935,6 +1954,16 @@ function teamsPostRequestFieldSpecs(): FieldSpec[] {
     { name: 'RequestedAt', type: 'DateTime' },
     { name: 'Status', type: 'Choice', choices: ['Pending', 'Completed', 'Failed'] },
     { name: 'ErrorMessage', type: 'Note' },
+    // Spira からチケット起票時にユーザが「タイトル」「本文」「メンション対象」を
+    // 直接編集できるよう、3 つの列を追加。
+    //   - Subject:        Teams 親メッセージの件名 (subject) として渡す
+    //   - BodyHtml:       本文 (HTML 可)。PA はそのまま投稿 body に使う
+    //   - MentionedEmails: メンションしたいユーザの email カンマ区切り。
+    //                     PA 側で Get user profile (V2) → AAD ObjectId を引いて
+    //                     <at> タグ + mentions[] を組み立てる。
+    { name: 'Subject', type: 'Text' },
+    { name: 'BodyHtml', type: 'NoteRich' },
+    { name: 'MentionedEmails', type: 'Text' },
   ];
 }
 
