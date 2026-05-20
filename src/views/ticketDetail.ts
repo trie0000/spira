@@ -4,7 +4,7 @@ import { ticketStatusList, priorityList } from '../api/sp';
 import { getRepo } from '../api/repo';
 import { setState, getState } from '../state';
 import { renderMailBody } from '../utils/sanitize';
-import { openOutlookReplyDraft, pingRelay, getRelayOrigin } from '../utils/spiraRelay';
+import { openOutlookReplyDraft, openOutlookNewDraft, pingRelay, getRelayOrigin } from '../utils/spiraRelay';
 import { createNoteEditor, htmlToMarkdown } from '../lib/note-editor';
 import { formatTicketTag, formatTicketIdShort, buildCopyableSubject } from '../utils/ticketTag';
 
@@ -60,39 +60,48 @@ export async function renderTicketDetail(ticketId: number): Promise<HTMLElement>
 
   const latestReceived = comments.filter(c => c.type === 'received').slice(-1)[0];
 
-  // 「返信メール作成」ボタンの返信ターゲット候補:
-  //   優先 1: 外部スレッド (threadKind != 'internal') の受信履歴で
-  //           fromEmail が取れている最新のもの → 正規 Reply 用に
-  //           InternetMessageId をリレーに渡せる
-  //   優先 2: チケットの reporterEmail → 新規メール作成にフォールバック
-  //           (受信履歴ゼロ / Forms 経由で respondent 不明 / 手動起票
-  //            のケースを救済)
-  // 両方無ければボタンを disable。
+  // 返信メール作成の動作モードを決定:
+  //   reply モード: 外部対応経緯にメール source の受信履歴が 1 件以上ある
+  //                 → 最新の 1 件を返信対象として relay 経由で Outlook に
+  //                   正規 Reply 下書きを開かせる。検索キーは送信時刻 +
+  //                   送信者 (= operator の Outlook 内で一意に決まる前提)。
+  //   new モード:   外部対応経緯にメール履歴が無い (Forms 起票 / 手動起票 /
+  //                 Teams 起票のみ等) → 新規メール下書きを開く。件名は
+  //                 「[#NNNNN] チケットタイトル」、本文はテンプレ回答文、
+  //                 宛先は reporterEmail (取れていれば)。
+  //   どちらの宛先も取れない場合のみボタンを disable。
   const latestExternalMail = comments
     .filter(c =>
       c.type === 'received' &&
       c.threadKind !== 'internal' &&
-      !!c.fromEmail
+      c.source === 'mail' &&
+      !!c.fromEmail &&
+      !!c.sentAt
     )
     .slice(-1)[0];
-  const replyTarget: ReplyComposerTarget | undefined =
-    latestExternalMail
-      ? {
-          toEmail: latestExternalMail.fromEmail!,
-          toName: latestExternalMail.fromName ?? '',
-          inReplyToInternetMessageId: latestExternalMail.internetMessageId,
-          sourceLabel: '外部対応経緯の最後の受信',
-          sourceSentAt: latestExternalMail.sentAt,
-        }
-      : (t.reporterEmail
-          ? {
-              toEmail: t.reporterEmail,
-              toName: t.reporterName ?? '',
-              inReplyToInternetMessageId: undefined,
-              sourceLabel: 'チケットの申請者',
-              sourceSentAt: undefined,
-            }
-          : undefined);
+  const replyTarget: ReplyComposerTarget | undefined = (() => {
+    if (latestExternalMail) {
+      return {
+        mode: 'reply',
+        toEmail: latestExternalMail.fromEmail!,
+        toName: latestExternalMail.fromName ?? '',
+        sourceSentAt: latestExternalMail.sentAt,
+        defaultSubject: `Re: ${formatTicketTag(t.id)} ${t.title}`,
+        defaultBody: '',
+      };
+    }
+    if (t.reporterEmail) {
+      return {
+        mode: 'new',
+        toEmail: t.reporterEmail,
+        toName: t.reporterName ?? '',
+        sourceSentAt: undefined,
+        defaultSubject: `${formatTicketTag(t.id)} ${t.title}`,
+        defaultBody: buildNewReplyTemplate(t),
+      };
+    }
+    return undefined;
+  })();
 
   // Snapshot the user's PREVIOUS last-seen timestamp for this ticket
   // BEFORE stamping the current visit. Cards with sentAt > prevLastSeen
@@ -667,17 +676,15 @@ function buildTicketActions(
   latestReceived: Comment | undefined,
   replyTarget: ReplyComposerTarget | undefined,
 ): HTMLElement[] {
-  // 返信メール作成ボタン: 返信ターゲット (外部対応経緯の最新受信 or
-  // チケットの申請者) を対象にローカル中継 (spira-relay.ps1) 経由で
-  // Outlook クライアントに正規返信下書きを開かせる。
-  // InternetMessageId が無い場合 (申請者フォールバック / 受信履歴が
-  // Teams 等で ID 無し) は OWA Compose にフォールバック。
+  // 返信メール作成ボタン: 返信ターゲットを relay 経由で operator の
+  // Outlook クライアントに渡して下書き表示する。reply / new の 2 モード
+  // (詳細は openReplyComposerModal / ReplyComposerTarget のコメント参照)。
   const replyBtn = el('button', {
     class: 'spira-btn spira-btn--ghost spira-btn--sm',
     title: replyTarget
-      ? (replyTarget.inReplyToInternetMessageId
-          ? `${replyTarget.sourceLabel} (${replyTarget.toName || replyTarget.toEmail}) への返信下書きを Outlook で開きます`
-          : `${replyTarget.sourceLabel} (${replyTarget.toName || replyTarget.toEmail}) 宛に新規メール作成画面を開きます (受信履歴の InternetMessageId が無いため OWA Compose にフォールバック)`)
+      ? (replyTarget.mode === 'reply'
+          ? `外部対応経緯の最後のメール (${replyTarget.toName || replyTarget.toEmail}) への返信下書きを Outlook で開きます`
+          : `申請者 (${replyTarget.toName || replyTarget.toEmail}) 宛に問い合わせ回答メール (新規) を Outlook で開きます。次の返信は件名タグで自動紐付け`)
       : '宛先が取得できないため返信を作成できません (外部対応経緯にメール履歴がなく、申請者メールアドレスも未設定)',
     disabled: !replyTarget,
     onclick: () => {
@@ -888,32 +895,64 @@ function buildTeamsThreadButton(activeT: Ticket, threadType: 'internal' | 'user'
 }
 
 /** 返信メール作成モーダルの「返信ターゲット」抽象。
- *  - 外部対応経緯の最新受信 (= 正規 Reply 可) なら inReplyToInternetMessageId 有り
- *  - 申請者メールフォールバック (= 新規 Compose) なら inReplyToInternetMessageId 無し */
+ *
+ *  mode:
+ *    'reply' — 外部対応経緯の最新メール (source=mail) への正規 Reply。relay が
+ *              送信時刻 + 送信者キーで Outlook 内を検索 → .Reply() で下書き。
+ *    'new'   — 受信メール履歴が無いチケット (Forms / 手動 / Teams のみ等)。
+ *              テンプレ件名 + テンプレ本文 + 宛先で Outlook 新規メール下書き。
+ *              次回の返信からは件名タグで自動 auto-link が効く。
+ */
 interface ReplyComposerTarget {
+  mode: 'reply' | 'new';
   toEmail: string;
   toName: string;
-  inReplyToInternetMessageId: string | undefined;
-  sourceLabel: string;     // 表示用 (例: '外部対応経緯の最後の受信' / 'チケットの申請者')
-  sourceSentAt: string | undefined;  // 表示用 (受信時刻)
+  /** reply モード時の元メール送信時刻 (relay の検索キー)。 */
+  sourceSentAt: string | undefined;
+  defaultSubject: string;
+  defaultBody: string;
+}
+
+/** 新規メール下書きに入れるデフォルトのテンプレ回答文。
+ *  チケットの件名を引用しつつ、admin がそのまま編集して送れる粒度に。 */
+function buildNewReplyTemplate(t: Ticket): string {
+  const tag = formatTicketTag(t.id);
+  return [
+    `${t.reporterName ? `${t.reporterName} 様` : 'お客様'}`,
+    '',
+    'お世話になっております。',
+    `お問い合わせ ${tag}「${t.title}」を確認しました。`,
+    '',
+    '(ここに回答内容を記載してください)',
+    '',
+    '※ 本件についてのご返信は本メールへの返信でお願いします',
+    '  (件名のチケット ID タグは変更せずにご返信ください)。',
+    '',
+    'よろしくお願いいたします。',
+  ].join('\n');
 }
 
 /** 申請者への返信メール作成モーダル。
  *
- *  返信対象 (ReplyComposerTarget) は外部対応経緯の最終メールか、
- *  チケットの申請者 (フォールバック) のいずれか。inReplyToInternetMessageId
- *  があれば relay 経由で Outlook の正規 Reply 下書きを開く。無ければ
- *  OWA Compose にフォールバック (新規メール作成)。
+ *  動作は 2 モード:
+ *   - reply: 外部対応経緯の最後のメール (source=mail) に対する正規 Reply。
+ *            relay が「送信時刻 + 送信者」キーで operator の Outlook 内を
+ *            検索 → .Reply() で下書き表示。In-Reply-To / References 自動付与。
+ *   - new:   受信メール履歴の無いチケット (Forms / 手動 / Teams のみ) で、
+ *            申請者宛に新規メールを作成。件名にチケット ID タグ、本文に
+ *            テンプレ回答文を入れた状態で Outlook 新規メール下書きを開く。
+ *
+ *  どちらも relay 経由 (Outlook クライアント必須)。relay が落ちている /
+ *  Outlook が起動していない / 元メールが見つからない時は エラートーストで
+ *  停止し、operator に relay の起動を促す (= OWA フォールバックは廃止)。
  *
  *  本文 textarea は「プレーンテキスト 入力 + 改行 → <br> 化」。HTML タグを
  *  直書きしたい場合はそのまま貼っても OK (簡易判定で生 HTML を尊重)。 */
 function openReplyComposerModal(activeT: Ticket, target: ReplyComposerTarget): void {
+  void activeT; // 現状チケット引数は使わないが、将来的な拡張 (添付 / 署名等) のため受け取る
   const fromAddress = target.toEmail.trim();
   const fromName = target.toName.trim();
-  // 返信件名: タグ付きで `Re: [#NNN] チケットタイトル` を既定。元メール件名は
-  // 申請者側で「ML プレフィックス + フォワード混入」等で揺れがちなので、
-  // チケットタイトルから組み立てた方が安定。ユーザは編集可能。
-  const defaultSubject = `Re: ${formatTicketTag(activeT.id)} ${activeT.title}`;
+  const isReply = target.mode === 'reply';
 
   // 入力ウィジェット
   const toInput = el('input', {
@@ -928,32 +967,34 @@ function openReplyComposerModal(activeT: Ticket, target: ReplyComposerTarget): v
   }) as HTMLInputElement;
   const subjectInput = el('input', {
     type: 'text', class: 'spira-input', style: 'width:100%',
-    value: defaultSubject,
+    value: target.defaultSubject,
   }) as HTMLInputElement;
   const bodyTextarea = el('textarea', {
     class: 'spira-input',
-    rows: '10',
+    rows: '12',
     style: 'width:100%;resize:vertical;font:var(--fs-sm)/1.55 ui-sans-serif,system-ui,sans-serif',
-    placeholder: '本文を入力。Outlook 側で元メールの引用が自動で続きます。',
+    placeholder: isReply
+      ? '本文を入力。Outlook 側で元メールの引用が自動で続きます。'
+      : '回答内容を編集して Outlook で送信してください。',
   }) as HTMLTextAreaElement;
+  bodyTextarea.value = target.defaultBody;
 
-  // ステータス行 (relay 接続確認 / フォールバック案内)
+  // ステータス行 (relay 接続確認)
   const statusLine = el('div', {
     style: 'font-size:var(--fs-xs);color:var(--ink-3);line-height:1.6',
   }, []);
-  // 並行で relay の死活確認 → 結果に応じてステータス文面を変える。
   void (async () => {
     const alive = await pingRelay();
     statusLine.innerHTML = '';
     if (alive) {
       statusLine.appendChild(el('span', { style: 'color:#4a7c59' }, [
-        `✓ ローカル中継 (${getRelayOrigin()}) に接続できました。Outlook で正規 Reply 下書きが開きます。`,
+        `✓ ローカル中継 (${getRelayOrigin()}) に接続できました。Outlook クライアントで下書きが開きます。`,
       ]));
     } else {
       statusLine.appendChild(el('span', { style: 'color:#c47f1c' }, [
-        '⚠ ローカル中継に接続できません。OWA Compose にフォールバック (件名・本文は反映されますが、メールスレッドは継続しません)。',
+        `⚠ ローカル中継 (${getRelayOrigin()}) に接続できません。`,
         el('br', {}, []),
-        `期待ポート: ${getRelayOrigin()} — spira-relay.ps1 が起動しているか確認してください。`,
+        'spira-ai-relay.ps1 が起動していない可能性があります。起動してから再試行してください。',
       ]));
     }
   })();
@@ -963,28 +1004,32 @@ function openReplyComposerModal(activeT: Ticket, target: ReplyComposerTarget): v
            'text-transform:uppercase;letter-spacing:0.04em;margin-bottom:4px',
   }, [text]);
 
-  const replySourceBox = el('div', {
+  const sourceBox = el('div', {
     style: 'background:var(--paper-2);border:1px solid var(--line);' +
            'border-radius:var(--r-2);padding:6px 10px;font-size:var(--fs-xs);' +
            'color:var(--ink-3);line-height:1.5',
   }, [
-    el('span', {}, [`返信対象 (${target.sourceLabel}): `]),
-    el('strong', { style: 'color:var(--ink-2)' }, [fromName || fromAddress || '(差出人不明)']),
+    el('span', {}, [isReply ? '🔁 返信対象 (外部対応経緯の最後のメール): ' : '✉ 新規メール作成 (受信メール履歴なし)。宛先: ']),
+    el('strong', { style: 'color:var(--ink-2)' }, [fromName || fromAddress || '(宛先未設定)']),
     ...(fromAddress && fromName ? [el('span', {}, [` <${fromAddress}>`])] : []),
-    ...(target.sourceSentAt ? [
+    ...(isReply && target.sourceSentAt ? [
       el('br', {}, []),
-      el('span', {}, [`受信時刻: ${fmtDate(target.sourceSentAt)}`]),
+      el('span', {}, [`元メール送信時刻: ${fmtDate(target.sourceSentAt)}`]),
+      el('br', {}, []),
+      el('span', { style: 'color:var(--ink-3)' }, [
+        '検索キー: 送信時刻 + 送信者 (operator の Outlook 内を全フォルダ検索)',
+      ]),
     ] : []),
-    el('br', {}, []),
-    el('span', { style: 'font-family:var(--font-mono);font-size:11px;word-break:break-all' }, [
-      target.inReplyToInternetMessageId
-        ? `InternetMessageId: ${target.inReplyToInternetMessageId}`
-        : '※ 受信履歴の InternetMessageId が無いため OWA Compose で新規メール作成画面を開きます',
-    ]),
+    ...(!isReply ? [
+      el('br', {}, []),
+      el('span', { style: 'color:var(--ink-3)' }, [
+        '次回の申請者からの返信は件名のチケット ID タグで自動的にこのチケットに紐付きます。',
+      ]),
+    ] : []),
   ]);
 
   const body = el('div', { style: 'display:flex;flex-direction:column;gap:var(--s-4);line-height:1.6' }, [
-    replySourceBox,
+    sourceBox,
     el('div', {}, [sectionLabel('To'), toInput]),
     el('div', {}, [sectionLabel('Cc (任意)'), ccInput]),
     el('div', {}, [sectionLabel('件名'), subjectInput]),
@@ -992,7 +1037,7 @@ function openReplyComposerModal(activeT: Ticket, target: ReplyComposerTarget): v
     statusLine,
   ]);
 
-  /** ボディの HTML 化 (chat 起票モーダルと同じロジック)。 */
+  /** ボディの HTML 化 (改行 → <br>、HTML タグ含むなら原文尊重)。 */
   const composeBodyHtml = (raw: string): string => {
     const hasHtml = /<\/?(?:p|br|strong|em|a|ul|ol|li|h\d|div|span)\b/i.test(raw);
     if (hasHtml) return raw;
@@ -1000,21 +1045,8 @@ function openReplyComposerModal(activeT: Ticket, target: ReplyComposerTarget): v
     return `<p>${esc.replace(/\n/g, '<br>')}</p>`;
   };
 
-  /** OWA Compose URL を組み立ててブラウザで開くフォールバック。
-   *  relay が落ちている / 元メールが見つからないときに使う。
-   *  正規 Reply ヘッダは付かないが、件名・本文・宛先はプリフィルされる。 */
-  const openOwaCompose = (): void => {
-    const params = new URLSearchParams();
-    if (toInput.value.trim()) params.set('to', toInput.value.trim());
-    if (ccInput.value.trim()) params.set('cc', ccInput.value.trim());
-    params.set('subject', subjectInput.value.trim());
-    params.set('body', bodyTextarea.value);  // OWA は HTML タグも受け付ける
-    const url = 'https://outlook.office.com/mail/deeplink/compose?' + params.toString();
-    window.open(url, '_blank', 'noopener');
-  };
-
   openModal(getRoot(), {
-    title: '📧 申請者に返信メールを作成',
+    title: isReply ? '📧 申請者に返信メールを作成 (Reply)' : '📧 申請者に問い合わせ回答メールを作成 (新規)',
     body,
     size: 'lg',
     primaryLabel: 'Outlook で下書きを開く',
@@ -1035,37 +1067,39 @@ function openReplyComposerModal(activeT: Ticket, target: ReplyComposerTarget): v
       const cc = ccInput.value
         .split(/[,\s]+/).map(s => s.trim()).filter(Boolean);
 
-      // relay 経由の正規 Reply を試す (InternetMessageId がある場合のみ)
-      if (target.inReplyToInternetMessageId) {
-        const result = await openOutlookReplyDraft({
-          inReplyTo: target.inReplyToInternetMessageId,
-          bodyHtml,
-          cc,
-        });
-        if (result.ok) {
-          toast(getRoot(), 'Outlook で下書きを開きました。内容を確認してから送信してください。', 'ok', 6000);
-          return;
-        }
-        // フォールバック判定 (元メールが Outlook で見つからない / relay 不通)
-        if (result.errorCode === 'message-not-found') {
-          toast(getRoot(),
-            'Outlook 内に元メールが見つかりませんでした。OWA で新規メール作成にフォールバックします。',
-            'warn', 6000);
-        } else if (result.errorCode === 'relay-unreachable') {
-          toast(getRoot(),
-            'ローカル中継に接続できません。OWA で新規メール作成にフォールバックします。',
-            'warn', 6000);
-        } else {
-          toast(getRoot(),
-            `Outlook 下書き作成に失敗: ${result.error ?? '(詳細不明)'} → OWA にフォールバック`,
-            'warn', 8000);
-        }
-      } else {
+      const result = isReply
+        ? await openOutlookReplyDraft({
+            sentAtIso: target.sourceSentAt ?? '',
+            fromEmail: target.toEmail,
+            bodyHtml,
+            cc,
+          })
+        : await openOutlookNewDraft({
+            to,
+            subject,
+            bodyHtml,
+            cc,
+          });
+
+      if (result.ok) {
         toast(getRoot(),
-          '元メールに InternetMessageId が無いため OWA Compose を開きます (件名タグでスレッドを維持してください)',
-          'warn', 6000);
+          'Outlook で下書きを開きました。内容を確認してから送信してください。',
+          'ok', 6000);
+        return;
       }
-      openOwaCompose();
+
+      // フォールバックは廃止。エラー種別ごとにユーザに案内のみ出す。
+      let msg = result.error ?? '(詳細不明)';
+      if (result.errorCode === 'relay-unreachable') {
+        msg = `ローカル中継 (${getRelayOrigin()}) に接続できません。spira-ai-relay.ps1 を起動してから再試行してください。`;
+      } else if (result.errorCode === 'message-not-found') {
+        msg = '元メールが Outlook 内で見つかりませんでした (送信時刻 + 送信者で検索)。' +
+              'operator の Outlook に元メールが届いていない / 完全削除済みの可能性があります。';
+      } else if (result.errorCode === 'outlook-not-running') {
+        msg = 'Outlook クライアントが起動していない可能性があります。Outlook を起動してから再試行してください。';
+      }
+      toast(getRoot(), `下書きを開けませんでした: ${msg}`, 'error', 10000);
+      throw new Error(result.errorCode ?? 'relay-failed');
     },
   });
 }

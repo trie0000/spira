@@ -209,7 +209,8 @@ if ($SkipCertCheck) { Write-Host '  ⚠ SSL 検証スキップ中 (-SkipCertChec
 Write-Host ('─' * 72)
 Write-Host 'ローカル機能エンドポイント (Spira UI が直接叩く):'
 Write-Host "  GET  $baseUrlShort/spira/health"
-Write-Host "  POST $baseUrlShort/spira/outlook/reply"
+Write-Host "  POST $baseUrlShort/spira/outlook/reply  (既存メールに対する正規 Reply 下書き、検索キー: 送信時刻 + 送信者)"
+Write-Host "  POST $baseUrlShort/spira/outlook/new    (新規メール下書き、To / Subject / Body 直接指定)"
 if ($Target) {
     Write-Host ''
     Write-Host 'Spira の「AI 設定」モーダルでベース URL に下記いずれかを入力:'
@@ -286,56 +287,92 @@ function Send-Json {
     finally { try { $Response.OutputStream.Close() } catch { } }
 }
 
-# 指定 InternetMessageId に一致するメールを Outlook ストア全体から探す。
-# 1) まず GetDefaultFolder(Inbox) を Items.Find で軽く探索 (高速、典型ケース)
-# 2) ヒットしなければ AdvancedSearch で Store ごとに SearchSubFolders=true。
-#    operator の個人ルールでサブフォルダに振り分けられたメールも見つかる。
+# Outlook COM 取得ヘルパ (起動中ならアタッチ、止まっていれば起動)。
+# 戻り値: COM オブジェクト or $null
+function Get-OutlookOrNull {
+    try {
+        try { return [Runtime.InteropServices.Marshal]::GetActiveObject('Outlook.Application') }
+        catch { return (New-Object -ComObject Outlook.Application) }
+    } catch { return $null }
+}
+
+# 「送信時刻 (分単位) + 送信者メール」で operator の Outlook ストア全体を
+# 検索する。Spira 側は Comments.sentAt (ISO 8601) + Comments.fromEmail を
+# 持っているので、これだけで一意に決まる前提。
+# 1) Inbox 直探索 (Items.Restrict)
+# 2) ヒット無しなら AdvancedSearch で全 Store / 全フォルダ再帰
 # 戻り値: 見つかった MailItem (COM) または $null
-function Find-OutlookMessageByInternetMessageId {
+function Find-OutlookMessageBySenderAndTime {
     param(
         $Outlook,
-        [string]$InternetMessageId
+        [string]$FromEmail,
+        [string]$SentAtIso
     )
-    $ns   = $Outlook.GetNamespace('MAPI')
-    $tag  = 'http://schemas.microsoft.com/mapi/proptag/0x1035001E'
-    $dasl = '@SQL="' + $tag + '" = ''' + ($InternetMessageId -replace "'", "''") + ''''
+    if (-not $FromEmail -or -not $SentAtIso) { return $null }
+    $ns = $Outlook.GetNamespace('MAPI')
 
-    # 1) Inbox 直探索 (Items.Find は高速)
+    # 送信時刻の前後 1 分でレンジ検索 (clock skew / 秒切り捨て差吸収)
+    $sent = $null
+    try { $sent = [DateTime]::Parse($SentAtIso).ToUniversalTime() } catch { return $null }
+    $from = $sent.AddMinutes(-1).ToString('yyyy-MM-dd HH:mm:ss')
+    $to   = $sent.AddMinutes( 1).ToString('yyyy-MM-dd HH:mm:ss')
+
+    # DASL 句: SentOn (PR_CLIENT_SUBMIT_TIME) のレンジ + sender email
+    # PR_SENT_REPRESENTING_SMTP_ADDRESS (0x5D02001F) を使うと SMTP 表記で
+    # ヒットしやすい (EX 形式の /o=ExchangeLabs/... を回避)。
+    $tagTime   = 'urn:schemas:httpmail:datereceived'   # 受信時刻ベース (一致しやすい)
+    $tagTime2  = 'urn:schemas:httpmail:date'           # 送信時刻
+    $tagSender = 'http://schemas.microsoft.com/mapi/proptag/0x5D01001F'  # PR_SENT_REPRESENTING_SMTP_ADDRESS
+
+    $safeFrom = ($FromEmail -replace "'", "''").Trim()
+    # 時刻はまず送信時刻 (Date) で広く、ダメなら受信時刻でも試す。
+    $daslPrimary = "@SQL=""$tagSender"" = '$safeFrom' AND ""$tagTime2"" >= '$from' AND ""$tagTime2"" <= '$to'"
+    $daslSecondary = "@SQL=""$tagSender"" = '$safeFrom' AND ""$tagTime"" >= '$from' AND ""$tagTime"" <= '$to'"
+
+    # 1) Inbox を Restrict で絞ってから最新を取る (Items.Find / Restrict は同等)
     try {
         $inbox = $ns.GetDefaultFolder(6)  # olFolderInbox
-        $hit   = $inbox.Items.Find($dasl)
-        if ($hit) { return $hit }
+        foreach ($dasl in @($daslPrimary, $daslSecondary)) {
+            try {
+                $sub = $inbox.Items.Restrict($dasl)
+                if ($sub.Count -ge 1) {
+                    # 複数ヒット時は送信時刻が一番近いものを採用 (理論上 1 件のはず)
+                    return $sub.Item(1)
+                }
+            } catch { }
+        }
     } catch { }
 
-    # 2) 全 Store / 全フォルダの AdvancedSearch (Inbox 外への振り分け対応)
+    # 2) 全 Store / 全フォルダの AdvancedSearch
     try {
         foreach ($store in $ns.Stores) {
             $root = $null
             try { $root = $store.GetRootFolder() } catch { continue }
             if (-not $root) { continue }
             $scope = "'" + $root.FolderPath + "'"
-            $search = $null
-            try {
-                $search = $Outlook.AdvancedSearch($scope, $dasl, $true, 'spira-find')
-            } catch { continue }
-            # AdvancedSearch は非同期。完了イベントを Bind せず簡易ポーリング。
-            $waitMs = 0
-            while ($waitMs -lt 5000) {
-                Start-Sleep -Milliseconds 100
-                $waitMs += 100
+            foreach ($dasl in @($daslPrimary, $daslSecondary)) {
+                $search = $null
                 try {
-                    if ($search.Results -and $search.Results.Count -gt 0) {
-                        return $search.Results.Item(1)
-                    }
-                } catch { }
+                    $search = $Outlook.AdvancedSearch($scope, $dasl, $true, 'spira-find')
+                } catch { continue }
+                $waitMs = 0
+                while ($waitMs -lt 5000) {
+                    Start-Sleep -Milliseconds 100
+                    $waitMs += 100
+                    try {
+                        if ($search.Results -and $search.Results.Count -gt 0) {
+                            return $search.Results.Item(1)
+                        }
+                    } catch { }
+                }
             }
         }
     } catch { }
     return $null
 }
 
-# /spira/outlook/reply 本体。
-# 入力 JSON: { inReplyTo: string, bodyHtml: string, cc?: string[] }
+# POST /spira/outlook/reply
+# 入力 JSON: { sentAtIso: string, fromEmail: string, bodyHtml: string, cc?: string[] }
 function Invoke-OutlookReplyHandler {
     param(
         [System.Net.HttpListenerRequest]$Request,
@@ -348,7 +385,6 @@ function Invoke-OutlookReplyHandler {
         return
     }
 
-    # JSON 入力読込
     $payload = $null
     try {
         $reader = New-Object System.IO.StreamReader($Request.InputStream, $Request.ContentEncoding)
@@ -360,40 +396,34 @@ function Invoke-OutlookReplyHandler {
             -Body @{ ok = $false; error = @{ code = 'bad_json'; detail = $_.Exception.Message } }
         return
     }
-    if (-not $payload -or -not $payload.inReplyTo) {
+    if (-not $payload -or -not $payload.sentAtIso -or -not $payload.fromEmail) {
         Send-Json -Response $Response -Status 400 `
-            -Body @{ ok = $false; error = @{ code = 'missing_field'; detail = 'inReplyTo is required' } }
+            -Body @{ ok = $false; error = @{ code = 'missing_field'; detail = 'sentAtIso and fromEmail are required' } }
         return
     }
 
-    # Outlook COM 取得 (起動中ならアタッチ、止まっていれば起動)
-    $outlook = $null
-    try {
-        try { $outlook = [Runtime.InteropServices.Marshal]::GetActiveObject('Outlook.Application') }
-        catch { $outlook = New-Object -ComObject Outlook.Application }
-    } catch {
+    $outlook = Get-OutlookOrNull
+    if (-not $outlook) {
         Send-Json -Response $Response -Status 500 `
-            -Body @{ ok = $false; error = @{ code = 'outlook_not_available'; detail = $_.Exception.Message } }
+            -Body @{ ok = $false; error = @{ code = 'outlook_not_available'; detail = 'Failed to acquire Outlook.Application COM' } }
         return
     }
 
-    # 元メール検索
     $orig = $null
     try {
-        $orig = Find-OutlookMessageByInternetMessageId -Outlook $outlook -InternetMessageId $payload.inReplyTo
+        $orig = Find-OutlookMessageBySenderAndTime -Outlook $outlook `
+                  -FromEmail $payload.fromEmail -SentAtIso $payload.sentAtIso
     } catch { }
     if (-not $orig) {
         Send-Json -Response $Response -Status 404 `
-            -Body @{ ok = $false; error = @{ code = 'message_not_found'; detail = "InternetMessageId not found in any local Outlook store: $($payload.inReplyTo)" } }
+            -Body @{ ok = $false; error = @{ code = 'message_not_found'; detail = "Mail not found by sentAtIso=$($payload.sentAtIso) fromEmail=$($payload.fromEmail)" } }
         return
     }
 
-    # 正規 Reply 下書きを生成 + 編集本文を冒頭に prepend + Cc 追記 + Display
     try {
         $reply = $orig.Reply()
         $bodyHtml = "$($payload.bodyHtml)"
         if ($bodyHtml) {
-            # Outlook が自動生成する引用本文の上に prepend
             $reply.HTMLBody = $bodyHtml + $reply.HTMLBody
         }
         if ($payload.cc) {
@@ -409,6 +439,63 @@ function Invoke-OutlookReplyHandler {
     } catch {
         Send-Json -Response $Response -Status 500 `
             -Body @{ ok = $false; error = @{ code = 'outlook_reply_failed'; detail = $_.Exception.Message } }
+    }
+}
+
+# POST /spira/outlook/new
+# 入力 JSON: { to: string, subject: string, bodyHtml: string, cc?: string[] }
+# 新規メール下書きを Outlook で開く (In-Reply-To 無し)。
+function Invoke-OutlookNewHandler {
+    param(
+        [System.Net.HttpListenerRequest]$Request,
+        [System.Net.HttpListenerResponse]$Response
+    )
+
+    if ($Request.HttpMethod.ToUpper() -ne 'POST') {
+        Send-Json -Response $Response -Status 405 `
+            -Body @{ ok = $false; error = @{ code = 'method_not_allowed'; detail = 'POST only' } }
+        return
+    }
+
+    $payload = $null
+    try {
+        $reader = New-Object System.IO.StreamReader($Request.InputStream, $Request.ContentEncoding)
+        $raw    = $reader.ReadToEnd()
+        $reader.Dispose() | Out-Null
+        if ($raw) { $payload = $raw | ConvertFrom-Json }
+    } catch {
+        Send-Json -Response $Response -Status 400 `
+            -Body @{ ok = $false; error = @{ code = 'bad_json'; detail = $_.Exception.Message } }
+        return
+    }
+    if (-not $payload -or -not $payload.to -or -not $payload.subject) {
+        Send-Json -Response $Response -Status 400 `
+            -Body @{ ok = $false; error = @{ code = 'missing_field'; detail = 'to and subject are required' } }
+        return
+    }
+
+    $outlook = Get-OutlookOrNull
+    if (-not $outlook) {
+        Send-Json -Response $Response -Status 500 `
+            -Body @{ ok = $false; error = @{ code = 'outlook_not_available'; detail = 'Failed to acquire Outlook.Application COM' } }
+        return
+    }
+
+    try {
+        # 0 = olMailItem
+        $mail = $outlook.CreateItem(0)
+        $mail.Subject = [string]$payload.subject
+        $mail.To      = [string]$payload.to
+        if ($payload.cc) {
+            $ccLine = ($payload.cc | Where-Object { $_ }) -join '; '
+            if ($ccLine) { $mail.CC = $ccLine }
+        }
+        $mail.HTMLBody = [string]$payload.bodyHtml
+        $mail.Display()
+        Send-Json -Response $Response -Status 200 -Body @{ ok = $true }
+    } catch {
+        Send-Json -Response $Response -Status 500 `
+            -Body @{ ok = $false; error = @{ code = 'outlook_new_failed'; detail = $_.Exception.Message } }
     }
 }
 
@@ -439,6 +526,10 @@ function Invoke-RelayRequest {
     }
     if ($path -eq '/spira/outlook/reply') {
         Invoke-OutlookReplyHandler -Request $request -Response $response
+        return
+    }
+    if ($path -eq '/spira/outlook/new') {
+        Invoke-OutlookNewHandler -Request $request -Response $response
         return
     }
 

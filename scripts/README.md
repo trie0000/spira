@@ -115,34 +115,76 @@ PowerShell から直接呼ぶ場合は引数で指定可:
 | `-NoProxy` | プロキシ無しで直接ゲートウェイへ (デバッグ用途) |
 | `-SkipCertCheck` | ⚠ 自己署名証明書のゲートウェイ用。本番では使わない |
 
-## Outlook 返信中継について
+## Outlook 中継について
 
-Spira の「📧 返信メール作成」ボタンが、外部対応経緯の最後のメールを
-返信対象として relay に POST する流れ:
+Spira の「📧 返信メール作成」ボタンは 2 モードで動作し、どちらも
+**operator の Outlook デスクトップ クライアント** に下書きを表示する。
+OWA ベースの操作は一切無い (relay 経由のみ)。
+
+### モード判定 (Spira UI 側)
+
+- 外部対応経緯に source=mail の受信履歴がある
+   → **reply モード** (`POST /spira/outlook/reply`、検索キー: 送信時刻 + 送信者)
+- 受信メール履歴ゼロ / Forms 起票 / 手動起票 / Teams のみ
+   → **new モード** (`POST /spira/outlook/new`、テンプレ件名・本文・宛先)
+
+### reply モード — 既存メールへの正規 Reply
 
 ```
-[Spira UI] 「Outlook で下書きを開く」 → POST /spira/outlook/reply
-        { inReplyTo: "<RFC 822 InternetMessageId>",
-          bodyHtml: "<p>...</p>", cc: ["..."] }
+[Spira UI] POST /spira/outlook/reply
+        { sentAtIso: "2026-05-19T10:30:00Z",
+          fromEmail: "alice@customer.example",
+          bodyHtml: "<p>回答...</p>", cc: ["..."] }
         │
 [relay] Outlook.Application を COM で取得
         │
-        ├─ Inbox.Items.Find (高速)
-        └─ AdvancedSearch (全ストア再帰、個人ルール振り分け先も対象)
-        │  ↑ InternetMessageId をキーに DASL クエリで検索
+        ├─ Inbox.Items.Restrict (高速)
+        │   DASL: PR_SENT_REPRESENTING_SMTP_ADDRESS = '<fromEmail>'
+        │       AND 受信時刻が <sentAt ± 1 分> の範囲
+        └─ AdvancedSearch (全ストア再帰、ルールでサブフォルダに振り分け済も対象)
         │
-        $orig.Reply() で正規返信下書きを生成 (In-Reply-To / References 自動付与)
-        $reply.HTMLBody = bodyHtml + $reply.HTMLBody (引用部分の上に prepend)
+        $orig.Reply() で正規返信下書きを生成
+        $reply.HTMLBody = bodyHtml + $reply.HTMLBody (引用部の上に prepend)
         $reply.Display()   ← Outlook ウィンドウが開く
 ```
 
-要件:
-- **Windows + Outlook デスクトップ クライアント** (COM が必要)
-- relay と Outlook は **同じユーザセッション** で動作 (= operator の PC)
-- 元メールが operator の Outlook 内に存在すること (Inbox / サブフォルダ / PST 含む)
+検索キーを「送信時刻 + 送信者」にしたのは:
+- `InternetMessageId` は Spira 経由で取り込んだメール (PA フロー①) でしか
+  保存されておらず、.msg ドラッグや手動入力では欠落しがち
+- 送信時刻 (Comments.sentAt) + 送信者 (Comments.fromEmail) は **どの経路で
+  取り込んだメールでも必ず揃っている** ため、検索キーとして信頼できる
+- 送信者 + 分単位の時刻が同じメールは現実的には一意
 
-見つからない / Outlook 未起動 / relay 停止のいずれの場合も Spira UI は
-OWA Compose にフォールバックして新規メール作成を開く (件名タグ付き)。
+### new モード — 新規メール下書き
+
+```
+[Spira UI] POST /spira/outlook/new
+        { to: "alice@customer.example",
+          subject: "[#00012] チケットタイトル",
+          bodyHtml: "<p>テンプレ本文...</p>", cc: ["..."] }
+        │
+[relay] $mail = $outlook.CreateItem(0)   # olMailItem
+        $mail.Subject = subject
+        $mail.To      = to
+        $mail.HTMLBody = bodyHtml
+        $mail.Display()  ← 新規メール作成画面 (In-Reply-To 無し)
+```
+
+次回の申請者からの返信は **件名のチケット ID タグ** (`[#NNNNN]`) で
+PA フロー① が自動的に既存チケットに紐付ける (auto-link)。
+
+### 要件 / 制約
+
+- **Windows + Outlook デスクトップ クライアント** が必須 (COM が必要)
+- relay と Outlook は **同じユーザセッション** で動作 (= operator の PC)
+- reply モードは operator の Outlook 内に元メールが存在することが前提
+   (Inbox / 全フォルダ / PST 全部を再帰検索する)
+
+### エラー時の挙動
+
+relay 停止 / Outlook 未起動 / 元メール見つからない場合は Spira UI で
+**エラートーストを出して停止**。OWA フォールバックは廃止。
+operator は relay と Outlook を起動してから再試行する運用。
 
 ## タスクスケジューラで常駐させる
 
