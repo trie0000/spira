@@ -62,6 +62,19 @@ export function renderShell(): HTMLElement {
     topbarSlot.appendChild(renderTopbar(root));
     paintErrorBanner(errorSlot);
   });
+
+  // 内部メンバー一覧の変更を捕捉して受信カードのバッジを再描画。
+  //   - 同一タブ: members.ts の writeList が発火する custom event
+  //   - 別タブ:   localStorage を直接書き換えた場合の StorageEvent
+  // どちらも setState({}) を呼んで paintMain で全描画 → isInternalAuthor が
+  // 最新のリストで再評価され、各カードの「内部 / 外部」バッジが更新される。
+  const onMembersChanged = (): void => { setState({}); };
+  window.addEventListener('spira:internal-members-changed', onMembersChanged);
+  window.addEventListener('storage', (e) => {
+    if (e.key === 'spira:internal-members' || e.key === 'spira:internal-names') {
+      onMembersChanged();
+    }
+  });
   return root;
 }
 

@@ -28,6 +28,15 @@ function writeList(key: string, values: string[]): void {
     const cleaned = Array.from(new Set(values.map(e => e.trim().toLowerCase()).filter(Boolean)));
     localStorage.setItem(key, JSON.stringify(cleaned));
   } catch { /* ignore */ }
+  // 内部メンバー一覧が変わったことを購読者に通知。これを listen している
+  // shell.ts が setState({}) を発火し、表示中のチケット詳細 / 一覧の
+  // 受信カードの「内部 / 外部」バッジを最新ルールで再描画する。
+  // - localStorage 書き込みだけだと同一タブ内には StorageEvent が飛ばないので
+  //   独自イベントで明示通知
+  // - 別タブには StorageEvent (window 既定動作) で通知される
+  try {
+    window.dispatchEvent(new CustomEvent('spira:internal-members-changed', { detail: { key } }));
+  } catch { /* ignore (古いブラウザ等) */ }
 }
 
 export function getInternalMembers(): string[] { return readList(KEY); }
