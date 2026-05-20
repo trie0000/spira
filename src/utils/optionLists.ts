@@ -85,6 +85,12 @@ export function getStatusOptionsSync(): string[] {
 export function getPriorityOptionsSync(): string[] {
   return cache[KEY_PRIORITIES] ?? DEFAULT_PRIORITIES;
 }
+export function getDepartmentOptionsSync(): string[] {
+  return cache[KEY_DEPARTMENTS] ?? DEFAULT_DEPARTMENTS;
+}
+export function getInquiryCategoryOptionsSync(): string[] {
+  return cache[KEY_CATEGORIES] ?? DEFAULT_INQUIRY_CATEGORIES;
+}
 
 /** 起動時に呼び出すウォーマー (非同期だが先に await できる)。 */
 export async function warmOptionLists(): Promise<void> {

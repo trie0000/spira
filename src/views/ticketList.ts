@@ -8,9 +8,9 @@ import { toast } from '../components/toast';
 import { attachColumnResize, savedColWidth } from '../utils/colResize';
 import { formatTicketIdShort } from '../utils/ticketTag';
 import { isInternalAuthor } from '../utils/members';
-import { findTag } from '../utils/tagDictionary';
+import { findTag, getTagDictionarySync } from '../utils/tagDictionary';
 import { renderTagPill } from './shell';
-import { getDepartmentOptions, getInquiryCategoryOptions } from '../utils/optionLists';
+import { getDepartmentOptionsSync, getInquiryCategoryOptionsSync } from '../utils/optionLists';
 import { getLastSeen, hasNewSince } from '../utils/seenState';
 import type { Ticket, TicketStatus, Priority, Comment } from '../types';
 
@@ -96,15 +96,36 @@ export async function renderTicketList(): Promise<HTMLElement> {
   }));
   const metaMap = new Map<number, TicketMeta>(metaArr);
 
-  const filtered = applyFilters(tickets);
+  // 本セッションのデータをそのまま使う再描画関数を closure に作る。
+  // 検索ボックスのライブ更新やフィルタ popover の「適用」から呼ばれ、
+  // paintMain (= スケルトン + 全再 fetch) を経由せずに subBar / toolbar /
+  // table を in-place で差し替える。これでちらつきと余計な API call を回避。
+  let subBarSlot: HTMLElement;
+  let toolbarSlot: HTMLElement;
+  let tableSlot: HTMLElement;
+  const rerender = (): void => {
+    const filtered = applyFilters(tickets, metaMap);
+    const sorted = applySort(filtered);
+    const nextSubBar = renderSubBar(sorted.length, sorted);
+    const nextToolbar = renderToolbar(rerender);
+    const nextTable = renderTable(sorted, metaMap);
+    subBarSlot.replaceWith(nextSubBar); subBarSlot = nextSubBar;
+    toolbarSlot.replaceWith(nextToolbar); toolbarSlot = nextToolbar;
+    tableSlot.replaceWith(nextTable); tableSlot = nextTable;
+  };
+
+  const filtered = applyFilters(tickets, metaMap);
   const sorted = applySort(filtered);
 
   // ルール: タイトル(subbar) → コントロール(toolbar) → 本体 の順
   // sorted を渡しているのは CSV エクスポートで「表示中の (フィルタ済) 全件」
   // を対象にするため。
-  wrap.appendChild(renderSubBar(sorted.length, sorted));
-  wrap.appendChild(renderToolbar());
-  wrap.appendChild(renderTable(sorted, metaMap));
+  subBarSlot = renderSubBar(sorted.length, sorted);
+  toolbarSlot = renderToolbar(rerender);
+  tableSlot = renderTable(sorted, metaMap);
+  wrap.appendChild(subBarSlot);
+  wrap.appendChild(toolbarSlot);
+  wrap.appendChild(tableSlot);
   return wrap;
 }
 
@@ -288,16 +309,76 @@ function onBulkDelete(): void {
   });
 }
 
-function applyFilters(rows: Ticket[]): Ticket[] {
+/** 日付 (ISO 文字列 or yyyy-mm-dd) を yyyy-mm-dd の文字列に正規化。比較用。 */
+function ymd(s: string | undefined | null): string | null {
+  if (!s) return null;
+  const t = String(s).slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(t) ? t : null;
+}
+
+/** フィルタ用に「チケットの全コラム」をまとめた検索対象文字列を組み立てる。
+ *  クエリ検索は全列に対する部分一致なので、対象列を 1 本に連結して
+ *  toLowerCase + includes で済ませる。ID は SP の Id (#5) と
+ *  表記用 ID (例: #00005) の両方を含めるので「02」のような部分指定でもヒットする。 */
+function buildSearchHaystack(t: Ticket, meta?: TicketMeta): string {
+  const parts: string[] = [];
+  parts.push(t.title ?? '');
+  parts.push(String(t.id));
+  parts.push(formatTicketIdShort(t.id));
+  parts.push(t.status ?? '');
+  parts.push(t.priority ?? '');
+  parts.push(...(t.assigneeNames ?? []));
+  parts.push(...(t.assigneeEmails ?? []));
+  parts.push(t.department ?? '');
+  parts.push(t.inquiryCategory ?? '');
+  parts.push(...((t.tags ?? []) as string[]));
+  parts.push(t.reporterName ?? '');
+  parts.push(t.reporterEmail ?? '');
+  if (t.dueDate)     parts.push(ymd(t.dueDate) ?? t.dueDate);
+  if (t.createdAt)   parts.push(ymd(t.createdAt) ?? t.createdAt);
+  if (t.updatedAt)   parts.push(ymd(t.updatedAt) ?? t.updatedAt);
+  if (meta?.lastReplyDirection) parts.push(meta.lastReplyDirection === 'internal' ? '内部' : '外部');
+  return parts.filter(Boolean).join('').toLowerCase();
+}
+
+function applyFilters(rows: Ticket[], metaMap?: Map<number, TicketMeta>): Ticket[] {
   const s = getState();
+  const f = s.filter;
   let out = rows;
-  if (s.filter.status) out = out.filter(r => r.status === (s.filter.status as TicketStatus));
-  if (s.filter.assignee === '__unset__') out = out.filter(r => !r.assigneeEmails || r.assigneeEmails.length === 0);
-  else if (s.filter.assignee) out = out.filter(r => (r.assigneeEmails ?? []).includes(s.filter.assignee));
-  if (s.filter.priority) out = out.filter(r => r.priority === (s.filter.priority as Priority));
-  if (s.filter.query) {
-    const q = s.filter.query.toLowerCase();
-    out = out.filter(r => r.title.toLowerCase().includes(q) || String(r.id).includes(q));
+  if (f.status)   out = out.filter(r => r.status === (f.status as TicketStatus));
+  if (f.assignee === '__unset__') out = out.filter(r => !r.assigneeEmails || r.assigneeEmails.length === 0);
+  else if (f.assignee) out = out.filter(r => (r.assigneeEmails ?? []).includes(f.assignee));
+  if (f.priority) out = out.filter(r => r.priority === (f.priority as Priority));
+  if (f.department) out = out.filter(r => (r.department ?? '') === f.department);
+  if (f.category)   out = out.filter(r => (r.inquiryCategory ?? '') === f.category);
+  if (f.tag)        out = out.filter(r => (r.tags ?? []).includes(f.tag!));
+
+  // 日付レンジ (yyyy-mm-dd 文字列比較で完結。タイムゾーンを意識せずに済む)。
+  const rangeFilter = (
+    val: string | undefined,
+    from?: string,
+    to?: string,
+  ): boolean => {
+    if (!from && !to) return true;
+    const y = ymd(val);
+    if (!y) return false; // 値が無いレコードはレンジ指定時に除外
+    if (from && y < from) return false;
+    if (to && y > to) return false;
+    return true;
+  };
+  if (f.dueFrom || f.dueTo)         out = out.filter(r => rangeFilter(r.dueDate, f.dueFrom, f.dueTo));
+  if (f.createdFrom || f.createdTo) out = out.filter(r => rangeFilter(r.createdAt, f.createdFrom, f.createdTo));
+  if (f.updatedFrom || f.updatedTo) out = out.filter(r => rangeFilter(r.updatedAt, f.updatedFrom, f.updatedTo));
+
+  if (f.query) {
+    // クエリは空白区切りで AND 検索 (どれも haystack に含まれること)。
+    const tokens = f.query.toLowerCase().split(/\s+/).filter(Boolean);
+    if (tokens.length > 0) {
+      out = out.filter(r => {
+        const hay = buildSearchHaystack(r, metaMap?.get(r.id));
+        return tokens.every(t => hay.includes(t));
+      });
+    }
   }
   return out;
 }
@@ -335,14 +416,14 @@ function applySort(rows: Ticket[]): Ticket[] {
   });
 }
 
-function renderToolbar(): HTMLElement {
+function renderToolbar(rerender: () => void): HTMLElement {
   const s = getState();
 
   const filterBtn = el('button', {
     class: 'spira-btn spira-btn--secondary spira-btn--sm',
     onclick: (e: Event) => {
       e.stopPropagation();
-      openFilterPopover(filterBtn);
+      openFilterPopover(filterBtn, rerender);
     },
   }, [
     el('span', { html: icon('filter'), style: 'display:inline-flex;width:14px;height:14px' }),
@@ -352,11 +433,22 @@ function renderToolbar(): HTMLElement {
   const searchInput = el('input', {
     type: 'search',
     class: 'spira-input spira-search-input',
-    placeholder: 'タイトル / ID で検索',
+    placeholder: 'キーワード検索 (件名 / ID / 担当 / 種別 / 部門 / タグ ほか)',
     value: s.filter.query,
     'data-focus-key': 'ticket-search',
   }) as HTMLInputElement;
-  searchInput.addEventListener('input', () => setFilter({ query: searchInput.value }));
+  // ライブ検索: paintMain を経由すると毎打鍵で全 fetch + スケルトンが走って
+  // ちらつくため、(a) setFilter は silent=true で state だけ更新、(b) 150ms
+  // デバウンスで rerender (= 表 / subBar / toolbar の in-place 差替え) を呼ぶ。
+  let debounceTimer: number | null = null;
+  searchInput.addEventListener('input', () => {
+    setFilter({ query: searchInput.value }, { silent: true });
+    if (debounceTimer !== null) window.clearTimeout(debounceTimer);
+    debounceTimer = window.setTimeout(() => {
+      debounceTimer = null;
+      rerender();
+    }, 150);
+  });
 
   const toolbar = el('div', { class: 'spira-toolbar' }, [
     filterBtn,
@@ -371,90 +463,184 @@ function renderToolbar(): HTMLElement {
     }),
   ]);
 
-  return el('div', {}, [toolbar, renderFilterChips()]);
+  return el('div', {}, [toolbar, renderFilterChips(rerender)]);
 }
 
 function activeFilterCount(): number {
   const f = getState().filter;
-  return [f.status, f.assignee, f.priority].filter(Boolean).length;
+  // chip / popover 両方で「条件アリ」と数える項目を 1 箇所にまとめる。
+  const single = [f.status, f.assignee, f.priority, f.department, f.category, f.tag];
+  const ranges = [
+    f.dueFrom, f.dueTo,
+    f.createdFrom, f.createdTo,
+    f.updatedFrom, f.updatedTo,
+  ];
+  // 各レンジは (from || to) で 1 つとしてカウントしたいので 2 軸ずつ OR
+  const rangePairs = [
+    f.dueFrom || f.dueTo,
+    f.createdFrom || f.createdTo,
+    f.updatedFrom || f.updatedTo,
+  ];
+  void ranges; // ranges は将来の拡張用に保持 (今は未使用)
+  return [...single, ...rangePairs].filter(Boolean).length;
 }
 
-function renderFilterChips(): HTMLElement {
+function renderFilterChips(rerender: () => void): HTMLElement {
   const s = getState();
   const f = s.filter;
   const chips: HTMLElement[] = [];
 
-  function chip(label: string, key: keyof typeof f) {
+  function chip(label: string, clearPatch: Partial<typeof f>) {
     chips.push(el('span', {
       class: 'spira-filter-chip',
       title: 'クリック で外す',
-      onclick: () => setFilter({ [key]: '' } as never),
+      onclick: () => { setFilter(clearPatch, { silent: true }); rerender(); },
     }, [label, el('span', { style: 'margin-left:4px;color:var(--ink-3)' }, ['×'])]));
   }
-  if (f.status) chip(`ステータス: ${f.status}`, 'status');
+  if (f.status) chip(`ステータス: ${f.status}`, { status: '' });
   if (f.assignee) {
     const u = s.users.find(x => x.email === f.assignee);
-    chip(`担当者: ${f.assignee === '__unset__' ? '未割当' : (u?.displayName ?? f.assignee)}`, 'assignee');
+    chip(`担当者: ${f.assignee === '__unset__' ? '未割当' : (u?.displayName ?? f.assignee)}`, { assignee: '' });
   }
-  if (f.priority) chip(`影響度: ${f.priority}`, 'priority');
+  if (f.priority) chip(`影響度: ${f.priority}`, { priority: '' });
+  if (f.department) chip(`部門: ${f.department}`, { department: '' });
+  if (f.category) chip(`種別: ${f.category}`, { category: '' });
+  if (f.tag) chip(`タグ: ${f.tag}`, { tag: '' });
+  const dateChip = (label: string, from: string | undefined, to: string | undefined, patch: Partial<typeof f>): void => {
+    if (!from && !to) return;
+    const range = `${from || '…'} ~ ${to || '…'}`;
+    chip(`${label}: ${range}`, patch);
+  };
+  dateChip('期限', f.dueFrom, f.dueTo, { dueFrom: '', dueTo: '' });
+  dateChip('作成日', f.createdFrom, f.createdTo, { createdFrom: '', createdTo: '' });
+  dateChip('更新日', f.updatedFrom, f.updatedTo, { updatedFrom: '', updatedTo: '' });
 
   if (chips.length === 0) return el('div', { style: 'display:none' });
 
   chips.push(el('button', {
     class: 'spira-filter-chip-clear',
-    onclick: () => setFilter({ status: '', assignee: '', priority: '' }),
+    onclick: () => {
+      setFilter({
+        status: '', assignee: '', priority: '',
+        department: '', category: '', tag: '',
+        dueFrom: '', dueTo: '',
+        createdFrom: '', createdTo: '',
+        updatedFrom: '', updatedTo: '',
+      }, { silent: true });
+      rerender();
+    },
   }, ['すべてクリア']));
 
   return el('div', { class: 'spira-filter-chipstrip' }, chips);
 }
 
-function openFilterPopover(anchor: HTMLElement): void {
+function openFilterPopover(anchor: HTMLElement, rerender: () => void): void {
   document.querySelectorAll('.spira-filter-pop').forEach(n => n.remove());
 
   const root = document.querySelector<HTMLElement>('#spira-root') ?? document.body;
-  const f = { ...getState().filter };
+  const f: Record<string, string> = { ...getState().filter } as Record<string, string>;
   const users = getState().users;
+  const departments = getDepartmentOptionsSync();
+  const categories = getInquiryCategoryOptionsSync();
+  const tagDict = (() => {
+    try { return getTagDictionarySync().map(t => t.name); }
+    catch { return [] as string[]; }
+  })();
 
-  // Field rows. Each row: [field][operator (always 'は')][value].
-  type FieldKey = 'status' | 'assignee' | 'priority';
-  const FIELDS: { key: FieldKey; label: string; values: { v: string; label: string }[] }[] = [
-    { key: 'status',   label: 'ステータス', values: ticketStatusList().map(v => ({ v, label: v })) },
-    { key: 'assignee', label: '担当者',     values: [
+  // Field rows. Single-value filters use a <select>; date ranges use 2 inputs.
+  type FieldKey =
+    | 'status' | 'assignee' | 'priority'
+    | 'department' | 'category' | 'tag';
+  type DateRangeKey = 'due' | 'created' | 'updated';
+  interface SingleField {
+    kind: 'single';
+    key: FieldKey;
+    label: string;
+    values: { v: string; label: string }[];
+  }
+  interface RangeField {
+    kind: 'range';
+    key: DateRangeKey;
+    label: string;
+    fromKey: 'dueFrom' | 'createdFrom' | 'updatedFrom';
+    toKey:   'dueTo'   | 'createdTo'   | 'updatedTo';
+  }
+  type Field = SingleField | RangeField;
+  const FIELDS: Field[] = [
+    { kind: 'single', key: 'status',   label: 'ステータス', values: ticketStatusList().map(v => ({ v, label: v })) },
+    { kind: 'single', key: 'assignee', label: '担当者',     values: [
         { v: '__unset__', label: '(未割当)' },
         ...users.map(u => ({ v: u.email, label: u.displayName })),
     ] },
-    { key: 'priority', label: '影響度',     values: priorityList().map(v => ({ v, label: v })) },
+    { kind: 'single', key: 'priority', label: '影響度',     values: priorityList().map(v => ({ v, label: v })) },
+    { kind: 'single', key: 'department', label: '部門',     values: departments.map(v => ({ v, label: v })) },
+    { kind: 'single', key: 'category',   label: '種別',     values: categories.map(v => ({ v, label: v })) },
+    { kind: 'single', key: 'tag',        label: 'タグ',     values: tagDict.map(v => ({ v, label: v })) },
+    { kind: 'range', key: 'due',     label: '期限',   fromKey: 'dueFrom',     toKey: 'dueTo' },
+    { kind: 'range', key: 'created', label: '作成日', fromKey: 'createdFrom', toKey: 'createdTo' },
+    { kind: 'range', key: 'updated', label: '更新日', fromKey: 'updatedFrom', toKey: 'updatedTo' },
   ];
+
+  const isActive = (F: Field): boolean => {
+    if (F.kind === 'single') return !!f[F.key];
+    return !!(f[F.fromKey] || f[F.toKey]);
+  };
 
   const rowsWrap = el('div', { class: 'spira-fpop-body' });
 
   function paintRows() {
     clear(rowsWrap);
-    const present = (['status', 'assignee', 'priority'] as FieldKey[])
-      .filter(k => (f as Record<string, string>)[k])
-      .map(k => [k, (f as Record<string, string>)[k]!] as [FieldKey, string]);
+    const present = FIELDS.filter(isActive);
     if (present.length === 0) {
       rowsWrap.appendChild(el('div', { class: 'spira-fpop-empty' }, ['条件はまだありません']));
-    } else {
-      for (const [key, val] of present) {
-        const fieldDef = FIELDS.find(F => F.key === key);
-        if (!fieldDef) continue;
-
+      return;
+    }
+    for (const F of present) {
+      if (F.kind === 'single') {
         const valSel = el('select', { class: 'spira-fpop-val' }, [
-          ...fieldDef.values.map(o => el('option', { value: o.v, selected: o.v === val }, [o.label])),
+          ...F.values.map(o => el('option', { value: o.v, selected: o.v === f[F.key] }, [o.label])),
         ]) as HTMLSelectElement;
-        valSel.addEventListener('change', () => { (f as Record<string, string>)[key] = valSel.value; });
+        valSel.addEventListener('change', () => { f[F.key] = valSel.value; });
 
         const removeBtn = el('button', {
           class: 'spira-fpop-rm',
           title: 'この条件を削除',
-          onclick: () => { (f as Record<string, string>)[key] = ''; paintRows(); },
+          onclick: () => { f[F.key] = ''; paintRows(); },
         }, ['×']);
 
         rowsWrap.appendChild(el('div', { class: 'spira-fpop-row' }, [
-          el('span', { class: 'spira-fpop-field' }, [fieldDef.label]),
+          el('span', { class: 'spira-fpop-field' }, [F.label]),
           el('span', { class: 'spira-fpop-op' }, ['は']),
           valSel,
+          removeBtn,
+        ]));
+      } else {
+        // 日付レンジ: from / to (どちらか片方だけでも可)
+        const fromInput = el('input', {
+          type: 'date', class: 'spira-input', style: 'min-width:140px;flex:1',
+          value: f[F.fromKey] ?? '',
+        }) as HTMLInputElement;
+        const toInput = el('input', {
+          type: 'date', class: 'spira-input', style: 'min-width:140px;flex:1',
+          value: f[F.toKey] ?? '',
+        }) as HTMLInputElement;
+        fromInput.addEventListener('change', () => { f[F.fromKey] = fromInput.value; });
+        toInput  .addEventListener('change', () => { f[F.toKey]   = toInput.value; });
+
+        const removeBtn = el('button', {
+          class: 'spira-fpop-rm',
+          title: 'この条件を削除',
+          onclick: () => { f[F.fromKey] = ''; f[F.toKey] = ''; paintRows(); },
+        }, ['×']);
+
+        rowsWrap.appendChild(el('div', { class: 'spira-fpop-row' }, [
+          el('span', { class: 'spira-fpop-field' }, [F.label]),
+          el('span', { class: 'spira-fpop-op' }, ['が']),
+          el('div', { style: 'display:flex;gap:6px;align-items:center;flex:1;flex-wrap:wrap' }, [
+            fromInput,
+            el('span', { style: 'color:var(--ink-3);font-size:var(--fs-xs)' }, ['〜']),
+            toInput,
+          ]),
           removeBtn,
         ]));
       }
@@ -465,13 +651,25 @@ function openFilterPopover(anchor: HTMLElement): void {
   // Add-row select: pick any field that doesn't already have a value.
   const addSel = el('select', { class: 'spira-select', style: 'flex:1' }, [
     el('option', { value: '' }, ['＋ 条件を追加']),
-    ...FIELDS.filter(F => !(f as Record<string, string>)[F.key]).map(F => el('option', { value: F.key }, [F.label])),
+    ...FIELDS.filter(F => !isActive(F)).map(F => el('option', { value: F.kind === 'single' ? F.key : `range:${F.key}` }, [F.label])),
   ]) as HTMLSelectElement;
   addSel.addEventListener('change', () => {
-    const key = addSel.value as FieldKey;
-    if (!key) return;
-    const def = FIELDS.find(F => F.key === key);
-    if (def) (f as Record<string, string>)[key] = def.values[0]?.v ?? '';
+    const v = addSel.value;
+    if (!v) return;
+    if (v.startsWith('range:')) {
+      const rk = v.slice('range:'.length);
+      const F = FIELDS.find(x => x.kind === 'range' && x.key === rk) as RangeField | undefined;
+      if (F) { f[F.fromKey] = ''; f[F.toKey] = ''; /* render側でレンジを「条件あり」扱いするには */ }
+      // レンジは from/to どちらかが入って初めて active になる仕様にすると、
+      // 「追加した瞬間に行が出ない」UX になるので、見せかけの空値で active 化する。
+      // ここで _placeholder を入れず、isActive 側を「from/to のキーが filter
+      // オブジェクトに存在するか」基準にしてもいいが、シンプルに sentinel として
+      // 空文字を入れて即 paintRows する (空のままなら apply 時に値は空文字 → 無効化)。
+      if (F) { f[F.fromKey] = ' '; f[F.toKey] = ' '; }
+    } else {
+      const F = FIELDS.find(x => x.kind === 'single' && x.key === v) as SingleField | undefined;
+      if (F) f[F.key] = F.values[0]?.v ?? '';
+    }
     addSel.value = '';
     paintRows();
   });
@@ -479,7 +677,15 @@ function openFilterPopover(anchor: HTMLElement): void {
   const apply = el('button', {
     class: 'spira-btn spira-btn--primary spira-btn--sm',
     onclick: () => {
-      setFilter(f);
+      // sentinel の半角空白 (' ') は無効値として空文字に倒す。
+      for (const k of Object.keys(f)) {
+        if (typeof f[k] === 'string' && f[k]!.trim() === '') f[k] = '';
+      }
+      // f は Record<string, string> なので setFilter の Partial<filter> シェイプに
+      // 暗黙キャストできない。setFilter は Object.assign で部分マージするだけなので、
+      // 型的にズレた未知のキーが混ざっても無視されるため as never で押し込む。
+      setFilter(f as never, { silent: true });
+      rerender();
       pop.remove();
     },
   }, ['適用']);
@@ -487,7 +693,10 @@ function openFilterPopover(anchor: HTMLElement): void {
   const clearAll = el('button', {
     class: 'spira-btn spira-btn--ghost spira-btn--sm',
     onclick: () => {
-      Object.keys(f).forEach(k => { if (k !== 'query') (f as Record<string, string>)[k] = ''; });
+      for (const k of Object.keys(f)) {
+        if (k === 'query') continue;
+        f[k] = '';
+      }
       paintRows();
     },
   }, ['クリア']);
@@ -925,10 +1134,10 @@ function renderRow(t: Ticket, meta?: TicketMeta): HTMLElement {
     }, [display]);
   };
   const categoryCell = inlineEditableCell(
-    t.inquiryCategory, getInquiryCategoryOptions(), '種別', 'inquiryCategory',
+    t.inquiryCategory, getInquiryCategoryOptionsSync(), '種別', 'inquiryCategory',
   );
   const deptCell = inlineEditableCell(
-    t.department, getDepartmentOptions(), '部門', 'department',
+    t.department, getDepartmentOptionsSync(), '部門', 'department',
   );
 
   const isClosed = t.status === '完了';

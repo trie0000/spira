@@ -10,6 +10,14 @@ interface State {
     assignee: string;
     priority: string;
     query: string;
+    // チケット一覧で追加された絞り込み軸。空文字 / undefined はフィルタ無効。
+    department?: string;
+    category?: string;     // inquiryCategory
+    tag?: string;          // タグ名 (1 件、配列の include 一致)
+    // 日付レンジ (yyyy-mm-dd の文字列、空は無効)
+    dueFrom?: string;      dueTo?: string;
+    createdFrom?: string;  createdTo?: string;
+    updatedFrom?: string;  updatedTo?: string;
   };
   sortBy: 'id' | 'title' | 'status' | 'assignee' | 'priority' | 'due' | 'updated';
   sortDir: 'asc' | 'desc';
@@ -68,8 +76,15 @@ export function setState(
   for (const l of listeners) l();
 }
 
-export function setFilter(patch: Partial<State['filter']>): void {
+export function setFilter(
+  patch: Partial<State['filter']>,
+  opts: { silent?: boolean } = {},
+): void {
   Object.assign(state.filter, patch);
+  // silent=true で state だけ更新してリスナを呼ばない。
+  // チケット一覧の検索ボックスのようにライブ更新で paintMain が走ると
+  // 画面全体がスケルトン → 再描画でちらつくため、表内だけ手動で更新する用途で使う。
+  if (opts.silent) return;
   for (const l of listeners) l();
 }
 
