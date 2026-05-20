@@ -16,7 +16,9 @@ export function setDeveloperMode(v: boolean): void {
   try {
     if (v) localStorage.setItem(KEY, '1');
     else localStorage.removeItem(KEY);
-  } catch {
-    /* ignore */
+  } catch (e) {
+    // L3: localStorage が無効 (private mode / クォータ超過) のときに
+    // 黙って失敗するのは混乱の元。コンソールには警告を出す。
+    console.warn('[spira/devMode] localStorage 書込失敗:', (e as Error).message);
   }
 }

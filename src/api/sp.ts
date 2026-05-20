@@ -834,6 +834,20 @@ export class SpRepository implements Repository {
     if (!body.Status) body.Status = '新規';
     if (!body.Priority) body.Priority = 'Medium';
     body.IsDeleted = false;
+    // M18: assigneeEmails が指定されていて assigneeNames が無いとき、
+    // listSiteUsers から display name を解決して併せて保存する。
+    // 旧仕様では sp の AssigneeName が null → 一覧で「未割当」表示になる
+    // 状態だった (mock では emails → names を解決していたので挙動が一致しなかった)。
+    if (input.assigneeEmails && input.assigneeEmails.length > 0 && !input.assigneeNames) {
+      try {
+        const users = await this.listSiteUsers();
+        const emailToName = new Map(users.map(u => [u.email.toLowerCase(), u.displayName]));
+        const names = input.assigneeEmails.map(e => emailToName.get(e.toLowerCase()) ?? e);
+        body.AssigneeName = names.join(', ');
+      } catch (e) {
+        console.warn('[spira/createTicket] assigneeNames resolution failed:', (e as Error).message);
+      }
+    }
     const created = await this.tx.req<SpListItem>(`${this.listPath(this.cfg.listTickets)}/items`, {
       method: 'POST',
       body: JSON.stringify(body),
@@ -1176,9 +1190,13 @@ export class SpRepository implements Repository {
     const errors: string[] = [];
     for (const m of unprocessed) {
       try {
-        const convId = m.conversationId ?? '';
-        const isForms = convId.startsWith('forms-');
-        const isTeams = convId.startsWith('teams-');
+        // L10: ConversationId は前後空白 / 改行 / 大小不一致を正規化してから判定。
+        // PA フローを後から書き換えた場合の typo / 末尾改行で auto-link を
+        // 取り逃すのを防ぐ。
+        const convId = (m.conversationId ?? '').trim();
+        const convLower = convId.toLowerCase();
+        const isForms = convLower.startsWith('forms-');
+        const isTeams = convLower.startsWith('teams-');
 
         // ── Teams 返信の自動紐付け ──────────────────────────────
         // PA フロー④ が ConversationId に "teams-<parentMessageId>" を入れて
@@ -1187,7 +1205,9 @@ export class SpRepository implements Repository {
         // ヒット → Comments に追加、InboxMails 物理削除 (= auto-link)
         // ハズレ → 受信一覧に残して手動トリアージ (チャネル外の議論など)
         if (isTeams) {
-          const parentId = convId.slice('teams-'.length);
+          // 元の大小ケースを保ったまま prefix 部分のみ削除 (parentId は
+          // Teams の messageId なので case-sensitive 比較されうる)。
+          const parentId = convId.slice('teams-'.length).trim();
           const hit = threadMap.get(parentId);
           if (hit) {
             const ticket = byId.get(hit.ticketId);
@@ -1444,8 +1464,11 @@ export class SpRepository implements Repository {
       const res = await this.tx.req<{ Id: number; Title: string; Email: string; LoginName?: string }>(
         '/_api/web/currentuser?$select=Id,Title,Email,LoginName',
       );
-      const email = res.Email || (res.LoginName ?? '').replace(/^.*\|/, '');
-      return { id: res.Id, email, displayName: res.Title || email };
+      // L6: LoginName から推測したメールは UPN と primary SMTP が違う
+      // テナントで誤メールになりうるので、Email が空のときは空のまま返し、
+      // 「不明」として扱う側に判定を委ねる (誤った監査ログ書込みを防止)。
+      const email = res.Email ?? '';
+      return { id: res.Id, email, displayName: res.Title || email || '(不明)' };
     } catch { return null; }
   }
 

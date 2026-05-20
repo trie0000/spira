@@ -22,6 +22,13 @@ export async function setFormsAnalyticsUrl(url: string | null): Promise<void> {
   await getRepo().setSetting(KEY, v || null);
 }
 
+/** Forms の認可された host 一覧。テナント環境によって新ドメイン
+ *  forms.cloud.microsoft も使われるためどちらも許可する。 */
+const FORMS_HOSTS = new Set<string>([
+  'forms.office.com',
+  'forms.cloud.microsoft',
+]);
+
 /** URL から Form ID を抽出 (`id=<...>` クエリ)。失敗時は null。
  *  Forms 管理画面 / 分析ページ / 共有ページ等の URL パターンに対応。 */
 export function extractFormId(url: string): string | null {
@@ -41,9 +48,19 @@ export function extractFormId(url: string): string | null {
   return null;
 }
 
-/** AnalysisPage 形式の URL に整形。未パース時はそのまま返す。 */
+/** AnalysisPage 形式の URL に整形。未パース時はそのまま返す。
+ *  L2: 入力 URL の origin が認可された Forms ドメイン (forms.office.com /
+ *  forms.cloud.microsoft) のときはそれを保持。それ以外は forms.office.com
+ *  に正規化 (旧挙動のフォールバック)。 */
 export function normalizeAnalyticsUrl(url: string): string {
   const formId = extractFormId(url);
   if (!formId) return url;
-  return `https://forms.office.com/Pages/AnalysisPage.aspx?id=${formId}`;
+  let origin = 'https://forms.office.com';
+  try {
+    const u = new URL(url);
+    if (FORMS_HOSTS.has(u.hostname.toLowerCase())) {
+      origin = `${u.protocol}//${u.hostname}`;
+    }
+  } catch { /* fall back to forms.office.com */ }
+  return `${origin}/Pages/AnalysisPage.aspx?id=${formId}`;
 }

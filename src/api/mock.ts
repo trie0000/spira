@@ -519,13 +519,15 @@ export class MockRepository implements Repository {
     const targets = store.inbox.filter(x => !x.isProcessed).slice();
     for (const m of targets) {
       try {
-        const convId = m.conversationId ?? '';
-        const isForms = convId.startsWith('forms-');
-        const isTeams = convId.startsWith('teams-');
+        // L10: ConversationId 正規化 (sp.ts と一致)
+        const convId = (m.conversationId ?? '').trim();
+        const convLower = convId.toLowerCase();
+        const isForms = convLower.startsWith('forms-');
+        const isTeams = convLower.startsWith('teams-');
 
         // Teams 返信の自動紐付け (sp.ts と同じロジック)
         if (isTeams) {
-          const parentId = convId.slice('teams-'.length);
+          const parentId = convId.slice('teams-'.length).trim();
           const hit = threadMap.get(parentId);
           if (hit) {
             const ticket = store.tickets.find(t => t.id === hit.ticketId && !t.isDeleted);

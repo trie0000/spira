@@ -65,7 +65,23 @@ const SCALES: Record<FontSize, Record<string, string>> = {
  *  ことで、確実にカスケード優先度を確保する (インラインは specificity 最高)。 */
 export function applyFontSize(): void {
   const root = document.querySelector<HTMLElement>('.spira-root');
-  if (!root) return;
+  if (!root) {
+    // L1: .spira-root がまだマウントされていなければ、MutationObserver で
+    // 出現を待って再 apply する (mount() より先に applyFontSize() が
+    // 呼ばれた場合の保険)。1 回 apply したら observer は解除。
+    if (!pendingFontApplyObserver) {
+      pendingFontApplyObserver = new MutationObserver(() => {
+        const r = document.querySelector<HTMLElement>('.spira-root');
+        if (r) {
+          pendingFontApplyObserver?.disconnect();
+          pendingFontApplyObserver = null;
+          applyFontSize();
+        }
+      });
+      pendingFontApplyObserver.observe(document.body, { childList: true, subtree: false });
+    }
+    return;
+  }
   const size = getFontSize();
   const scale = SCALES[size];
   for (const [k, v] of Object.entries(scale)) {
@@ -76,3 +92,5 @@ export function applyFontSize(): void {
   // base font-size をルートにも適用 (root.style.fontSize でも反映)
   root.style.fontSize = scale['--fs-base']!;
 }
+
+let pendingFontApplyObserver: MutationObserver | null = null;
