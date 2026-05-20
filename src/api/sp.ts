@@ -160,6 +160,11 @@ class SpTransport {
 
 // ---------------------------------------------------------------- field mapping
 
+/** listComments の重複自己治癒で削除に繰り返し失敗した Comment ID。
+ *  失敗が累積するとそのセッション中ずっと無駄な DELETE を投げ続けるので、
+ *  1 度失敗したらこのセッションでは再試行しない (ブラウザリロードでリセット)。 */
+const healFailureCache = new Set<number>();
+
 interface SpListItem {
   Id: number;
   Title?: string;
@@ -832,9 +837,9 @@ export class SpRepository implements Repository {
     items.sort((a, b) => (a.sentAt ?? '').localeCompare(b.sentAt ?? ''));
 
     // E: 同 InternetMessageId のコメントが 2 件以上あれば古い 1 件を残して
-    // 新しい方を物理削除する (自動同期 race による重複自己治癒)。削除は
-    // fire-and-forget — 失敗してもユーザーには影響させない (次回の閲覧で
-    // 再試行されるため)。
+    // 新しい方を物理削除する (自動同期 race による重複自己治癒)。
+    // A4: Promise.allSettled で削除完了を待ち、実際に成功した分だけ UI から
+    // 除外する。削除失敗のループ累積も healFailureCache で抑止。
     const byIMID = new Map<string, Comment[]>();
     for (const c of items) {
       if (c.internetMessageId && c.type === 'received') {
@@ -843,22 +848,34 @@ export class SpRepository implements Repository {
         byIMID.set(c.internetMessageId, arr);
       }
     }
-    const dupIds = new Set<number>();
+    const dupCandidates: number[] = [];
     for (const arr of byIMID.values()) {
       if (arr.length <= 1) continue;
-      // ID 昇順で最初のものを残し、それ以降を削除対象に
       arr.sort((a, b) => a.id - b.id);
-      for (let i = 1; i < arr.length; i++) dupIds.add(arr[i]!.id);
-    }
-    if (dupIds.size > 0) {
-      console.warn(`[spira/comments] 重複コメント ${dupIds.size} 件を自動削除 (InternetMessageId 一致)`);
-      for (const id of dupIds) {
-        // 非同期 fire-and-forget。失敗時は warn のみ (UI には反映しない)。
-        this.tx.remove(this.listPath(this.cfg.listComments), id)
-          .catch((e: Error) => console.warn(`[spira/comments] 重複削除失敗 id=${id}:`, e.message));
+      for (let i = 1; i < arr.length; i++) {
+        const id = arr[i]!.id;
+        if (healFailureCache.has(id)) continue;   // 過去に失敗したものはスキップ
+        dupCandidates.push(id);
       }
     }
-    return items.filter(c => !dupIds.has(c.id));
+    const dupConfirmed = new Set<number>();
+    if (dupCandidates.length > 0) {
+      console.warn(`[spira/comments] 重複コメント ${dupCandidates.length} 件を自動削除 (InternetMessageId 一致)`);
+      const results = await Promise.allSettled(
+        dupCandidates.map(id => this.tx.remove(this.listPath(this.cfg.listComments), id))
+      );
+      for (let i = 0; i < results.length; i++) {
+        const id = dupCandidates[i]!;
+        const r = results[i]!;
+        if (r.status === 'fulfilled') {
+          dupConfirmed.add(id);
+        } else {
+          healFailureCache.add(id);
+          console.warn(`[spira/comments] 重複削除失敗 id=${id}:`, (r.reason as Error)?.message);
+        }
+      }
+    }
+    return items.filter(c => !dupConfirmed.has(c.id));
   }
 
   async updateComment(
@@ -1042,6 +1059,9 @@ export class SpRepository implements Repository {
       if (t.userThreadId)     threadMap.set(t.userThreadId,     { ticketId: t.id, threadType: 'user' });
     }
     let autoLinked = 0;
+    // 既存コメントと InternetMessageId 一致のため auto-link 不要だが、行だけ削除
+    // した件数 (UI 上は autoLinked と区別しない既存挙動だがログには出す)。
+    let dedupedRemoved = 0;
     const errors: string[] = [];
     for (const m of unprocessed) {
       try {
@@ -1063,17 +1083,24 @@ export class SpRepository implements Repository {
             // 完了済みチケットも紐付ける (議論の補足が後から来る場合あり)。
             // 「完了は紐付けない」運用に変えたければここで !== '完了' に変更可。
             if (ticket && !ticket.isDeleted) {
+              // A5: internetMessageId が無い行は重複判定キーが取れないので
+              // auto-add しない (deleteInboxMail 失敗で永久増殖するため)。
+              // 手動トリアージ送りにする。
+              if (!m.internetMessageId) {
+                console.warn(`[spira/sync] inbox #${m.id}: Teams 返信に InternetMessageId が無いため手動トリアージ送り (PA フローで messageId をマップしてください)`);
+                continue;
+              }
               // 重複防止
-              if (m.internetMessageId) {
-                const existing = await this.listComments(ticket.id);
-                const dup = existing.some(
-                  (c) => c.type === 'received' && c.internetMessageId === m.internetMessageId,
-                );
-                if (dup) {
-                  await this.deleteInboxMail(m.id);
-                  autoLinked++;
-                  continue;
-                }
+              const existing = await this.listComments(ticket.id);
+              const dup = existing.some(
+                (c) => c.type === 'received' && c.internetMessageId === m.internetMessageId,
+              );
+              if (dup) {
+                await this.deleteInboxMail(m.id).catch((e: Error) => {
+                  console.warn(`[spira/sync] inbox #${m.id}: 重複行の削除失敗:`, e.message);
+                });
+                dedupedRemoved++;
+                continue;
               }
               await this.addComment({
                 ticketId: ticket.id, type: 'received',
@@ -1087,7 +1114,15 @@ export class SpRepository implements Repository {
                 // 'user' → 'external' (顧客向けスレッド)、'internal' → 'internal'。
                 threadKind: hit.threadType === 'user' ? 'external' : 'internal',
               });
-              await this.deleteInboxMail(m.id);
+              // A5: deleteInboxMail 失敗時のフォールバック → markInboxProcessed で
+              // 「処理済み」マーキング。これで次回 sync で再 add されない。
+              try {
+                await this.deleteInboxMail(m.id);
+              } catch (e) {
+                console.warn(`[spira/sync] inbox #${m.id}: 削除失敗 (markProcessed にフォールバック):`, (e as Error).message);
+                await this.markInboxProcessed(m.id, { ticketId: ticket.id, result: 'auto-linked' })
+                  .catch((e2: Error) => console.warn(`[spira/sync] inbox #${m.id}: markProcessed もエラー:`, e2.message));
+              }
               autoLinked++;
               continue;
             }
@@ -1115,18 +1150,24 @@ export class SpRepository implements Repository {
           console.warn(`[spira/sync] inbox #${m.id}: tag parsed as #${tid} but ticket ${ticket ? 'is deleted' : 'not found'}`);
           continue;
         }
+        // A5: internetMessageId が無い行は重複判定不可なので手動トリアージへ。
+        // (PA フロー① の InternetMessageId 動的コンテンツマッピング漏れ対策)
+        if (!m.internetMessageId) {
+          console.warn(`[spira/sync] inbox #${m.id}: メールに InternetMessageId が無いため手動トリアージ送り`);
+          continue;
+        }
         // Idempotency: PA が同じメールを 2 回投入したり、前回 sync が
         // 途中で落ちた場合の保険。internetMessageId 一致で重複検知。
-        if (m.internetMessageId) {
-          const existing = await this.listComments(tid);
-          const dup = existing.some(
-            (c) => c.type === 'received' && c.internetMessageId === m.internetMessageId,
-          );
-          if (dup) {
-            await this.deleteInboxMail(m.id);
-            autoLinked++;
-            continue;
-          }
+        const existing = await this.listComments(tid);
+        const dup = existing.some(
+          (c) => c.type === 'received' && c.internetMessageId === m.internetMessageId,
+        );
+        if (dup) {
+          await this.deleteInboxMail(m.id).catch((e: Error) => {
+            console.warn(`[spira/sync] inbox #${m.id}: 重複行の削除失敗:`, e.message);
+          });
+          dedupedRemoved++;
+          continue;
         }
         await this.addComment({
           ticketId: tid, type: 'received',
@@ -1139,14 +1180,23 @@ export class SpRepository implements Repository {
           // メール経由はすべて外部 (顧客/外部ユーザーとのやり取り) として扱う
           threadKind: 'external',
         });
-        // auto-link 完了したら受信箱から物理削除
-        await this.deleteInboxMail(m.id);
+        // A5: 削除失敗時の markInboxProcessed フォールバック (永久増殖防止)
+        try {
+          await this.deleteInboxMail(m.id);
+        } catch (e) {
+          console.warn(`[spira/sync] inbox #${m.id}: 削除失敗 (markProcessed にフォールバック):`, (e as Error).message);
+          await this.markInboxProcessed(m.id, { ticketId: tid, result: 'auto-linked' })
+            .catch((e2: Error) => console.warn(`[spira/sync] inbox #${m.id}: markProcessed もエラー:`, e2.message));
+        }
         autoLinked++;
       } catch (e) {
         errors.push(`#${m.id}: ${(e as Error).message}`);
       }
     }
     const remaining = (await this.listInbox({ unprocessedOnly: true })).length;
+    if (dedupedRemoved > 0) {
+      console.log(`[spira/sync] dedupedRemoved=${dedupedRemoved} (既存と同 InternetMessageId のため削除のみ実施)`);
+    }
     return { autoLinked, remaining, errors };
   }
 

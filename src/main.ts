@@ -20,13 +20,23 @@ declare global {
 // startAutoSync() で起動、restartAutoSync() で設定変更後に再構築する。
 let autoSyncTimer: number | null = null;
 let autoSyncRoot: HTMLElement | null = null;
+// A2: doSync の reentrancy guard。SP の応答遅延で前回 sync が未完のとき、
+// 次の interval tick が走って並行 syncInbox → race を恒常化させるのを防ぐ。
+let syncing = false;
 
-async function startAutoSync(root: HTMLElement): Promise<void> {
-  autoSyncRoot = root;
+/** 古いタイマーがあれば確実に停止する。mount() の二重起動やリロードで
+ *  メモリリーク / 多重 sync を起こさないよう全エントリポイントから呼ぶ。 */
+function stopAutoSync(): void {
   if (autoSyncTimer != null) {
     window.clearInterval(autoSyncTimer);
     autoSyncTimer = null;
   }
+}
+
+async function startAutoSync(root: HTMLElement): Promise<void> {
+  // A1: 多重 setInterval を防ぐため、必ず既存タイマーを止めてから登録。
+  stopAutoSync();
+  autoSyncRoot = root;
   try {
     const { getSyncIntervalSec } = await import('./views/syncIntervalModal');
     const sec = await getSyncIntervalSec();
@@ -36,10 +46,13 @@ async function startAutoSync(root: HTMLElement): Promise<void> {
     }
     autoSyncTimer = window.setInterval(() => {
       if (!getState().ready) return;
-      // タブが裏側のときは結果が反映できないので silent でも回さない方が良い
-      // ように見えるが、SP 側の更新は走らせて inboxCount だけは更新したいので
-      // そのまま実行する (visibilitychange は将来検討)。
-      void doSync(autoSyncRoot!, /* silent */ true);
+      // 古い autoSyncRoot が DOM から外されていればここで諦める (再 mount 後の
+      // ゾンビタイマー対策)。これで万一 stopAutoSync 漏れがあっても無害化。
+      if (!autoSyncRoot || !document.body.contains(autoSyncRoot)) {
+        stopAutoSync();
+        return;
+      }
+      void doSync(autoSyncRoot, /* silent */ true);
     }, sec * 1000);
     console.log(`[spira] auto-sync: every ${sec}s`);
   } catch (e) {
@@ -54,6 +67,9 @@ export async function restartAutoSync(): Promise<void> {
 }
 
 export async function mount(): Promise<void> {
+  // A1: 再 mount 前に既存 auto-sync timer を必ず停止 (多重 setInterval 防止)。
+  stopAutoSync();
+  syncing = false;
   if (window.__SPIRA_MOUNTED__) {
     document.querySelector<HTMLElement>('.spira-root')?.remove();
   }
@@ -188,6 +204,14 @@ export async function mount(): Promise<void> {
 }
 
 async function doSync(root: HTMLElement, silent = false): Promise<void> {
+  // A2: 既存 sync が走っているなら early return (silent / manual 問わず)。
+  // SP REST 遅延で次の interval tick が走って syncInbox を多重実行する race を防ぐ。
+  // 手動クリックも 2 回目以降は黙ってスキップ (同期完了後にもう一度押せる)。
+  if (syncing) {
+    if (!silent) toast(root, '同期中です…完了までお待ちください', 'warn', 3000);
+    return;
+  }
+  syncing = true;
   const repo = getRepo();
   // dev affordance: in mock mode, simulate inbound mail occasionally
   if (getRepoMode() === 'mock' && Math.random() < 0.5) {
@@ -217,6 +241,7 @@ async function doSync(root: HTMLElement, silent = false): Promise<void> {
     else console.warn('[spira] silent sync failed:', (e as Error).message);
   } finally {
     if (!silent) syncBtn?.classList.remove('spira-spin');
+    syncing = false;
   }
 }
 

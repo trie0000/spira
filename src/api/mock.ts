@@ -506,13 +506,14 @@ export class MockRepository implements Repository {
   }
   async syncInbox(): Promise<SyncResult> {
     let autoLinked = 0;
+    let dedupedRemoved = 0;
     const errors: string[] = [];
-    // Teams スレッド ID → チケット ID の逆引き map (sp.ts と同様)
-    const threadMap = new Map<string, { ticketId: number }>();
+    // C1: sp.ts と同じ threadType 情報を保持 (mock の挙動を本番と一致させる)。
+    const threadMap = new Map<string, { ticketId: number; threadType: 'internal' | 'user' }>();
     for (const t of store.tickets) {
       if (t.isDeleted) continue;
-      if (t.internalThreadId) threadMap.set(t.internalThreadId, { ticketId: t.id });
-      if (t.userThreadId)     threadMap.set(t.userThreadId,     { ticketId: t.id });
+      if (t.internalThreadId) threadMap.set(t.internalThreadId, { ticketId: t.id, threadType: 'internal' });
+      if (t.userThreadId)     threadMap.set(t.userThreadId,     { ticketId: t.id, threadType: 'user' });
     }
     // 走査対象を先にコピー (削除しながら回ると iteration がズレるため)
     const targets = store.inbox.filter(x => !x.isProcessed).slice();
@@ -529,16 +530,18 @@ export class MockRepository implements Repository {
           if (hit) {
             const ticket = store.tickets.find(t => t.id === hit.ticketId && !t.isDeleted);
             if (ticket) {
-              if (m.internetMessageId) {
-                const dup = store.comments.some(
-                  c => c.ticketId === ticket.id && c.type === 'received' &&
-                       c.internetMessageId === m.internetMessageId,
-                );
-                if (dup) {
-                  await this.deleteInboxMail(m.id);
-                  autoLinked++;
-                  continue;
-                }
+              if (!m.internetMessageId) {
+                console.warn(`[spira/sync] inbox #${m.id}: Teams 返信に InternetMessageId が無いため手動トリアージ送り`);
+                continue;
+              }
+              const dup = store.comments.some(
+                c => c.ticketId === ticket.id && c.type === 'received' &&
+                     c.internetMessageId === m.internetMessageId,
+              );
+              if (dup) {
+                await this.deleteInboxMail(m.id);
+                dedupedRemoved++;
+                continue;
               }
               await this.addComment({
                 ticketId: ticket.id, type: 'received',
@@ -550,7 +553,13 @@ export class MockRepository implements Repository {
                 source: 'teams',
                 threadKind: hit.threadType === 'user' ? 'external' : 'internal',
               });
-              await this.deleteInboxMail(m.id);
+              try {
+                await this.deleteInboxMail(m.id);
+              } catch (e) {
+                console.warn(`[spira/sync] inbox #${m.id}: 削除失敗 (markProcessed):`, (e as Error).message);
+                await this.markInboxProcessed(m.id, { ticketId: ticket.id, result: 'auto-linked' })
+                  .catch(() => { /* swallow */ });
+              }
               autoLinked++;
               continue;
             }
@@ -577,17 +586,19 @@ export class MockRepository implements Repository {
           console.warn(`[spira/sync] inbox #${m.id}: tag parsed as #${tid} but ticket not found / deleted`);
           continue;
         }
+        if (!m.internetMessageId) {
+          console.warn(`[spira/sync] inbox #${m.id}: メールに InternetMessageId が無いため手動トリアージ送り`);
+          continue;
+        }
         // Idempotency: 既存コメントを重複追加しない
-        if (m.internetMessageId) {
-          const dup = store.comments.some(
-            (c) => c.ticketId === tid && c.type === 'received' &&
-              c.internetMessageId === m.internetMessageId,
-          );
-          if (dup) {
-            await this.deleteInboxMail(m.id);
-            autoLinked++;
-            continue;
-          }
+        const dup = store.comments.some(
+          (c) => c.ticketId === tid && c.type === 'received' &&
+            c.internetMessageId === m.internetMessageId,
+        );
+        if (dup) {
+          await this.deleteInboxMail(m.id);
+          dedupedRemoved++;
+          continue;
         }
         await this.addComment({
           ticketId: tid, type: 'received',
@@ -600,13 +611,22 @@ export class MockRepository implements Repository {
           threadKind: 'external',
         });
         // auto-link 後は物理削除 (受信箱には auto-link 待ち or Forms のみ残る運用)
-        await this.deleteInboxMail(m.id);
+        try {
+          await this.deleteInboxMail(m.id);
+        } catch (e) {
+          console.warn(`[spira/sync] inbox #${m.id}: 削除失敗 (markProcessed):`, (e as Error).message);
+          await this.markInboxProcessed(m.id, { ticketId: tid, result: 'auto-linked' })
+            .catch(() => { /* swallow */ });
+        }
         autoLinked++;
       } catch (e) {
         errors.push(`#${m.id}: ${(e as Error).message}`);
       }
     }
     const remaining = store.inbox.filter(x => !x.isProcessed).length;
+    if (dedupedRemoved > 0) {
+      console.log(`[spira/sync] dedupedRemoved=${dedupedRemoved} (mock)`);
+    }
     return { autoLinked, remaining, errors };
   }
 
