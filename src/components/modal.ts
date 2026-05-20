@@ -81,6 +81,31 @@ export function openModal(root: HTMLElement, opts: ModalOptions): ModalHandle {
     // 到達させない。最前面判定は modalStack の末尾と自分が一致するか。
     if (modalStack[modalStack.length - 1] !== backdrop) return;
     if (e.key === 'Escape') {
+      // ネイティブのドロップダウンを持つフォーム要素にフォーカスがある場合は、
+      // 1 回目の Esc はブラウザに任せてドロップダウンを閉じさせる (モーダルは
+      // 閉じない)。これがないと「<select> の選択肢を出した状態で Esc」が
+      // ドロップダウンではなくモーダル本体を閉じてしまうため。
+      //   対象: <select> / <input list=...> (datalist) / <input type=date|time|
+      //         datetime-local|month|week|color>
+      // dropdown が実際に開いているかは JS で確実に判定できないが、これらの
+      // 要素にフォーカスがある状況の Esc はネイティブ挙動を尊重する方が
+      // ユーザの直感に合致する。フォーカスが他にあるときは従来通りモーダル close。
+      const t = e.target as HTMLElement | null;
+      const tag = t?.tagName?.toLowerCase();
+      const inpType = (t as HTMLInputElement | null)?.type?.toLowerCase();
+      const nativeDropdownTags = new Set(['select']);
+      const nativeDropdownInputTypes = new Set([
+        'date', 'time', 'datetime-local', 'month', 'week', 'color',
+      ]);
+      const hasDatalist = tag === 'input' && !!(t as HTMLInputElement).getAttribute('list');
+      if (
+        (tag && nativeDropdownTags.has(tag)) ||
+        (tag === 'input' && inpType && nativeDropdownInputTypes.has(inpType)) ||
+        hasDatalist
+      ) {
+        // ネイティブ動作を尊重 (= ドロップダウンを閉じる)。モーダルは閉じない。
+        return;
+      }
       e.stopImmediatePropagation();
       close();
     } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {

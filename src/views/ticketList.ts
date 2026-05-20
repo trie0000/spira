@@ -885,14 +885,39 @@ function openInlineSelectMenu<T extends string>(
   menu.style.top = `${rect.bottom + 4}px`;
   menu.style.left = `${rect.left}px`;
   root().appendChild(menu);
-  setTimeout(() => {
-    const closer = (e: Event) => {
-      if (menu.contains(e.target as Node)) return;
-      menu.remove();
-      document.removeEventListener('click', closer);
-    };
-    document.addEventListener('click', closer);
-  }, 0);
+  attachFloatingMenuCloser(menu);
+}
+
+/** フローティングメニュー (openInlineSelectMenu / openInlineAssigneeMenu) 共通の
+ *  「外クリック / Esc / Tab 移動」で閉じるロジック。
+ *  - 外クリック: bubble phase の click listener
+ *  - Esc:       capture phase の keydown listener。モーダル内で開かれた
+ *               メニューでも、モーダルの Esc ハンドラ (document bubble) より
+ *               先に発火させて stopImmediatePropagation することで、メニュー
+ *               だけが閉じてモーダルは生き残る挙動を保証する。 */
+function attachFloatingMenuCloser(menu: HTMLElement): void {
+  const cleanup = (): void => {
+    menu.remove();
+    document.removeEventListener('click', onClick);
+    document.removeEventListener('keydown', onKey, true);
+  };
+  const onClick = (e: Event): void => {
+    if (menu.contains(e.target as Node)) return;
+    cleanup();
+  };
+  const onKey = (e: KeyboardEvent): void => {
+    if (e.key === 'Escape') {
+      // capture phase で動いているのでこの後の document bubble の
+      // モーダル Esc ハンドラに到達させない。
+      e.stopImmediatePropagation();
+      e.preventDefault();
+      cleanup();
+    }
+  };
+  // 開いた瞬間の click イベントで即閉じるのを避けるため click は次のタスクで登録。
+  setTimeout(() => document.addEventListener('click', onClick), 0);
+  // Esc はモーダルの listener より早く取りたいので capture=true。
+  document.addEventListener('keydown', onKey, true);
 }
 
 /** 担当者マルチ選択メニュー (チェックボックス式)。
@@ -961,14 +986,7 @@ export function openInlineAssigneeMenu(
   menu.style.left = `${rect.left}px`;
   root().appendChild(menu);
   setTimeout(() => filterInput.focus(), 0);
-  setTimeout(() => {
-    const closer = (e: Event) => {
-      if (menu.contains(e.target as Node)) return;
-      menu.remove();
-      document.removeEventListener('click', closer);
-    };
-    document.addEventListener('click', closer);
-  }, 0);
+  attachFloatingMenuCloser(menu);
 }
 
 /** インライン編集用: チケットを更新してトーストを出す。 */
