@@ -26,23 +26,39 @@ interface ParsedTeamsUrl {
  *    https://teams.microsoft.com/l/message/<channelId>/<messageId>?...
  *    https://teams.microsoft.com/dl/launcher/launcher.html?url=...&...  ← 2 段デコード
  *  失敗時は null。 */
+/** B3: Teams DeepLink URL の host を厳密検証。
+ *  URL() でパースし hostname が teams.microsoft.com (または末尾一致のサブ
+ *  ドメイン *.teams.microsoft.com) であることを確認する。文字列途中マッチで
+ *  攻撃者由来の https://attacker.example/redir?u=teams.microsoft.com/... を
+ *  許してしまうのを防ぐ。 */
+function isTeamsHost(hostname: string): boolean {
+  const h = hostname.toLowerCase();
+  return h === 'teams.microsoft.com' || h.endsWith('.teams.microsoft.com');
+}
+
 function parseTeamsMessageUrl(input: string): ParsedTeamsUrl | null {
   const raw = input.trim();
   if (!raw) return null;
-  try {
-    const u = new URL(raw);
-    if (u.hostname.includes('teams.microsoft.com') && u.pathname.includes('/dl/launcher/')) {
-      const inner = u.searchParams.get('url');
-      if (inner) return parseTeamsMessageUrl(decodeURIComponent(inner));
-    }
-  } catch {
-    return null;
+  // 必ず URL() でパースして host を検証。失敗なら拒否。
+  let u: URL;
+  try { u = new URL(raw); } catch { return null; }
+  if (u.protocol !== 'https:' && u.protocol !== 'http:') return null;
+  if (!isTeamsHost(u.hostname)) return null;
+
+  // launcher ラッパ (https://teams.microsoft.com/dl/launcher/launcher.html?url=...)
+  if (u.pathname.includes('/dl/launcher/')) {
+    const inner = u.searchParams.get('url');
+    if (inner) return parseTeamsMessageUrl(decodeURIComponent(inner));
   }
-  const m = raw.match(/teams\.microsoft\.com\/(?:_#\/)?l\/message\/([^/?#]+)\/([^/?#]+)/);
+
+  // 期待するパス形: /l/message/<channelId>/<messageId> または /_#/l/message/...
+  const path = u.pathname;
+  const m = path.match(/^\/(?:_#\/)?l\/message\/([^/?#]+)\/([^/?#]+)/);
   if (!m) return null;
   const channelId = decodeURIComponent(m[1]!);
   const messageId = decodeURIComponent(m[2]!);
-  return { channelId, messageId, url: raw };
+  // URL は正規化したものを使う (raw を直接持つと余分なクエリが残る)
+  return { channelId, messageId, url: u.toString() };
 }
 
 // 履歴を追加モーダルと揃えたスタイル定義 ----------------------------------

@@ -531,6 +531,15 @@ export function openSettingsHubModal(root: HTMLElement): void {
   // 現在アクティブなパネルの save。openModal の onPrimary がこれを呼ぶ。
   let currentSave: (() => Promise<void> | void) | null = null;
 
+  // B1: パネルキャッシュ — 一度開いたパネルは body + save をキャッシュし、
+  // 左ナビで切替・戻った時もユーザー入力中の draft (input 値や DOM 状態) を
+  // 失わない。各セクションは初回表示時にのみ build される。
+  // L4: 切替連打時のレースも回避できる (cached body は build 不要なので await
+  // 不要 → 後勝ち上書きが発生しない)。
+  const panelCache = new Map<string, SettingPanel>();
+  // 切替レース防止: renderDetail に世代カウンタを付与する
+  let renderToken = 0;
+
   let closeModal: (() => void) | null = null;
   const onClose = (): void => { closeModal?.(); };
 
@@ -542,8 +551,18 @@ export function openSettingsHubModal(root: HTMLElement): void {
   const renderDetail = async (): Promise<void> => {
     const item = findItem(activeKey);
     if (!item) return;
+    const cached = panelCache.get(activeKey);
+    if (cached) {
+      currentSave = cached.save ?? null;
+      detailPane.replaceChildren(cached.body);
+      detailPane.scrollTop = 0;
+      return;
+    }
+    const myToken = ++renderToken;
     detailPane.replaceChildren(el('div', { style: 'color:var(--ink-3);font-size:var(--fs-sm)' }, ['読み込み中…']));
     const panel = await item.render(root, onClose);
+    if (myToken !== renderToken) return; // L4: stale, ユーザーは別パネルに移動済み
+    panelCache.set(activeKey, panel);
     currentSave = panel.save ?? null;
     detailPane.replaceChildren(panel.body);
     detailPane.scrollTop = 0;

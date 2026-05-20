@@ -12,6 +12,10 @@ interface ModalOptions {
   hideCancel?: boolean;
 }
 
+// B2: モーダルのスタック。多階層モーダルで Esc / Ctrl+Enter が最前面のみに
+// 効くように、現在開いているモーダル backdrop の順序を保持する。
+const modalStack: HTMLElement[] = [];
+
 export interface ModalHandle {
   close(): void;
   setPrimaryDisabled(disabled: boolean): void;
@@ -70,8 +74,15 @@ export function openModal(root: HTMLElement, opts: ModalOptions): ModalHandle {
   }, [modal]);
 
   function onKey(e: KeyboardEvent) {
-    if (e.key === 'Escape') { close(); }
-    else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+    // B2: モーダルが多階層に重なった時、Esc / Ctrl+Enter で最前面のみ
+    // 処理する。stopImmediatePropagation で他の (背後の) モーダルの listener へ
+    // 到達させない。最前面判定は modalStack の末尾と自分が一致するか。
+    if (modalStack[modalStack.length - 1] !== backdrop) return;
+    if (e.key === 'Escape') {
+      e.stopImmediatePropagation();
+      close();
+    } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+      e.stopImmediatePropagation();
       primaryBtn.click();
     }
   }
@@ -79,8 +90,11 @@ export function openModal(root: HTMLElement, opts: ModalOptions): ModalHandle {
   function close() {
     backdrop.remove();
     document.removeEventListener('keydown', onKey);
+    const idx = modalStack.indexOf(backdrop);
+    if (idx >= 0) modalStack.splice(idx, 1);
   }
 
+  modalStack.push(backdrop);
   root.appendChild(backdrop);
   document.addEventListener('keydown', onKey);
 
