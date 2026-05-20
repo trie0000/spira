@@ -2930,13 +2930,26 @@ function renderNoteCard(c: Comment, lastSeen: number | null = null): HTMLElement
     });
   };
 
+  // 内部メモは「作成時刻」より「最終更新時刻」を見せたほうが
+  // ユーザの直感に合う (メモは更新が前提のため)。updatedAt > sentAt の
+  // ときは更新時刻を、未編集の場合は元の sentAt を表示する。
+  const displayDate = (): string => {
+    const u = c.updatedAt;
+    const s = c.sentAt ?? c.createdAt;
+    if (u && s && u !== s) return fmtDate(u);
+    return fmtDate(s ?? u ?? '');
+  };
+
   // Inline editor with debounced auto-save. No "edit" / "save" toggle —
   // typing into the card persists automatically. Unsaved status is shown
   // next to the date so the user knows when their work has landed.
   const status = el('span', {
     class: 'spira-note-status',
     style: 'margin-left:auto;color:var(--ink-3);font-size:var(--fs-sm);min-width:0;text-align:right',
-  }, [fmtDate(c.sentAt)]);
+    title: c.updatedAt && c.sentAt && c.updatedAt !== c.sentAt
+      ? `登録: ${fmtDate(c.sentAt)}\n最終更新: ${fmtDate(c.updatedAt)}`
+      : `登録: ${fmtDate(c.sentAt ?? c.createdAt ?? '')}`,
+  }, [displayDate()]);
 
   // Legacy HTML notes (created before the editor port) get a one-way
   // conversion to markdown on first edit. We convert eagerly so the user
@@ -2949,13 +2962,21 @@ function renderNoteCard(c: Comment, lastSeen: number | null = null): HTMLElement
   let saving = false;
   let inflight: Promise<void> = Promise.resolve();
 
+  const refreshStatusTooltip = (): void => {
+    status.setAttribute('title',
+      c.updatedAt && c.sentAt && c.updatedAt !== c.sentAt
+        ? `登録: ${fmtDate(c.sentAt)}\n最終更新: ${fmtDate(c.updatedAt)}`
+        : `登録: ${fmtDate(c.sentAt ?? c.createdAt ?? '')}`,
+    );
+  };
+
   const flashSaved = (): void => {
     status.textContent = '保存済み';
     setTimeout(() => {
       // Restore the date label only if we're still in "saved" state — a
       // subsequent edit would have flipped to "未保存".
       if (status.textContent === '保存済み') {
-        status.textContent = fmtDate(c.sentAt);
+        status.textContent = displayDate();
       }
     }, 1200);
   };
@@ -2963,7 +2984,7 @@ function renderNoteCard(c: Comment, lastSeen: number | null = null): HTMLElement
   const flushSave = async (): Promise<void> => {
     if (!editor) return;
     const v = editor.getMarkdown();
-    if (v === c.content && !c.isHtml) { status.textContent = fmtDate(c.sentAt); return; }
+    if (v === c.content && !c.isHtml) { status.textContent = displayDate(); return; }
     saving = true;
     status.textContent = '保存中...';
     try {
@@ -2976,6 +2997,11 @@ function renderNoteCard(c: Comment, lastSeen: number | null = null): HTMLElement
       await getRepo().updateComment(c.id, { content: v, isHtml: false });
       c.content = v;
       c.isHtml = false;
+      // 楽観的に updatedAt を「今」で更新しておく。次回 listComments で
+      // SP の Modified を取り直したらそちらで上書きされる (端末時計のズレも
+      // 自動補正)。これで保存直後に表示日付が「最新の編集時刻」に切り替わる。
+      c.updatedAt = new Date().toISOString();
+      refreshStatusTooltip();
       // Tell the parent ticketDetail's polling loop that this change
       // came from this client. Without this, the next 30-sec poll would
       // see a fingerprint mismatch and show the "他のメンバーが…"
