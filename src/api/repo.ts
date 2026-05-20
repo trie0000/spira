@@ -140,6 +140,16 @@ export interface Repository {
   /** findDuplicateTicket など重複検知のみ目的で listComments を呼ぶ用。
    *  通常版と違って自己治癒 (重複コメント DELETE) を行わない。 */
   listCommentsForLookup?(ticketId: number): Promise<import('../types').Comment[]>;
+  /** 選択肢 (status / priority / department / inquiryCategory) の改名・削除に
+   *  伴い、該当値を持つ既存チケットを一括更新する。
+   *  - renames の `<old, new>` → そのフィールドが old のチケットを new に変更
+   *  - deletions の `<old>` → そのフィールドが old のチケットを null に変更
+   *  戻り値: 更新件数 + 行ごとのエラーメッセージ。 */
+  bulkMigrateTicketField(
+    field: 'status' | 'priority' | 'department' | 'inquiryCategory',
+    renames: Map<string, string>,
+    deletions: Set<string>,
+  ): Promise<{ updated: number; errors: string[] }>;
   markInboxProcessed(id: number, patch: { ticketId: number; result: InboxState }): Promise<void>;
   /** 「管理外」マーク。reason を渡すと ExclusionReason 列に記録。 */
   hideInboxItems(ids: number[], reason?: string): Promise<void>;

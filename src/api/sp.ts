@@ -1127,6 +1127,65 @@ export class SpRepository implements Repository {
 
   // ---- inbox
 
+  async bulkMigrateTicketField(
+    field: 'status' | 'priority' | 'department' | 'inquiryCategory',
+    renames: Map<string, string>,
+    deletions: Set<string>,
+  ): Promise<{ updated: number; errors: string[] }> {
+    const SP_FIELD: Record<typeof field, string> = {
+      status: 'Status',
+      priority: 'Priority',
+      department: 'Department',
+      inquiryCategory: 'InquiryCategory',
+    } as const;
+    const spField = SP_FIELD[field];
+    let updated = 0;
+    const errors: string[] = [];
+
+    const updateMatching = async (oldVal: string, newVal: string | null): Promise<void> => {
+      if (!oldVal) return;
+      const url = `${this.listPath(this.cfg.listTickets)}/items?$select=Id&` +
+        `$filter=${encodeURIComponent(`IsDeleted eq 0 and ${spField} eq '${oldVal.replace(/'/g, "''")}'`)}&$top=500`;
+      let all: SpListItem[];
+      try {
+        all = await this.fetchAllPaged<SpListItem>(url);
+      } catch (e) {
+        errors.push(`${spField}='${oldVal}' 検索失敗: ${(e as Error).message}`);
+        return;
+      }
+      for (const it of all) {
+        try {
+          await this.tx.update(this.listPath(this.cfg.listTickets), it.Id, { [spField]: newVal });
+          updated++;
+        } catch (e) {
+          errors.push(`#${it.Id} ${spField}='${oldVal}' → '${newVal ?? '(空)'}' 失敗: ${(e as Error).message}`);
+        }
+      }
+    };
+
+    for (const [oldVal, newVal] of renames.entries()) {
+      await updateMatching(oldVal, newVal);
+    }
+    for (const oldVal of deletions) {
+      await updateMatching(oldVal, null);
+    }
+    if (updated > 0 || errors.length > 0) {
+      void emitAudit({
+        action: 'ticket.update',
+        ticketId: 0,
+        targetType: 'ticket',
+        details: {
+          bulkMigrateField: spField,
+          renames: Array.from(renames.entries()),
+          deletions: Array.from(deletions),
+          updated,
+          errors: errors.length,
+        },
+      });
+    }
+    return { updated, errors };
+  }
+
   async getInboxItem(id: number): Promise<InboxMail | null> {
     try {
       const it = await this.tx.req<SpListItem>(`${this.listPath(this.cfg.listInbox)}/items(${id})`);

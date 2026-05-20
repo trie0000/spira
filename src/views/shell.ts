@@ -877,8 +877,20 @@ export function buildOptionsPanel(root: HTMLElement, kind: OptionsPanelKind): { 
     priority: { title: '影響度の選択肢',        getter: getPriorityOptions,        setter: setPriorityOptions,        placeholder: '例: High / Medium / Low' },
   }[kind];
   const { title, getter, setter, placeholder } = meta;
+  // dept/category/status/priority → Ticket フィールド名へのマッピング (バルク更新用)
+  const TICKET_FIELD: Record<OptionsPanelKind, 'department' | 'inquiryCategory' | 'status' | 'priority'> = {
+    dept: 'department',
+    category: 'inquiryCategory',
+    status: 'status',
+    priority: 'priority',
+  };
 
+  // 初期ロード時のスナップショット (改名・削除の差分計算用)。
+  let initialSnapshot: string[] = [];
   let draft: string[] = [];
+  // 各 draft 行に対応する「元の値」。新規追加行は null。改名されても元の値は
+  // ここに保持される。並び替え・削除では draft と一緒に splice / swap される。
+  let rowOrigin: (string | null)[] = [];
 
   const listHost = el('div', { style: 'display:flex;flex-direction:column;gap:var(--s-2);max-height:50vh;overflow-y:auto' });
 
@@ -952,9 +964,8 @@ export function buildOptionsPanel(root: HTMLElement, kind: OptionsPanelKind): { 
           disabled: i === 0,
           onclick: () => {
             if (i === 0) return;
-            const tmp = draft[i - 1]!;
-            draft[i - 1] = draft[i]!;
-            draft[i] = tmp;
+            [draft[i - 1], draft[i]] = [draft[i]!, draft[i - 1]!];
+            [rowOrigin[i - 1], rowOrigin[i]] = [rowOrigin[i]!, rowOrigin[i - 1]!];
             renderList();
           },
         }, ['↑']),
@@ -965,9 +976,8 @@ export function buildOptionsPanel(root: HTMLElement, kind: OptionsPanelKind): { 
           disabled: i === draft.length - 1,
           onclick: () => {
             if (i === draft.length - 1) return;
-            const tmp = draft[i + 1]!;
-            draft[i + 1] = draft[i]!;
-            draft[i] = tmp;
+            [draft[i + 1], draft[i]] = [draft[i]!, draft[i + 1]!];
+            [rowOrigin[i + 1], rowOrigin[i]] = [rowOrigin[i]!, rowOrigin[i + 1]!];
             renderList();
           },
         }, ['↓']),
@@ -978,6 +988,7 @@ export function buildOptionsPanel(root: HTMLElement, kind: OptionsPanelKind): { 
           title: '削除',
           onclick: () => {
             draft.splice(i, 1);
+            rowOrigin.splice(i, 1);
             renderList();
           },
         }, ['×']),
@@ -1001,6 +1012,7 @@ export function buildOptionsPanel(root: HTMLElement, kind: OptionsPanelKind): { 
         return;
       }
       draft.push(v);
+      rowOrigin.push(null); // 新規追加なので origin は null
       addInput.value = '';
       renderList();
       addInput.focus();
@@ -1021,10 +1033,10 @@ export function buildOptionsPanel(root: HTMLElement, kind: OptionsPanelKind): { 
       el('br'),
       '※ 設定は SpiraSettings リストに保存され、全ユーザーで共有されます。',
       el('br'),
-      '※ 名称変更しても ', el('strong', {}, ['既存チケットに保存された旧名はそのまま残ります']),
-      ' (一覧表示時は旧名のまま、新規選択時は新名になります)。一括書換えしたい場合は SP 側で値置換が必要です。',
-      el('br'),
-      '※ 削除しても既存チケットの値は残ります (新規選択肢としては選べなくなるだけ)。',
+      '※ ', el('strong', {}, ['保存ボタンを押すと既存チケットも一括更新']),
+      ' されます: 名称変更 → 該当チケットを新名に書き換え / 削除 → 該当チケットの値を ',
+      el('strong', {}, ['ブランクにリセット']),
+      '。件数が多い場合は更新に時間がかかる場合があります。',
       ...(kind === 'category' ? [
         el('br'),
         '※ Forms 起票時、応答のカテゴリ値がここの一覧と一致すれば自動マッピング。一致しない場合は応答の値そのままが入ります。',
@@ -1037,15 +1049,53 @@ export function buildOptionsPanel(root: HTMLElement, kind: OptionsPanelKind): { 
   ]);
 
   void getter().then((list) => {
+    initialSnapshot = [...list];
     draft = [...list];
+    rowOrigin = list.map(v => v); // 初期ロードは全部 origin=自分自身
     renderList();
   });
   renderList(); // 初期 (ロード中)
 
   const save = async (): Promise<void> => {
     try {
+      // 差分計算: rowOrigin と draft を見比べて renames / deletions を作る。
+      const renames = new Map<string, string>();
+      const presentOrigins = new Set<string>();
+      for (let i = 0; i < draft.length; i++) {
+        const o = rowOrigin[i];
+        if (!o) continue;                      // 新規追加行 (origin=null) はスキップ
+        presentOrigins.add(o);
+        if (o !== draft[i]) renames.set(o, draft[i]!);  // 改名
+      }
+      // 初期にあって今 rowOrigin に存在しない = 削除された値
+      const deletions = new Set<string>(
+        initialSnapshot.filter(v => !presentOrigins.has(v))
+      );
+
+      // 先に SpiraSettings を保存 (新しい選択肢リスト)
       await setter(draft);
-      toast(root, `${title}を保存しました (${draft.length} 件)`, 'ok', 4000);
+
+      // バルク更新を実施 (該当チケットがあれば)
+      if (renames.size > 0 || deletions.size > 0) {
+        const repo = getRepo();
+        const field = TICKET_FIELD[kind];
+        const result = await repo.bulkMigrateTicketField(field, renames, deletions);
+        const parts: string[] = [`${title}を保存`];
+        if (renames.size > 0) parts.push(`改名 ${renames.size} 件`);
+        if (deletions.size > 0) parts.push(`削除 ${deletions.size} 件`);
+        if (result.updated > 0) parts.push(`既存チケット ${result.updated} 件を一括更新`);
+        if (result.errors.length > 0) {
+          toast(root, `${parts.join(' / ')} (エラー ${result.errors.length} 件)`, 'warn', 8000);
+          console.warn('[spira/bulkMigrate] errors:', result.errors);
+        } else {
+          toast(root, parts.join(' / '), 'ok', 6000);
+        }
+        // 反映後のスナップショットを更新 (再保存に備える)
+        initialSnapshot = [...draft];
+        rowOrigin = draft.map(v => v);
+      } else {
+        toast(root, `${title}を保存しました (${draft.length} 件)`, 'ok', 4000);
+      }
       setState({});
     } catch (e) {
       toast(root, `保存失敗: ${(e as Error).message}`, 'error');

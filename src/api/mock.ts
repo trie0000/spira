@@ -463,6 +463,30 @@ export class MockRepository implements Repository {
     return c;
   }
 
+  async bulkMigrateTicketField(
+    field: 'status' | 'priority' | 'department' | 'inquiryCategory',
+    renames: Map<string, string>,
+    deletions: Set<string>,
+  ): Promise<{ updated: number; errors: string[] }> {
+    let updated = 0;
+    const nowIso = now();
+    for (const t of store.tickets) {
+      if (t.isDeleted) continue;
+      const cur = (t as Record<string, unknown>)[field] as string | undefined;
+      if (!cur) continue;
+      if (renames.has(cur)) {
+        (t as Record<string, unknown>)[field] = renames.get(cur);
+        t.updatedAt = nowIso;
+        updated++;
+      } else if (deletions.has(cur)) {
+        (t as Record<string, unknown>)[field] = undefined;
+        t.updatedAt = nowIso;
+        updated++;
+      }
+    }
+    return { updated, errors: [] };
+  }
+
   async getInboxItem(id: number): Promise<InboxMail | null> {
     return store.inbox.find(m => m.id === id) ?? null;
   }
