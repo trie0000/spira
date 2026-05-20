@@ -371,7 +371,7 @@ export class MockRepository implements Repository {
       fromName?: string | null;
       fromEmail?: string | null;
       sentAt?: string;
-      source?: 'mail' | 'teams' | 'other';
+      source?: 'mail' | 'forms' | 'teams' | 'other';
     },
   ): Promise<void> {
     const c = store.comments.find(x => x.id === id);

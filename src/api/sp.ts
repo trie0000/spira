@@ -289,12 +289,18 @@ function asComment(it: SpListItem): Comment {
 }
 
 function normalizeSource(v: unknown): 'mail' | 'forms' | 'teams' | 'other' | undefined {
-  if (v === 'mail' || v === 'forms' || v === 'teams' || v === 'other') return v;
+  // C4: PA フローや管理者が手書きで 'Mail' 等のケース違いを入れる可能性が
+  // あるので、文字列化 + 小文字化してからマッチ。
+  if (typeof v !== 'string') return undefined;
+  const s = v.trim().toLowerCase();
+  if (s === 'mail' || s === 'forms' || s === 'teams' || s === 'other') return s;
   return undefined;
 }
 
 function normalizeThreadKind(v: unknown): 'internal' | 'external' | undefined {
-  if (v === 'internal' || v === 'external') return v;
+  if (typeof v !== 'string') return undefined;
+  const s = v.trim().toLowerCase();
+  if (s === 'internal' || s === 'external') return s;
   return undefined;
 }
 
@@ -599,9 +605,13 @@ export class SpRepository implements Repository {
   }
 
   /** スキーマドリフト対策: 既存列の TypeAsString が現在の定義と
-   *  違う場合、古い列を DELETE する。次の ensureFields でほしい型で
-   *  作り直される。旧データは消えるが、Spira では DeepLink (Text→Note)
-   *  くらいしか該当しないので影響範囲は限定的。 */
+   *  違う場合、古い列を DELETE する (次の ensureFields でほしい型で再作成)。
+   *
+   *  C5 セーフガード:
+   *  - 互換ペア (Text ↔ Note 等) はそのまま残す (データロスを起こさない)
+   *  - 列に既存データが入っている場合は削除しない (count>0 で skip + 警告)
+   *  - PA が拾う Choice 列 (Status / Priority など) も保護リストで除外
+   */
   private async migrateFieldTypeMismatches(title: string, fields: FieldSpec[]): Promise<void> {
     const url = `${this.listPath(title)}/fields?$select=InternalName,Title,StaticName,TypeAsString&$top=500`;
     let res: { value: { InternalName: string; Title: string; StaticName: string; TypeAsString: string }[] };
@@ -614,12 +624,45 @@ export class SpRepository implements Repository {
       if (f.StaticName) byName.set(f.StaticName, t);
       if (f.Title) byName.set(f.Title, t);
     }
+    // 「実質互換」とみなして移行をスキップする型ペア集合。
+    // 例: Text と Note は格納先が違うが文字列という意味では互換、Choice ↔ Text も
+    // ユーザーが意図して Choice にしているケースを尊重する。
+    const compatible = (cur: string, want: string): boolean => {
+      const pair = `${cur}|${want}`;
+      return (
+        pair === 'Text|Note'   || pair === 'Note|Text'   ||
+        pair === 'Text|Choice' || pair === 'Choice|Text' ||
+        pair === 'Number|Currency' || pair === 'Currency|Number'
+      );
+    };
     for (const spec of fields) {
       const cur = byName.get(spec.name);
       if (!cur) continue;
       const want = spFieldTypeString(spec.type);
       if (cur === want) continue;
-      // 型が違う列だけ削除。例: Text → Note への移行。
+      if (compatible(cur, want)) {
+        console.log(`[spira] field type drift tolerated: ${title}.${spec.name} (${cur} ≈ ${want})`);
+        continue;
+      }
+      // C5: 既存値がある列を破壊的に削除しない。$top=1 で値の有無を先に確認。
+      try {
+        const probe = await this.tx.req<ListItemsResp<SpListItem>>(
+          `${this.listPath(title)}/items?$select=Id,${encodeURIComponent(spec.name)}` +
+          `&$filter=${encodeURIComponent(`${spec.name} ne null`)}&$top=1`
+        );
+        if (probe.value && probe.value.length > 0) {
+          console.warn(
+            `[spira] field migrate SKIPPED (列にデータあり): ${title}.${spec.name} (${cur} → ${want}). ` +
+            `データロスを避けるため自動マイグレーションは行いません。手動で列の型を ${want} に揃えてください。`,
+          );
+          continue;
+        }
+      } catch (e) {
+        // データ確認に失敗 (権限不足など) なら安全側で削除しない
+        console.warn(`[spira] field migrate aborted (probe failed): ${title}.${spec.name}`, (e as Error).message);
+        continue;
+      }
+      // ここまで到達: 空の列で型が違うので削除して作り直す。
       try {
         await this.tx.req(
           `${this.listPath(title)}/fields/getbyinternalnameortitle('${encodeURIComponent(spec.name)}')`,
@@ -886,7 +929,7 @@ export class SpRepository implements Repository {
       fromName?: string | null;
       fromEmail?: string | null;
       sentAt?: string;
-      source?: 'mail' | 'teams' | 'other';
+      source?: 'mail' | 'forms' | 'teams' | 'other';
     },
   ): Promise<void> {
     const body: Record<string, unknown> = {};

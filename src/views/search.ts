@@ -297,15 +297,18 @@ function renderMatchCard(c: Comment, ticketId: number, query: string, closeModal
   const isNote = c.type === 'note';
   const iconName = isNote ? 'note'
     : c.source === 'teams' ? 'chat'
+    : c.source === 'forms' ? 'inbox'
     : c.source === 'other' ? 'bookmark'
     : 'mail';
   const sourceLabel = isNote ? '内部メモ'
     : c.source === 'teams' ? 'Teams'
+    : c.source === 'forms' ? 'Forms'
     : c.source === 'other' ? 'その他'
     : 'メール';
   // ソース別の色クラス (左ボーダー色を変えて視覚的に区別)
   const sourceClass = isNote ? 'spira-search-card--note'
     : c.source === 'teams' ? 'spira-search-card--teams'
+    : c.source === 'forms' ? 'spira-search-card--forms'
     : c.source === 'other' ? 'spira-search-card--other'
     : 'spira-search-card--mail';
 

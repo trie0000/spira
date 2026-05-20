@@ -1618,6 +1618,8 @@
 .spira-search-card--mail   .spira-search-card-src { color: #1d4ed8; font-weight: 600; }
 .spira-search-card--teams  { border-left-color: #8b5cf6; }
 .spira-search-card--teams  .spira-search-card-src { color: #6d28d9; font-weight: 600; }
+.spira-search-card--forms  { border-left-color: #a05a8c; background: rgba(160,90,140,0.04); }
+.spira-search-card--forms  .spira-search-card-src { color: #7c3a64; font-weight: 600; }
 .spira-search-card--other  { border-left-color: #9ca3af; }
 .spira-search-card--other  .spira-search-card-src { color: #4b5563; font-weight: 600; }
 /* ダークテーマでは少し明るめに */

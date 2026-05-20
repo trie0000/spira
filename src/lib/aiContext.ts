@@ -31,6 +31,7 @@ function commentContent(c: Comment): string {
 /** Source label in Japanese. */
 function sourceLabel(src: string | undefined): string {
   if (src === 'mail') return 'メール';
+  if (src === 'forms') return 'Forms';
   if (src === 'teams') return 'Teams';
   if (src === 'other') return 'その他';
   return '不明';
