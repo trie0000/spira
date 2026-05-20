@@ -60,17 +60,39 @@ export async function renderTicketDetail(ticketId: number): Promise<HTMLElement>
 
   const latestReceived = comments.filter(c => c.type === 'received').slice(-1)[0];
 
-  // 「外部対応経緯の最後のメール」= 外部スレッド (threadKind != 'internal')
-  // に流れた最新の受信メール (source=mail、または legacy で source 未設定)。
-  // 返信メール作成ボタンの返信対象として使う。
+  // 「返信メール作成」ボタンの返信ターゲット候補:
+  //   優先 1: 外部スレッド (threadKind != 'internal') の受信履歴で
+  //           fromEmail が取れている最新のもの → 正規 Reply 用に
+  //           InternetMessageId をリレーに渡せる
+  //   優先 2: チケットの reporterEmail → 新規メール作成にフォールバック
+  //           (受信履歴ゼロ / Forms 経由で respondent 不明 / 手動起票
+  //            のケースを救済)
+  // 両方無ければボタンを disable。
   const latestExternalMail = comments
     .filter(c =>
       c.type === 'received' &&
       c.threadKind !== 'internal' &&
-      (c.source === 'mail' || c.source == null) &&
       !!c.fromEmail
     )
     .slice(-1)[0];
+  const replyTarget: ReplyComposerTarget | undefined =
+    latestExternalMail
+      ? {
+          toEmail: latestExternalMail.fromEmail!,
+          toName: latestExternalMail.fromName ?? '',
+          inReplyToInternetMessageId: latestExternalMail.internetMessageId,
+          sourceLabel: '外部対応経緯の最後の受信',
+          sourceSentAt: latestExternalMail.sentAt,
+        }
+      : (t.reporterEmail
+          ? {
+              toEmail: t.reporterEmail,
+              toName: t.reporterName ?? '',
+              inReplyToInternetMessageId: undefined,
+              sourceLabel: 'チケットの申請者',
+              sourceSentAt: undefined,
+            }
+          : undefined);
 
   // Snapshot the user's PREVIOUS last-seen timestamp for this ticket
   // BEFORE stamping the current visit. Cards with sentAt > prevLastSeen
@@ -102,7 +124,7 @@ export async function renderTicketDetail(ticketId: number): Promise<HTMLElement>
     style: 'display:flex;flex-direction:column;height:100%;min-height:0',
   }, [
     await renderTabStrip(t, latestReceived),
-    renderTicketHeader(t, latestReceived, latestExternalMail),
+    renderTicketHeader(t, latestReceived, replyTarget),
     refreshBanner,
     renderSplitPanes(t, comments, prevLastSeen),
   ]);
@@ -643,21 +665,24 @@ async function renderTabStrip(activeT: Ticket, _latestReceived: Comment | undefi
 function buildTicketActions(
   activeT: Ticket,
   latestReceived: Comment | undefined,
-  latestExternalMail: Comment | undefined,
+  replyTarget: ReplyComposerTarget | undefined,
 ): HTMLElement[] {
-  // 返信メール作成ボタン: 外部対応経緯の最後のメールを返信対象として
-  // ローカル中継 (spira-relay.ps1) 経由で Outlook クライアントに
-  // 正規返信下書きを開かせる。relay が落ちている / 元メールが見つからない
-  // 場合は OWA Compose にフォールバック。
+  // 返信メール作成ボタン: 返信ターゲット (外部対応経緯の最新受信 or
+  // チケットの申請者) を対象にローカル中継 (spira-relay.ps1) 経由で
+  // Outlook クライアントに正規返信下書きを開かせる。
+  // InternetMessageId が無い場合 (申請者フォールバック / 受信履歴が
+  // Teams 等で ID 無し) は OWA Compose にフォールバック。
   const replyBtn = el('button', {
     class: 'spira-btn spira-btn--ghost spira-btn--sm',
-    title: latestExternalMail
-      ? `外部対応経緯の最後のメール (${latestExternalMail.fromName ?? latestExternalMail.fromEmail ?? ''}) への返信下書きを Outlook で開きます`
-      : '外部対応経緯にメール履歴がないため返信を作成できません',
-    disabled: !latestExternalMail,
+    title: replyTarget
+      ? (replyTarget.inReplyToInternetMessageId
+          ? `${replyTarget.sourceLabel} (${replyTarget.toName || replyTarget.toEmail}) への返信下書きを Outlook で開きます`
+          : `${replyTarget.sourceLabel} (${replyTarget.toName || replyTarget.toEmail}) 宛に新規メール作成画面を開きます (受信履歴の InternetMessageId が無いため OWA Compose にフォールバック)`)
+      : '宛先が取得できないため返信を作成できません (外部対応経緯にメール履歴がなく、申請者メールアドレスも未設定)',
+    disabled: !replyTarget,
     onclick: () => {
-      if (!latestExternalMail) return;
-      openReplyComposerModal(activeT, latestExternalMail);
+      if (!replyTarget) return;
+      openReplyComposerModal(activeT, replyTarget);
     },
   }, [
     el('span', { html: icon('mail'), style: 'display:inline-flex;width:14px;height:14px' }),
@@ -862,18 +887,29 @@ function buildTeamsThreadButton(activeT: Ticket, threadType: 'internal' | 'user'
   return btn;
 }
 
+/** 返信メール作成モーダルの「返信ターゲット」抽象。
+ *  - 外部対応経緯の最新受信 (= 正規 Reply 可) なら inReplyToInternetMessageId 有り
+ *  - 申請者メールフォールバック (= 新規 Compose) なら inReplyToInternetMessageId 無し */
+interface ReplyComposerTarget {
+  toEmail: string;
+  toName: string;
+  inReplyToInternetMessageId: string | undefined;
+  sourceLabel: string;     // 表示用 (例: '外部対応経緯の最後の受信' / 'チケットの申請者')
+  sourceSentAt: string | undefined;  // 表示用 (受信時刻)
+}
+
 /** 申請者への返信メール作成モーダル。
  *
- *  外部対応経緯の最終メールを「返信対象」として、件名 / Cc / 本文を編集して
- *  「Outlook で下書きを開く」をクリック → ローカル中継 (spira-relay.ps1) 経由で
- *  Outlook デスクトップに正規 Reply 下書きを表示する。relay が起動していない
- *  / 元メールが Outlook 内に見つからない場合は OWA Compose にフォールバック。
+ *  返信対象 (ReplyComposerTarget) は外部対応経緯の最終メールか、
+ *  チケットの申請者 (フォールバック) のいずれか。inReplyToInternetMessageId
+ *  があれば relay 経由で Outlook の正規 Reply 下書きを開く。無ければ
+ *  OWA Compose にフォールバック (新規メール作成)。
  *
  *  本文 textarea は「プレーンテキスト 入力 + 改行 → <br> 化」。HTML タグを
  *  直書きしたい場合はそのまま貼っても OK (簡易判定で生 HTML を尊重)。 */
-function openReplyComposerModal(activeT: Ticket, srcMail: Comment): void {
-  const fromAddress = (srcMail.fromEmail ?? '').trim();
-  const fromName = (srcMail.fromName ?? '').trim();
+function openReplyComposerModal(activeT: Ticket, target: ReplyComposerTarget): void {
+  const fromAddress = target.toEmail.trim();
+  const fromName = target.toName.trim();
   // 返信件名: タグ付きで `Re: [#NNN] チケットタイトル` を既定。元メール件名は
   // 申請者側で「ML プレフィックス + フォワード混入」等で揺れがちなので、
   // チケットタイトルから組み立てた方が安定。ユーザは編集可能。
@@ -932,14 +968,18 @@ function openReplyComposerModal(activeT: Ticket, srcMail: Comment): void {
            'border-radius:var(--r-2);padding:6px 10px;font-size:var(--fs-xs);' +
            'color:var(--ink-3);line-height:1.5',
   }, [
-    el('span', {}, ['返信対象: ']),
+    el('span', {}, [`返信対象 (${target.sourceLabel}): `]),
     el('strong', { style: 'color:var(--ink-2)' }, [fromName || fromAddress || '(差出人不明)']),
     ...(fromAddress && fromName ? [el('span', {}, [` <${fromAddress}>`])] : []),
-    el('br', {}, []),
-    el('span', {}, [`送信日時: ${fmtDate(srcMail.sentAt)}`]),
+    ...(target.sourceSentAt ? [
+      el('br', {}, []),
+      el('span', {}, [`受信時刻: ${fmtDate(target.sourceSentAt)}`]),
+    ] : []),
     el('br', {}, []),
     el('span', { style: 'font-family:var(--font-mono);font-size:11px;word-break:break-all' }, [
-      `InternetMessageId: ${srcMail.internetMessageId ?? '(なし — OWA フォールバックになります)'}`,
+      target.inReplyToInternetMessageId
+        ? `InternetMessageId: ${target.inReplyToInternetMessageId}`
+        : '※ 受信履歴の InternetMessageId が無いため OWA Compose で新規メール作成画面を開きます',
     ]),
   ]);
 
@@ -996,9 +1036,9 @@ function openReplyComposerModal(activeT: Ticket, srcMail: Comment): void {
         .split(/[,\s]+/).map(s => s.trim()).filter(Boolean);
 
       // relay 経由の正規 Reply を試す (InternetMessageId がある場合のみ)
-      if (srcMail.internetMessageId) {
+      if (target.inReplyToInternetMessageId) {
         const result = await openOutlookReplyDraft({
-          inReplyTo: srcMail.internetMessageId,
+          inReplyTo: target.inReplyToInternetMessageId,
           bodyHtml,
           cc,
         });
@@ -1200,7 +1240,7 @@ function openTeamsPostConfirmModal(
 function renderTicketHeader(
   t: Ticket,
   latestReceived: Comment | undefined,
-  latestExternalMail: Comment | undefined,
+  replyTarget: ReplyComposerTarget | undefined,
 ): HTMLElement {
   const idTag = formatTicketTag(t.id);
   const idDisplay = formatTicketIdShort(t.id);
@@ -1342,7 +1382,7 @@ function renderTicketHeader(
         t.reporterName ? ` · 起票元: ${t.reporterName}` : '',
       ]),
       el('div', { style: 'display:flex;gap:var(--s-2);align-items:center;flex-shrink:0' },
-        buildTicketActions(t, latestReceived, latestExternalMail),
+        buildTicketActions(t, latestReceived, replyTarget),
       ),
     ]),
     el('div', { class: 'spira-detail-title-row' }, [idLabel, titleInput]),
