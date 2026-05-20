@@ -285,8 +285,9 @@ export function openTicketPropertiesModal(ticket: Ticket): void {
     );
 
     // 内部スレッド / 外部スレッド
-    appendThreadRows(grid, current, 'internal', applyPatch);
+    // UX 統一: 外部 → 内部 の順に表示
     appendThreadRows(grid, current, 'user', applyPatch);
+    appendThreadRows(grid, current, 'internal', applyPatch);
 
     // フッターヒント (全幅)
     grid.append(

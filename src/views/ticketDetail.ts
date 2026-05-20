@@ -695,7 +695,7 @@ function buildTicketActions(activeT: Ticket, latestReceived: Comment | undefined
     'エクスポート',
   ]);
 
-  const buttons: HTMLElement[] = [aiBtn, copySubjectBtn, replyBtn, internalThreadBtn, userThreadBtn];
+  const buttons: HTMLElement[] = [aiBtn, copySubjectBtn, replyBtn, userThreadBtn, internalThreadBtn];
   if (formsBtn) buttons.push(formsBtn);
   buttons.push(exportBtn, propertiesBtn, deleteBtn);
   return buttons;
@@ -1279,8 +1279,8 @@ function renderSplitPanes(t: Ticket, comments: Comment[], lastSeen: number | nul
            'background:var(--paper);border-bottom:1px solid var(--line)',
   }, [
     el('span', { style: 'font-size:var(--fs-xs);color:var(--ink-3);margin-right:4px' }, ['表示:']),
-    modeBtn('🏢 内部のみ', 'internal', currentMode),
     modeBtn('👥 外部のみ', 'external', currentMode),
+    modeBtn('🏢 内部のみ', 'internal', currentMode),
     modeBtn('⫻ 並列', 'both', currentMode),
     modeBtn('🔀 マージ', 'merged', currentMode),
     el('span', { style: 'flex:1' }),

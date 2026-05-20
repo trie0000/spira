@@ -227,7 +227,7 @@ function exportTicketsCsv(tickets: Ticket[]): void {
     'ID', 'タイトル', 'ステータス', '影響度', '担当者', '担当者メール',
     '部門', '問い合わせ種別', '起票者', '起票者メール',
     '期限', '作成日', '最終更新',
-    'Teams 内部スレッド', 'Teams 外部スレッド',
+    'Teams 外部スレッド', 'Teams 内部スレッド',
     '説明 (先頭 200 文字)',
   ];
   const rows = tickets.map(t => [
@@ -244,8 +244,8 @@ function exportTicketsCsv(tickets: Ticket[]): void {
     t.dueDate ? fmtDate(t.dueDate, false) : '',
     fmtDate(t.createdAt),
     fmtDate(t.updatedAt),
-    t.internalDeepLink ?? '',
     t.userDeepLink ?? '',
+    t.internalDeepLink ?? '',
     (t.description ?? '').replace(/\s+/g, ' ').slice(0, 200),
   ]);
   const escape = (v: string): string => {
@@ -540,10 +540,11 @@ function renderTable(rows: Ticket[], metaMap: Map<number, TicketMeta>): HTMLElem
   const tableKey = 'tickets';
   // 列順 (renderHeaderRow と renderRow と必ず一致させること):
   //   ☐ / # / 件名 / ステータス / 担当 / 影響度 / 種別 / 部門 / 期限 /
-  //   内部スレ / 外部スレ / 最終返信 / 滞留日 / 経過日 / 更新
+  //   外部スレ / 内部スレ / 最終返信 / 滞留日 / 経過日 / 更新
+  // (UX 統一: 外部スレ → 内部スレ の順、ヘッダ / ボタン群と一致)
   const colKeys: (string | null)[] = [
     null, 'id', 'title', 'status', 'assignee', 'priority', 'category', 'dept',
-    'due', 'internal', 'external', 'lastDir', 'stagnant', 'elapsed', null,
+    'due', 'external', 'internal', 'lastDir', 'stagnant', 'elapsed', null,
   ];
   const defaults = [
     '36px', '64px', '280px', '96px', '120px', '80px', '140px', '120px',
@@ -580,8 +581,8 @@ function renderHeaderRow(visibleRows: Ticket[]): HTMLElement {
     { label: '種別' },                                // 問い合わせ種別 (影響度の隣)
     { label: '部門' },
     { label: '期限',        sortKey: 'due' },
+    { label: '外部スレ' },                             // 外部スレッド DeepLink (UX 統一: 外部 → 内部)
     { label: '内部スレ' },                             // 内部スレッド DeepLink
-    { label: '外部スレ' },                             // 外部スレッド DeepLink
     { label: '最終返信' },
     { label: '滞留日' },
     { label: '経過日' },
@@ -904,8 +905,8 @@ function renderRow(t: Ticket, meta?: TicketMeta): HTMLElement {
     categoryCell,
     deptCell,
     dueCellEditable,
+    userCell,           // 外部スレッド (UX 統一: 外部 → 内部)
     internalCell,
-    userCell,
     el('td', {}, [lastDirCell]),
     el('td', { class: stagnantCls }, [dayLabel(meta?.stagnantDays)]),
     el('td', { class: elapsedCls }, [dayLabel(meta?.elapsedDays)]),
