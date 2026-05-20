@@ -891,13 +891,60 @@ export function buildOptionsPanel(root: HTMLElement, kind: OptionsPanelKind): { 
       return;
     }
     draft.forEach((item, i) => {
+      // 名称をインラインで編集できる input。blur 時に draft[i] を更新。
+      // 重複・空文字は元の値に戻す。Enter で次の input にフォーカス。
+      const renameInput = el('input', {
+        type: 'text',
+        class: 'spira-input',
+        value: item,
+        style: 'flex:1;min-width:0;background:var(--paper);border:1px solid transparent;' +
+               'padding:4px 6px;border-radius:var(--r-2);font-size:var(--fs-sm)',
+        title: 'クリックして名称を編集 (フォーカスを外すと反映)',
+        onfocus: (e: Event) => {
+          (e.target as HTMLInputElement).style.borderColor = 'var(--accent)';
+        },
+        onblur: (e: Event) => {
+          const input = e.target as HTMLInputElement;
+          input.style.borderColor = 'transparent';
+          const next = input.value.trim();
+          if (!next) {
+            // 空欄は不可 — 元の値に戻す
+            input.value = draft[i] ?? '';
+            return;
+          }
+          if (next === draft[i]) return; // 変更なし
+          // 重複チェック (自分自身以外と比較)
+          const dupIdx = draft.findIndex((x, idx) => idx !== i && x === next);
+          if (dupIdx >= 0) {
+            toast(getRoot(), `「${next}」は既に存在します`, 'warn');
+            input.value = draft[i] ?? '';
+            return;
+          }
+          draft[i] = next;
+          // 名称変更の補足: 既存チケットの値は保存ボタンを押すまで更新されないため
+          // 視覚的なフィードバックだけ。
+        },
+        onkeydown: (e: KeyboardEvent) => {
+          if (e.key === 'Enter') {
+            (e.target as HTMLInputElement).blur();
+            // 次の input にフォーカス移動
+            const inputs = listHost.querySelectorAll<HTMLInputElement>('input.spira-input');
+            const idx = Array.from(inputs).indexOf(e.target as HTMLInputElement);
+            if (idx >= 0 && idx + 1 < inputs.length) inputs[idx + 1]?.focus();
+          } else if (e.key === 'Escape') {
+            (e.target as HTMLInputElement).value = draft[i] ?? '';
+            (e.target as HTMLInputElement).blur();
+          }
+        },
+      }) as HTMLInputElement;
+
       const row = el('div', {
         style:
           'display:flex;gap:var(--s-2);align-items:center;' +
           'padding:var(--s-2) var(--s-3);background:var(--paper);' +
           'border:1px solid var(--line);border-radius:var(--r-2)',
       }, [
-        el('span', { style: 'flex:1;min-width:0' }, [item]),
+        renameInput,
         el('button', {
           type: 'button',
           class: 'spira-btn spira-btn--ghost spira-btn--sm',
@@ -970,12 +1017,21 @@ export function buildOptionsPanel(root: HTMLElement, kind: OptionsPanelKind): { 
       style: 'font-size:var(--fs-xs);color:var(--ink-3);background:var(--paper-2);' +
              'padding:var(--s-3);border-radius:var(--r-2);line-height:1.6',
     }, [
+      '※ 各行の入力欄をクリックすると名称を編集できます (Enter / フォーカスを外すと反映、Esc でキャンセル)。',
+      el('br'),
       '※ 設定は SpiraSettings リストに保存され、全ユーザーで共有されます。',
       el('br'),
-      '※ 既存チケットに「削除済み」の選択肢が入っていても、その値は残ります (新規選択肢としては選べなくなるだけ)。',
+      '※ 名称変更しても ', el('strong', {}, ['既存チケットに保存された旧名はそのまま残ります']),
+      ' (一覧表示時は旧名のまま、新規選択時は新名になります)。一括書換えしたい場合は SP 側で値置換が必要です。',
+      el('br'),
+      '※ 削除しても既存チケットの値は残ります (新規選択肢としては選べなくなるだけ)。',
       ...(kind === 'category' ? [
         el('br'),
         '※ Forms 起票時、応答のカテゴリ値がここの一覧と一致すれば自動マッピング。一致しない場合は応答の値そのままが入ります。',
+      ] : []),
+      ...(kind === 'status' || kind === 'priority' ? [
+        el('br'),
+        '※ SP の Tickets リスト側 Choice 列にも同じ選択肢を手動追加する必要があります (SP リスト設定 → 列 → Status/Priority)。',
       ] : []),
     ]),
   ]);
