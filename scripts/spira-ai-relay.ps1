@@ -442,7 +442,14 @@ function Invoke-OutlookReplyHandler {
         $reply = $orig.Reply()
         $bodyHtml = "$($payload.bodyHtml)"
         if ($bodyHtml) {
-            $reply.HTMLBody = $bodyHtml + $reply.HTMLBody
+            # Spira から渡る bodyHtml はスタイル指定の無い <p>...</p> なので、
+            # そのまま prepend すると Outlook が「Times New Roman など HTML 既定」
+            # で描画してダサい。元メール引用部 (Outlook 自動生成) と同じ和文
+            # フォント感に揃えるため、<div style=...> でラップしてから付ける。
+            #   - 游ゴシック UI / Meiryo UI を 10.5pt (Outlook 日本語の典型)
+            #   - 色は黒固定 (テーマで白文字になるのを防ぐ)
+            $styled = '<div style="font-family:''Yu Gothic UI'',''Meiryo UI'',''Yu Gothic'',sans-serif; font-size:10.5pt; color:#000;">' + $bodyHtml + '</div>'
+            $reply.HTMLBody = $styled + $reply.HTMLBody
         }
         if ($payload.cc) {
             foreach ($addr in $payload.cc) {
@@ -516,7 +523,12 @@ function Invoke-OutlookNewHandler {
             $ccLine = ($payload.cc | Where-Object { $_ }) -join '; '
             if ($ccLine) { $mail.CC = $ccLine }
         }
-        $mail.HTMLBody = [string]$payload.bodyHtml
+        # 新規メールも reply と同じく、和文フォントを明示しないと Outlook が
+        # HTML 既定の Times New Roman で描画してしまうため、<div style=...> で
+        # ラップしてセット。詳細は /spira/outlook/reply のコメント参照。
+        $bodyHtml = [string]$payload.bodyHtml
+        $styled = '<div style="font-family:''Yu Gothic UI'',''Meiryo UI'',''Yu Gothic'',sans-serif; font-size:10.5pt; color:#000;">' + $bodyHtml + '</div>'
+        $mail.HTMLBody = $styled
         # ★ 設計上ここで .Send() は絶対に呼ばない。下書きを表示するだけ。
         # ★ 最終的な「送信」ボタン操作は operator 本人が Outlook クライアントで
         # ★ 確認した上で行う。誤送信防止のため、この方針は変更しないこと。
