@@ -850,6 +850,9 @@
 .spira-tk-table tr:hover td { background: var(--paper-2); }
 .spira-tk-row.active td { background: var(--accent-soft); }
 .spira-tk-row.selected td { background: var(--accent-soft); }
+/* Closed (= 完了) tickets: 全体グレーアウト。日数表示も updatedAt 基準で凍結する。 */
+#spira-root tr.spira-tk-row--closed td { color: var(--ink-3); opacity: 0.62; }
+#spira-root tr.spira-tk-row--closed:hover td { opacity: 0.85; }
 /* Hidden inbox row: greyed out so the user can tell it's currently filtered-out */
 #spira-root tr.spira-row-hidden td { opacity: 0.55; }
 #spira-root tr.spira-row-hidden:hover td { opacity: 0.85; }

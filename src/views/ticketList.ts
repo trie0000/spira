@@ -35,11 +35,19 @@ interface TicketMeta {
   hasNew: boolean;
 }
 
+/** 2 つの ISO 時刻の日数差。第 2 引数省略時は「今」基準。
+ *  完了チケットは updatedAt を基準にすることで日数を凍結する。 */
+function daysBetween(fromIso: string | null | undefined, toIso?: string): number | null {
+  if (!fromIso) return null;
+  const from = new Date(fromIso).getTime();
+  if (!Number.isFinite(from)) return null;
+  const to = toIso ? new Date(toIso).getTime() : Date.now();
+  if (!Number.isFinite(to)) return null;
+  return Math.max(0, Math.floor((to - from) / 86400000));
+}
+
 function daysSince(iso: string | null | undefined): number | null {
-  if (!iso) return null;
-  const t = new Date(iso).getTime();
-  if (!Number.isFinite(t)) return null;
-  return Math.max(0, Math.floor((Date.now() - t) / 86400000));
+  return daysBetween(iso);
 }
 
 function deriveTicketMeta(comments: Comment[], ticket: Ticket): TicketMeta {
@@ -48,9 +56,14 @@ function deriveTicketMeta(comments: Comment[], ticket: Ticket): TicketMeta {
     .sort((a, b) => new Date(a.sentAt ?? '').getTime() - new Date(b.sentAt ?? '').getTime());
   const last = received[received.length - 1];
   const lastSeen = getLastSeen(ticket.id);
+  // 完了チケットは updatedAt を基準時刻にして日数を凍結する。
+  // (案 A: 完了 = 更新停止という近似。完了後に編集すると updatedAt が
+  //  動くので厳密な closedAt ではないが、運用上ほぼ問題ない)
+  const isClosed = ticket.status === '完了';
+  const refIso = isClosed ? ticket.updatedAt : undefined;
   return {
-    elapsedDays: daysSince(ticket.createdAt),
-    stagnantDays: last ? daysSince(last.sentAt ?? null) : null,
+    elapsedDays: daysBetween(ticket.createdAt, refIso),
+    stagnantDays: last ? daysBetween(last.sentAt ?? null, refIso) : null,
     lastReplyDirection: last
       ? (isInternalAuthor(last, getState().users) ? 'internal' : 'external')
       : null,
@@ -851,8 +864,11 @@ function renderRow(t: Ticket, meta?: TicketMeta): HTMLElement {
   const categoryCell = textCell(t.inquiryCategory);
   const deptCell = textCell(t.department);
 
+  const isClosed = t.status === '完了';
   return el('tr', {
-    class: 'spira-tk-row' + (selectedIds.has(t.id) ? ' selected' : ''),
+    class: 'spira-tk-row'
+      + (selectedIds.has(t.id) ? ' selected' : '')
+      + (isClosed ? ' spira-tk-row--closed' : ''),
     onclick: (e: Event) => {
       const target = e.target as HTMLElement;
       if (target.closest('.spira-tk-checkbox-cell')) return;
