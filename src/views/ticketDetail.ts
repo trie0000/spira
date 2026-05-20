@@ -676,9 +676,28 @@ function buildTicketActions(activeT: Ticket, latestReceived: Comment | undefined
     'AI',
   ]);
 
+  // エクスポートボタン — Markdown / HTML / PDF / JSON 形式で出力。
+  // 対象 (内部/外部/メモ) + 表示形式 (併記/マージ) をモーダルで選ばせる。
+  const exportBtn = el('button', {
+    class: 'spira-btn spira-btn--ghost spira-btn--sm',
+    title: 'チケットをエクスポート (Markdown / HTML / PDF / JSON)',
+    onclick: async () => {
+      try {
+        const comments = await getRepo().listComments(activeT.id);
+        const { openTicketExportModal } = await import('./ticketExportModal');
+        openTicketExportModal(activeT, comments);
+      } catch (e) {
+        toast(getRoot(), `読込失敗: ${(e as Error).message}`, 'error');
+      }
+    },
+  }, [
+    el('span', { html: icon('external'), style: 'display:inline-flex;width:14px;height:14px' }),
+    'エクスポート',
+  ]);
+
   const buttons: HTMLElement[] = [aiBtn, copySubjectBtn, replyBtn, internalThreadBtn, userThreadBtn];
   if (formsBtn) buttons.push(formsBtn);
-  buttons.push(propertiesBtn, deleteBtn);
+  buttons.push(exportBtn, propertiesBtn, deleteBtn);
   return buttons;
 }
 

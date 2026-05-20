@@ -232,6 +232,25 @@ function renderBasics(): HTMLElement {
       ]),
     ]),
 
+    el('h2', { style: H2 }, ['チケットのエクスポート']),
+    el('p', { style: P }, [
+      'チケット詳細ヘッダの ', el('strong', {}, ['📤 エクスポート']),
+      ' ボタンで、選択したセクションを 4 形式から書き出せます。',
+    ]),
+    el('ul', { style: UL }, [
+      el('li', {}, [el('strong', {}, ['対象選択: ']), '🏢 内部スレッド / 👥 外部スレッド / 📝 内部メモ の組合せ']),
+      el('li', {}, [el('strong', {}, ['表示形式: ']), '併記 (独立セクション) / マージ (時系列統合、ラベル付き) を切替']),
+      el('li', {}, [el('strong', {}, ['オプション: ']), 'チケット属性 / 送信者・送信時刻 / HTML 本文そのまま / 添付リンク を個別 ON/OFF']),
+      el('li', {}, [
+        el('strong', {}, ['形式: ']),
+        '📝 Markdown / 🌐 HTML / 📄 PDF (印刷ダイアログ経由) / 🧬 JSON',
+      ]),
+    ]),
+    el('div', { style: HINT }, [
+      'PDF は新規タブで HTML を開いてブラウザの印刷ダイアログから「PDF として保存」を選びます。',
+      'HTML は単独ファイルでメール添付可能 (画像は base64 でインライン埋め込み)。',
+    ]),
+
     el('h2', { style: H2 }, ['キーボードショートカット']),
     el('table', {
       style: 'width:auto;border-collapse:collapse;font-size:var(--fs-sm)',
