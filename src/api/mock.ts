@@ -777,7 +777,6 @@ export class MockRepository implements Repository {
     threadType: 'internal' | 'user';
     subject?: string;
     bodyHtml?: string;
-    mentionedEmails?: string[];
   }): Promise<{ id: number }> {
     const settingKey = params.threadType === 'internal'
       ? 'teams-channel:internal'
@@ -816,7 +815,6 @@ export class MockRepository implements Repository {
         threadType: params.threadType, channelId,
         hasSubject: !!params.subject,
         hasBody: !!params.bodyHtml,
-        mentions: (params.mentionedEmails ?? []).length,
       },
     });
     return { id: reqId };

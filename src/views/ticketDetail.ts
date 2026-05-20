@@ -811,7 +811,7 @@ function buildTeamsThreadButton(activeT: Ticket, threadType: 'internal' | 'user'
         window.open(deepLink, '_blank', 'noopener');
         return;
       }
-      // 確認モーダル: 投稿先チャネル / タイトル / 本文 / メンションを編集して
+      // 確認モーダル: 投稿先チャネル / タイトル / 本文を編集して
       // 「起票する」で createTeamsPostRequest に渡す。
       openTeamsPostConfirmModal(activeT, threadType, async (input) => {
         // 連打防止
@@ -823,7 +823,6 @@ function buildTeamsThreadButton(activeT: Ticket, threadType: 'internal' | 'user'
             threadType,
             subject: input.subject,
             bodyHtml: input.bodyHtml,
-            mentionedEmails: input.mentionedEmails,
           });
           toast(
             getRoot(),
@@ -851,12 +850,10 @@ function buildTeamsThreadButton(activeT: Ticket, threadType: 'internal' | 'user'
 
 /** Teams スレッド起票の事前確認モーダル。
  *  投稿先チャネル (設定済みの teams-channel:{internal|external} から解決) と、
- *  Teams 親メッセージの「タイトル / 本文 / メンション対象」を編集できる
- *  フォームを表示し、ユーザの「起票する」クリックで入力値を onConfirm に渡す。
+ *  Teams 親メッセージの「タイトル / 本文」を編集できるフォームを表示し、
+ *  ユーザの「起票する」クリックで入力値を onConfirm に渡す。
  *
  *  - タイトル/本文: 初期値はチケットの ID タグ + タイトル / description。
- *  - メンション: AD ユーザから複数選択。チップ表示。PA 側で email →
- *    AAD ObjectId を解決して <at> タグ + mentions[] を組み立てる。
  *
  *  チャネル未設定の場合: 警告を出し「起票する」を disable。設定画面への
  *  動線を案内する (歯車 → Teams チャネル)。 */
@@ -866,7 +863,6 @@ function openTeamsPostConfirmModal(
   onConfirm: (input: {
     subject: string;
     bodyHtml: string;
-    mentionedEmails: string[];
   }) => void | Promise<void>,
 ): void {
   const isInternal = threadType === 'internal';
@@ -893,70 +889,6 @@ function openTeamsPostConfirmModal(
     placeholder: '本文を入力 (改行可)。<br> や <strong> 等の HTML タグも使えます。',
   }) as HTMLTextAreaElement;
   bodyTextarea.value = initialBody;
-
-  // メンションするユーザの選択状態 (email キー)。
-  const mentionEmails = new Set<string>();
-  const mentionChipsWrap = el('div', {
-    style: 'display:flex;flex-wrap:wrap;gap:6px;min-height:28px;align-items:center',
-  });
-  const renderChips = (): void => {
-    mentionChipsWrap.innerHTML = '';
-    if (mentionEmails.size === 0) {
-      mentionChipsWrap.appendChild(el('span', {
-        style: 'font-size:var(--fs-xs);color:var(--ink-3)',
-      }, ['(まだ選択されていません)']));
-      return;
-    }
-    const users = getState().users;
-    for (const email of mentionEmails) {
-      const u = users.find(x => x.email.toLowerCase() === email);
-      const name = u?.displayName ?? email;
-      const chip = el('span', {
-        style:
-          'display:inline-flex;align-items:center;gap:6px;padding:2px 8px;' +
-          'background:var(--accent-soft);color:var(--ink);' +
-          'border:1px solid var(--accent);border-radius:999px;font-size:var(--fs-xs)',
-        title: email,
-      }, [
-        el('span', {}, [`@${name}`]),
-        el('button', {
-          type: 'button',
-          class: 'spira-chip-remove',
-          style: 'background:transparent;border:0;color:var(--ink-3);cursor:pointer;line-height:1;padding:0',
-          'aria-label': `${name} を外す`,
-          onclick: () => { mentionEmails.delete(email); renderChips(); },
-        }, ['×']),
-      ]);
-      mentionChipsWrap.appendChild(chip);
-    }
-  };
-  renderChips();
-
-  const mentionSelect = el('select', {
-    class: 'spira-select',
-    style: 'flex:1;min-width:200px',
-  }, [
-    el('option', { value: '' }, ['＋ メンションを追加…']),
-    ...getState().users
-      .filter(u => !mentionEmails.has(u.email.toLowerCase()))
-      .map(u => el('option', { value: u.email }, [`${u.displayName} <${u.email}>`])),
-  ]) as HTMLSelectElement;
-  const refreshMentionSelect = (): void => {
-    mentionSelect.innerHTML = '';
-    mentionSelect.appendChild(el('option', { value: '' }, ['＋ メンションを追加…']));
-    for (const u of getState().users) {
-      if (mentionEmails.has(u.email.toLowerCase())) continue;
-      mentionSelect.appendChild(el('option', { value: u.email }, [`${u.displayName} <${u.email}>`]));
-    }
-    mentionSelect.value = '';
-  };
-  mentionSelect.addEventListener('change', () => {
-    const v = mentionSelect.value.trim().toLowerCase();
-    if (!v) return;
-    mentionEmails.add(v);
-    renderChips();
-    refreshMentionSelect();
-  });
 
   // チャネル情報は非同期で取得 → 取得完了後に preview セクションを差し替え。
   const channelInfoSlot = el('div', {
@@ -1040,12 +972,6 @@ function openTeamsPostConfirmModal(
       sectionTitle('本文', '改行や簡単な HTML タグ (<br>, <strong>, <em>, <a>) が使えます。'),
       bodyTextarea,
     ]),
-
-    el('div', {}, [
-      sectionTitle('メンション (任意)', 'PA フロー側で AAD ユーザに解決して @ メンション化します。'),
-      mentionChipsWrap,
-      el('div', { style: 'display:flex;gap:8px;margin-top:6px' }, [mentionSelect]),
-    ]),
   ]);
 
   const handle = openModal(getRoot(), {
@@ -1069,8 +995,7 @@ function openTeamsPostConfirmModal(
       const bodyHtml = hasHtml
         ? bodyText
         : `<p>${bodyText.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>')}</p>`;
-      const mentionedEmails = Array.from(mentionEmails);
-      await onConfirm({ subject, bodyHtml, mentionedEmails });
+      await onConfirm({ subject, bodyHtml });
     },
   });
 
