@@ -36,9 +36,21 @@ export interface ParsedTeamsMessage {
   body: string;
 }
 
-const TIME_RE = /^\d{1,2}:\d{2}(?::\d{2})?$/;
+// 時刻ヘッダの検出。Teams は locale / バージョンによって複数フォーマットを
+// 出すため、できるだけ広く受け入れる:
+//   - 24h:  "13:49" / "13:49:05"
+//   - 12h:  "1:49 PM" / "1:49 午後" / "午後 1:49" (Teams JP 12h 設定)
+//   - JP 専用: "13時49分" / "13時49分05秒"
+//   - 末尾の "編集済み" / "Edited" 等のタグ付き: "13:49 編集済み"
+// 後方互換のため厳格マッチは TIME_STRICT_RE で、緩いマッチは TIME_LOOSE_RE。
+const TIME_STRICT_RE = /^(?:\d{1,2}:\d{2}(?::\d{2})?|\d{1,2}時\d{1,2}分(?:\d{1,2}秒)?)$/;
+const TIME_AMPM_RE = /^(?:午前|午後|AM|PM|A\.?M\.?|P\.?M\.?)\s*\d{1,2}:\d{2}(?::\d{2})?$|^\d{1,2}:\d{2}(?::\d{2})?\s*(?:午前|午後|AM|PM|A\.?M\.?|P\.?M\.?)$/i;
+const TIME_RE = new RegExp(`${TIME_STRICT_RE.source.slice(1, -1)}|${TIME_AMPM_RE.source.slice(1, -1)}`);
+
 const META_RE = /^.+、.+ が作成$/;
-const NOISE_RE = /^(コンテキスト メニューあり|リアクション.*|返信|編集済み|その他のアクション|.+ が作成)$/;
+// ヘッダ周辺に現れる非本文行を弾く。日付ピル (今日 / 昨日 / Today / Yesterday /
+// "MM/DD" / "May 19" 等) もここで吸収して header pair の検出を妨げないようにする。
+const NOISE_RE = /^(コンテキスト メニューあり|リアクション.*|返信|編集済み|Edited|その他のアクション|.+ が作成|今日|昨日|今週|先週|Today|Yesterday|This week|Last week|\d{1,2}\/\d{1,2}|\d{4}\/\d{1,2}\/\d{1,2}|[A-Z][a-z]+ \d{1,2}(?:, \d{4})?)$/;
 
 function isSenderLine(s: string): boolean {
   if (!s) return false;
@@ -93,13 +105,30 @@ function findHeaders(lines: string[]): { idx: number; time: string; sender: stri
   const headers: { idx: number; time: string; sender: string }[] = [];
   for (let i = 0; i < lines.length - 1; i++) {
     const a = lines[i]!;
+    // 隣接 2 行ペアを優先 (旧仕様 / Teams JP の典型形)。
     const b = lines[i + 1]!;
     if (TIME_RE.test(a) && isSenderLine(b)) {
       headers.push({ idx: i, time: a, sender: b });
       i++;
-    } else if (isSenderLine(a) && TIME_RE.test(b)) {
+      continue;
+    }
+    if (isSenderLine(a) && TIME_RE.test(b)) {
       headers.push({ idx: i, time: b, sender: a });
       i++;
+      continue;
+    }
+    // 空行 / 日付ピルが間に挟まる Teams バージョン (例: 送信者 → 空 → 時刻)
+    // にも対応。最大 2 行先まで遡って組み合わせを試す。
+    const c = lines[i + 2] ?? '';
+    if (TIME_RE.test(a) && (!b || NOISE_RE.test(b)) && isSenderLine(c)) {
+      headers.push({ idx: i, time: a, sender: c });
+      i += 2;
+      continue;
+    }
+    if (isSenderLine(a) && (!b || NOISE_RE.test(b)) && TIME_RE.test(c)) {
+      headers.push({ idx: i, time: c, sender: a });
+      i += 2;
+      continue;
     }
   }
   return headers;
@@ -151,10 +180,33 @@ export function detectLeadingOrphan(text: string): string {
  *  seconds by the caller (via the `seq` parameter) so chronological
  *  sorting stays stable when several messages share the minute. */
 export function resolveTeamsTimeToISO(time: string, baseDate: Date, seq = 0): string {
+  // 24h HH:MM
   const hhmmOnly = time.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
   if (hhmmOnly) {
     const d = new Date(baseDate);
     d.setHours(Number(hhmmOnly[1]), Number(hhmmOnly[2]), Number(hhmmOnly[3] ?? '0') + seq, 0);
+    return d.toISOString();
+  }
+  // JP: "13時49分" / "13時49分05秒"
+  const jp = time.match(/^(\d{1,2})時(\d{1,2})分(?:(\d{1,2})秒)?$/);
+  if (jp) {
+    const d = new Date(baseDate);
+    d.setHours(Number(jp[1]), Number(jp[2]), Number(jp[3] ?? '0') + seq, 0);
+    return d.toISOString();
+  }
+  // 12h with AM/PM (English / 日本語): "1:49 PM" / "午後 1:49" / "1:49 午後"
+  const ampm = time.match(/^(?:(午前|午後|AM|PM|A\.?M\.?|P\.?M\.?)\s*)?(\d{1,2}):(\d{2})(?::(\d{2}))?(?:\s*(午前|午後|AM|PM|A\.?M\.?|P\.?M\.?))?$/i);
+  if (ampm) {
+    const marker = (ampm[1] ?? ampm[5] ?? '').toUpperCase();
+    let h = Number(ampm[2]);
+    const m = Number(ampm[3]);
+    const s = Number(ampm[4] ?? '0');
+    const isPm = /^(P\.?M\.?|午後)$/i.test(marker);
+    const isAm = /^(A\.?M\.?|午前)$/i.test(marker);
+    if (isPm && h < 12) h += 12;
+    else if (isAm && h === 12) h = 0;
+    const d = new Date(baseDate);
+    d.setHours(h, m, s + seq, 0);
     return d.toISOString();
   }
   const full = time.match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?$/);

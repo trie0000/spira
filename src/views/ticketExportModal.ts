@@ -133,13 +133,13 @@ function buildMarkdown(t: Ticket, comments: Comment[], opts: ExportOptions): str
     } else {
       // 併記 (それぞれ独立セクション) or 片方のみ
       if (opts.includeInternal) {
-        lines.push(`## 🏢 内部スレッド (${internal.length} 件)`);
+        lines.push(`## 🏢 内部対応経緯 (${internal.length} 件)`);
         lines.push('');
         const sorted = [...internal].sort((a, b) => (a.sentAt ?? '').localeCompare(b.sentAt ?? ''));
         for (const c of sorted) lines.push(...renderComment(c, false));
       }
       if (opts.includeExternal) {
-        lines.push(`## 👥 外部スレッド (${external.length} 件)`);
+        lines.push(`## 👥 外部対応経緯 (${external.length} 件)`);
         lines.push('');
         const sorted = [...external].sort((a, b) => (a.sentAt ?? '').localeCompare(b.sentAt ?? ''));
         for (const c of sorted) lines.push(...renderComment(c, false));
@@ -272,12 +272,12 @@ ${[
       sections.push(all.map(c => renderCard(c, true)).join(''));
     } else {
       if (opts.includeInternal) {
-        sections.push(`<h2>🏢 内部スレッド (${internal.length} 件)</h2>`);
+        sections.push(`<h2>🏢 内部対応経緯 (${internal.length} 件)</h2>`);
         const sorted = [...internal].sort((a, b) => (a.sentAt ?? '').localeCompare(b.sentAt ?? ''));
         sections.push(sorted.map(c => renderCard(c, false)).join(''));
       }
       if (opts.includeExternal) {
-        sections.push(`<h2>👥 外部スレッド (${external.length} 件)</h2>`);
+        sections.push(`<h2>👥 外部対応経緯 (${external.length} 件)</h2>`);
         const sorted = [...external].sort((a, b) => (a.sentAt ?? '').localeCompare(b.sentAt ?? ''));
         sections.push(sorted.map(c => renderCard(c, false)).join(''));
       }
@@ -385,8 +385,8 @@ export function openTicketExportModal(ticket: Ticket, comments: Comment[]): void
     return { input, el: wrap };
   };
 
-  const cInternal = cb('🏢 内部スレッド', internal.length > 0, `${internal.length} 件`);
-  const cExternal = cb('👥 外部スレッド', external.length > 0, `${external.length} 件`);
+  const cInternal = cb('🏢 内部対応経緯', internal.length > 0, `${internal.length} 件`);
+  const cExternal = cb('👥 外部対応経緯', external.length > 0, `${external.length} 件`);
   const cNotes    = cb('📝 内部メモ',     notes.length > 0,    `${notes.length} 件`);
 
   const layoutParallel = el('input', { type: 'radio', name: 'layout', value: 'parallel', style: 'margin:0' }) as HTMLInputElement;

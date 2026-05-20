@@ -17,6 +17,7 @@ import { isInternalAuthor, colorForAuthor, tintForAuthor } from '../utils/member
 import { renderStatusBadge, renderPriorityLabel, renderAssignee, openInlineAssigneeMenu } from './ticketList';
 import { toast } from '../components/toast';
 import { confirmModal, openModal } from '../components/modal';
+import { getInternalChannelConfig, getExternalChannelConfig, type TeamsChannelConfig } from '../utils/teamsChannels';
 import { getLastSeen, markTicketSeen, isCommentNewSince } from '../utils/seenState';
 import { openTicketPropertiesModal } from './ticketProperties';
 import { getDepartmentOptions, getInquiryCategoryOptions } from '../utils/optionLists';
@@ -150,14 +151,58 @@ interface NoteEditorEntry {
 const noteEditorRegistry = new Map<number, NoteEditorEntry>();
 
 /** 受信スレッドの新着カードを setState を介さず DOM に直接挿入。
- *  既存の `.spira-th-list` を探して、id 昇順で正しい位置に追加し、
- *  「更新」バッジを付ける。失敗時は no-op。 */
+ *  `data-thread-kind` 属性で内部 / 外部のカラムを選び、id 昇順で正しい
+ *  位置に追加し「更新」バッジを付ける。失敗時 (該当カラム不在など) は
+ *  no-op で、次の setState 全描画で正規描画される。
+ *
+ *  対象カラムの選択ロジック (両カラム並列 / 単一カラム / マージ どれでも対応):
+ *   1. `data-thread-kind="<kind>"` を持つカラムが見つかればそこを使う。
+ *   2. なければ「マージ表示」 (data-thread-mode="merged") をフォールバック。
+ *   3. それも無ければ no-op (内部のみモードで外部新着が来た等)。
+ *
+ *  同 id カードが既に DOM 内に存在する場合は no-op (二重挿入防止)。
+ *  並列モードで「最初に見つかった .spira-th-list」に挿入していた旧実装は
+ *  内部新着を外部カラムへ流し込む致命バグがあったため修正。 */
 function insertReceivedCardSilently(c: Comment, _ticketId: number): void {
-  const lists = Array.from(document.querySelectorAll<HTMLElement>('.spira-th-list'));
-  const threadList = lists.find(l => l.querySelector('.spira-th-card--received')) ?? lists[0];
+  // 1) すでに DOM 上に同 id のカードがあれば二重挿入しない (setState 全描画が
+  //    一足先に走った場合 / 別ポーリングが先に挿入した場合の保険)。
+  if (document.querySelector(`[data-comment-id="${c.id}"]`)) return;
+
+  // 2) フィンガープリント (送信者 + 送信時刻分単位 + 本文先頭 32 文字) が
+  //    一致するカードが既に DOM にあるなら挿入しない。SP の POST レスポンス
+  //    が遅延して polling listComments が先に拾った場合、`recentlySavedByMe`
+  //    に間に合わず id ベースでは検出できないため、内容ベースで重複を弾く。
+  //    次の setState 全描画では comments[] 側の dedup と組み合わさって
+  //    最終的に 1 件に収束する。
+  const fp = fingerprintForCard(c);
+  if (fp) {
+    const cards = document.querySelectorAll<HTMLElement>('.spira-th-card--received');
+    for (const existing of cards) {
+      if (existing.getAttribute('data-card-fp') === fp) return;
+    }
+  }
+
+  const kind: 'internal' | 'external' = c.threadKind === 'internal' ? 'internal' : 'external';
+  // kind 別のカラムを優先。並列 / 単一カラムモードのいずれでもヒットする。
+  const kindCol = document.querySelector<HTMLElement>(
+    `.spira-thread-column[data-thread-kind="${kind}"]`,
+  );
+  // 見つからなければマージ表示にフォールバック (時系列 1 リスト)。
+  const mergedCol = document.querySelector<HTMLElement>(
+    '.spira-thread-column[data-thread-mode="merged"]',
+  );
+  const targetCol = kindCol ?? mergedCol;
+  if (!targetCol) return; // 反対側のみ表示中。次の setState で描画される。
+
+  // 対象カラム内の最初の .spira-th-list を使う。merged モードでは外側カードで
+  // 包まれているが、いちばん近い .spira-th-list へ append すれば時系列末尾に
+  // 来る (厳密なグループ化は次の setState で正規化される)。
+  const threadList = targetCol.querySelector<HTMLElement>('.spira-th-list');
   if (!threadList) return;
+
   const t = { id: c.ticketId } as Ticket;
   const card = renderReceivedCard(t, c);
+  if (fp) card.setAttribute('data-card-fp', fp);
   const existing = Array.from(threadList.querySelectorAll<HTMLElement>('.spira-th-card--received'));
   let insertBefore: HTMLElement | null = null;
   for (const existCard of existing) {
@@ -167,6 +212,17 @@ function insertReceivedCardSilently(c: Comment, _ticketId: number): void {
   if (insertBefore) threadList.insertBefore(card, insertBefore);
   else threadList.appendChild(card);
   markCardUpdated(c.id);
+}
+
+/** カード内容の指紋。送信者 + 送信時刻 (分単位) + 本文先頭 32 文字を組み合わせる。
+ *  id が違っても同内容なら一致するので、polling の silent-insert と setState
+ *  全描画の race による DOM 二重挿入を内容ベースで弾く用途で使う。 */
+function fingerprintForCard(c: Comment): string {
+  const author = (c.fromName ?? c.fromEmail ?? '').trim().toLowerCase();
+  const minute = (c.sentAt ?? '').slice(0, 16); // "YYYY-MM-DDTHH:MM"
+  const body = (c.content ?? '').slice(0, 32);
+  if (!author && !minute && !body) return '';
+  return `${author}::${minute}::${body}`;
 }
 
 /** 内部メモの新着カードを setState を介さず DOM に直接挿入。
@@ -755,27 +811,31 @@ function buildTeamsThreadButton(activeT: Ticket, threadType: 'internal' | 'user'
         window.open(deepLink, '_blank', 'noopener');
         return;
       }
-      // 連打防止
-      btn.setAttribute('disabled', 'true');
-      btn.classList.add('spira-spin');
-      try {
-        await getRepo().createTeamsPostRequest({
-          ticketId: activeT.id,
-          threadType,
-        });
-        toast(
-          getRoot(),
-          `${emoji} ${label}の起票をキューに積みました。PA 処理後に DeepLink が反映されます。`,
-          'ok',
-          6000,
-        );
-        // 再描画 (mock では即座に DeepLink が生える / SP では PA 完了後の同期待ち)
-        setState({});
-      } catch (e) {
-        toast(getRoot(), `${label}起票に失敗: ${(e as Error).message}`, 'error');
-        btn.removeAttribute('disabled');
-        btn.classList.remove('spira-spin');
-      }
+      // 確認モーダル: 投稿先チャネル / タイトル / 本文 を見せた上で
+      // ユーザの明示確認を取ってから createTeamsPostRequest を実行する。
+      openTeamsPostConfirmModal(activeT, threadType, async () => {
+        // 連打防止
+        btn.setAttribute('disabled', 'true');
+        btn.classList.add('spira-spin');
+        try {
+          await getRepo().createTeamsPostRequest({
+            ticketId: activeT.id,
+            threadType,
+          });
+          toast(
+            getRoot(),
+            `${emoji} ${label}の起票をキューに積みました。PA 処理後に DeepLink が反映されます。`,
+            'ok',
+            6000,
+          );
+          // 再描画 (mock では即座に DeepLink が生える / SP では PA 完了後の同期待ち)
+          setState({});
+        } catch (e) {
+          toast(getRoot(), `${label}起票に失敗: ${(e as Error).message}`, 'error');
+          btn.removeAttribute('disabled');
+          btn.classList.remove('spira-spin');
+        }
+      });
     },
   }, [
     el('span', { html: icon('chat'), style: 'display:inline-flex;width:14px;height:14px' }),
@@ -784,6 +844,136 @@ function buildTeamsThreadButton(activeT: Ticket, threadType: 'internal' | 'user'
 
   if (created) btn.classList.add('spira-btn--success');
   return btn;
+}
+
+/** Teams スレッド起票の事前確認モーダル。
+ *  投稿先チャネル (設定済みの teams-channel:{internal|external} から解決)、
+ *  PA が投稿する想定のタイトル ([#NNN] + チケットタイトル) と本文
+ *  (チケット description、なければプレースホルダ) を表示し、
+ *  ユーザの「起票する」クリックでコールバックを実行する。
+ *
+ *  チャネル未設定の場合: 警告を出し「起票する」を disable。設定画面への
+ *  動線を案内する (歯車 → Teams チャネル)。 */
+function openTeamsPostConfirmModal(
+  activeT: Ticket,
+  threadType: 'internal' | 'user',
+  onConfirm: () => void | Promise<void>,
+): void {
+  const isInternal = threadType === 'internal';
+  const emoji = isInternal ? '🏢' : '👥';
+  const label = isInternal ? '内部スレッド' : '外部スレッド';
+
+  // PA がポストする想定の Title / Body。フロントでは厳密な再現は不可だが、
+  // ユーザが「何が Teams に流れるか」を理解できる粒度のプレビューを示す。
+  // Title 例: "[#00012] 印刷できない"
+  const titleText = `${formatTicketTag(activeT.id)} ${activeT.title}`;
+  const bodyText = (activeT.description ?? '').trim();
+
+  // チャネル情報は非同期で取得 → 取得完了後に preview セクションを差し替え。
+  // 初期表示は「読込中」プレースホルダ。
+  const channelInfoSlot = el('div', {
+    style: 'font-size:var(--fs-sm);color:var(--ink-3)',
+  }, ['チャネル情報を読み込み中…']);
+
+  let channelReady = false;
+  let primaryBtn: HTMLButtonElement | null = null;
+  const updatePrimaryEnabled = (): void => {
+    if (!primaryBtn) return;
+    if (channelReady) primaryBtn.removeAttribute('disabled');
+    else primaryBtn.setAttribute('disabled', 'true');
+  };
+
+  const renderChannelInfo = (cfg: TeamsChannelConfig | null): void => {
+    channelInfoSlot.innerHTML = '';
+    if (!cfg || !cfg.channelId || !cfg.teamId) {
+      channelInfoSlot.appendChild(el('div', {
+        style: 'background:#fef3c7;border:1px solid #f59e0b;color:#78350f;' +
+               'border-radius:var(--r-2);padding:var(--s-3) var(--s-4);font-size:var(--fs-sm);line-height:1.6',
+      }, [
+        '⚠ ', el('strong', {}, [`${label} のチャネルが未設定です。`]),
+        el('br'), '歯車 → Teams チャネル設定で URL を登録してください。起票には設定が必須です。',
+      ]));
+      channelReady = false;
+      updatePrimaryEnabled();
+      return;
+    }
+    const rows: Array<[string, string]> = [
+      ['チャネル名', cfg.channelName ?? '(URL に名前なし)'],
+      ['チャネル ID', cfg.channelId],
+      ['チーム ID', cfg.teamId],
+      ['URL', cfg.url],
+    ];
+    const table = el('div', {
+      style: 'display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:var(--fs-sm)',
+    }, rows.flatMap(([k, v]) => [
+      el('div', { style: 'color:var(--ink-3)' }, [k]),
+      el('div', {
+        style: 'color:var(--ink);word-break:break-all;font-family:var(--font-mono);font-size:var(--fs-xs)',
+      }, [v]),
+    ]));
+    channelInfoSlot.appendChild(table);
+    channelReady = true;
+    updatePrimaryEnabled();
+  };
+
+  // 設定読み込み (非同期)
+  (isInternal ? getInternalChannelConfig() : getExternalChannelConfig())
+    .then(cfg => renderChannelInfo(cfg))
+    .catch(() => renderChannelInfo(null));
+
+  const sectionTitle = (text: string): HTMLElement => el('div', {
+    style: 'font-size:var(--fs-xs);font-weight:600;color:var(--ink-2);' +
+           'text-transform:uppercase;letter-spacing:0.04em;margin-bottom:var(--s-2)',
+  }, [text]);
+
+  const previewBox = (content: string, placeholder = '(空)'): HTMLElement => el('div', {
+    style: 'background:var(--paper-2);border:1px solid var(--line);border-radius:var(--r-2);' +
+           'padding:var(--s-3) var(--s-4);font-size:var(--fs-sm);line-height:1.55;' +
+           'white-space:pre-wrap;word-break:break-word;max-height:240px;overflow:auto',
+  }, [content || placeholder]);
+
+  const body = el('div', { style: 'display:flex;flex-direction:column;gap:var(--s-4);line-height:1.6' }, [
+    el('div', { style: 'font-size:var(--fs-sm);color:var(--ink-2)' }, [
+      `${emoji} ${label} を Teams に起票します。以下の内容で投稿してよいか確認してください。`,
+      el('br'),
+      el('span', { style: 'color:var(--ink-3);font-size:var(--fs-xs)' }, [
+        '※ 実際の投稿は PA フローが行います。送信後に DeepLink がチケットに反映されます。',
+      ]),
+    ]),
+
+    el('div', {}, [sectionTitle('投稿先チャネル'), channelInfoSlot]),
+    el('div', {}, [sectionTitle('タイトル (Teams 親メッセージの subject)'), previewBox(titleText)]),
+    el('div', {}, [
+      sectionTitle('本文 (チケット詳細の本文)'),
+      previewBox(bodyText, '(本文未設定 — チケット詳細から description を編集できます)'),
+    ]),
+  ]);
+
+  const handle = openModal(getRoot(), {
+    title: `${emoji} ${label}起票の確認`,
+    body,
+    size: 'lg',
+    primaryLabel: '起票する',
+    cancelLabel: 'キャンセル',
+    onPrimary: async () => {
+      if (!channelReady) {
+        // 念のため (UI で disabled でも、何らかの抜け道で押された場合の保険)
+        throw new Error('channel-not-configured');
+      }
+      await onConfirm();
+    },
+  });
+
+  // フッターの primary ボタンを掴んで、チャネル情報読込までは disable しておく。
+  // openModal の戻り値からは直接取れないので、現在描画中の最前面 modal を query。
+  setTimeout(() => {
+    const modal = document.querySelector<HTMLElement>('.spira-modal:last-of-type, .spira-modal');
+    const all = document.querySelectorAll<HTMLButtonElement>('.spira-modal .spira-modal-footer button.spira-btn--primary');
+    primaryBtn = all[all.length - 1] ?? null;
+    void modal;
+    void handle;
+    updatePrimaryEnabled();
+  }, 0);
 }
 
 // (toolbar moved into the tab strip — see renderTabStrip above)
@@ -1105,8 +1295,13 @@ const SPLIT_DEFAULT = 0.5;
 const SPLIT_MIN_PX = 280;
 
 function renderSplitPanes(t: Ticket, comments: Comment[], lastSeen: number | null = null): HTMLElement {
-  const received = comments.filter(c => c.type === 'received');
-  const notes = comments.filter(c => c.type === 'note');
+  // 念のため id で重複除去 (listComments の race / silent-insert と全描画の
+  // 二重供給に備えた最終ガード)。重複していた場合は後勝ち (= 最新の field 値)。
+  const seen = new Map<number, Comment>();
+  for (const c of comments) seen.set(c.id, c);
+  const deduped = Array.from(seen.values());
+  const received = deduped.filter(c => c.type === 'received');
+  const notes = deduped.filter(c => c.type === 'note');
 
   // threadKind 未指定の legacy コメントは external にフォールバック。
   // mail/その他は基本 external 寄りなので妥当。
@@ -1195,7 +1390,7 @@ function renderSplitPanes(t: Ticket, comments: Comment[], lastSeen: number | nul
     const renderGroup = (g: Group): HTMLElement => {
       const border = g.kind === 'internal' ? INTERNAL_BORDER : EXTERNAL_BORDER;
       const tint = g.kind === 'internal' ? INTERNAL_TINT : EXTERNAL_TINT;
-      const label = g.kind === 'internal' ? '🏢 内部' : '👥 外部';
+      const label = g.kind === 'internal' ? '🏢 内部対応経緯' : '👥 外部対応経緯';
       const groupHeader = el('div', {
         style: `display:flex;align-items:center;gap:6px;padding:6px var(--s-3);` +
                `font-size:var(--fs-xs);color:var(--ink-3);` +
@@ -1225,7 +1420,7 @@ function renderSplitPanes(t: Ticket, comments: Comment[], lastSeen: number | nul
     }, [
       el('span', { style: 'font-size:var(--fs-md);font-weight:600;color:var(--ink)' }, ['🔀 マージ表示']),
       el('span', { style: 'font-size:var(--fs-xs);color:var(--ink-3)' }, [
-        `内部 ${internalComments.length} / 外部 ${externalComments.length} 件 (時系列)`,
+        `内部対応経緯 ${internalComments.length} / 外部対応経緯 ${externalComments.length} 件 (時系列)`,
       ]),
     ]);
 
@@ -1279,8 +1474,8 @@ function renderSplitPanes(t: Ticket, comments: Comment[], lastSeen: number | nul
            'background:var(--paper);border-bottom:1px solid var(--line)',
   }, [
     el('span', { style: 'font-size:var(--fs-xs);color:var(--ink-3);margin-right:4px' }, ['表示:']),
-    modeBtn('👥 外部のみ', 'external', currentMode),
-    modeBtn('🏢 内部のみ', 'internal', currentMode),
+    modeBtn('👥 外部対応経緯のみ', 'external', currentMode),
+    modeBtn('🏢 内部対応経緯のみ', 'internal', currentMode),
     modeBtn('⫻ 並列', 'both', currentMode),
     modeBtn('🔀 マージ', 'merged', currentMode),
     el('span', { style: 'flex:1' }),
@@ -1300,21 +1495,21 @@ function renderSplitPanes(t: Ticket, comments: Comment[], lastSeen: number | nul
   } else if (currentMode === 'internal') {
     columnsContainer = el('div', {
       style: 'flex:1;min-height:0;display:flex;overflow:hidden',
-    }, [buildColumn('🏢 内部スレッド', internalComments, 'internal', true)]);
+    }, [buildColumn('🏢 内部対応経緯', internalComments, 'internal', true)]);
   } else if (currentMode === 'external') {
     columnsContainer = el('div', {
       style: 'flex:1;min-height:0;display:flex;overflow:hidden',
-    }, [buildColumn('👥 外部スレッド', externalComments, 'external', true)]);
+    }, [buildColumn('👥 外部対応経緯', externalComments, 'external', true)]);
   } else {
     // both モード: 内部 / 外部 を横並びにして、間にドラッグ可能なリサイザを挟む。
     // 並列表示の配置は ★ 外部 (左) / 内部 (右) ★ に統一。
     // 顧客対応スレッド (= 外部) が常に視線の起点になるレイアウト。
     // 幅比率は localStorage に永続化、ダブルクリックで 50/50 に戻す。
-    const internalCol = buildColumn('🏢 内部スレッド', internalComments, 'internal', false);
-    const externalCol = buildColumn('👥 外部スレッド', externalComments, 'external', false);
+    const internalCol = buildColumn('🏢 内部対応経緯', internalComments, 'internal', false);
+    const externalCol = buildColumn('👥 外部対応経緯', externalComments, 'external', false);
     const innerResizer = el('div', {
       class: 'spira-split-resizer',
-      'aria-label': '外部/内部スレッドの幅を変更',
+      'aria-label': '外部/内部対応経緯の幅を変更',
       style: 'flex:0 0 6px;cursor:col-resize;background:var(--paper-3);transition:background 0.1s',
     });
 
@@ -1519,8 +1714,8 @@ function openAddHistoryModal(
     class: 'spira-input',
     style: 'width:200px;min-width:0',
   }, [
-    el('option', { value: 'internal', ...(defaultThreadKind === 'internal' ? { selected: 'selected' } : {}) }, ['🏢 内部スレッド']),
-    el('option', { value: 'external', ...(defaultThreadKind === 'external' ? { selected: 'selected' } : {}) }, ['👥 外部スレッド']),
+    el('option', { value: 'internal', ...(defaultThreadKind === 'internal' ? { selected: 'selected' } : {}) }, ['🏢 内部対応経緯']),
+    el('option', { value: 'external', ...(defaultThreadKind === 'external' ? { selected: 'selected' } : {}) }, ['👥 外部対応経緯']),
   ]);
 
   // Datalist for the 送信者 field — AD users + authors already seen
@@ -2016,7 +2211,7 @@ function openAddHistoryModal(
             const fp = fingerprint(mm.author, isoForKey, mm.body);
             existingFingerprints.add(fp);
             try {
-              await repo.addComment({
+              const created = await repo.addComment({
                 ticketId: t.id,
                 type: 'received',
                 fromName: mm.author,
@@ -2026,6 +2221,9 @@ function openAddHistoryModal(
                 source: 'teams',
                 threadKind: (threadKindSel as HTMLSelectElement).value as ThreadKind,
               });
+              // 自分の追加分はポーリングが silent-insert しないように記録
+              // (insertReceivedCardSilently のカラム取り違えで二重表示を防止)。
+              markRecentlySavedByMe(created.id);
               added++;
             } catch (e) {
               console.warn('[spira] addComment failed for teams message:', e);
@@ -2119,7 +2317,7 @@ function openAddHistoryModal(
           //   それ以外は textarea の plain text を isHtml=false で保存。
           const userEdited = bodyArea.value !== textBaseline;
           const useHtml = src === 'mail' && pendingHtmlBody && !userEdited;
-          await repo.addComment({
+          const created = await repo.addComment({
             ticketId: t.id,
             type: 'received',
             fromName: fromName || (src === 'mail' ? '(メール)' : '(履歴)'),
@@ -2129,6 +2327,9 @@ function openAddHistoryModal(
             source: src,
             threadKind: (threadKindSel as HTMLSelectElement).value as ThreadKind,
           });
+          // 自分の追加分はポーリングが silent-insert しないように記録
+          // (insertReceivedCardSilently のカラム取り違えで二重表示を防止)。
+          markRecentlySavedByMe(created.id);
           toast(getRoot(), useHtml ? 'HTML 形式で取り込みました' : 'スレッドに追加しました', 'ok');
         } catch (e) {
           toast(getRoot(), `追加に失敗: ${(e as Error).message}`, 'error');
@@ -2617,6 +2818,11 @@ function renderReceivedCard(t: Ticket, c: Comment, lastSeen: number | null = nul
     'data-side': !hasAuthor ? 'unknown' : internal ? 'internal' : 'external',
     'data-comment-id': String(c.id),
   }, [head, auditLine, body]);
+  // 指紋 (送信者 + 送信時刻分単位 + 本文先頭) を data 属性に持たせる。
+  // silent-insert の重複検出と setState 全描画とで「同じ実体」のカードを
+  // 内容ベースで照合するための共通鍵。
+  const cardFp = fingerprintForCard(c);
+  if (cardFp) card.setAttribute('data-card-fp', cardFp);
   attachCollapseToggle(card, body, c.id, expandedReceived);
   return card;
 }
