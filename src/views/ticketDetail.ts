@@ -60,16 +60,16 @@ export async function renderTicketDetail(ticketId: number): Promise<HTMLElement>
 
   const latestReceived = comments.filter(c => c.type === 'received').slice(-1)[0];
 
-  // 返信メール作成の動作モードを決定:
-  //   reply モード: 外部対応経緯にメール source の受信履歴が 1 件以上ある
+  // 返信メール作成の動作モードを決定。ボタンは常に活性化し、宛先が
+  // 取れなければ空欄でモーダルを開いて operator が手入力できるようにする
+  // (= ボタンが押せない状態は作らない)。
+  //   reply モード: 外部対応経緯に source=mail の受信履歴が 1 件以上ある
   //                 → 最新の 1 件を返信対象として relay 経由で Outlook に
-  //                   正規 Reply 下書きを開かせる。検索キーは送信時刻 +
-  //                   送信者 (= operator の Outlook 内で一意に決まる前提)。
-  //   new モード:   外部対応経緯にメール履歴が無い (Forms 起票 / 手動起票 /
-  //                 Teams 起票のみ等) → 新規メール下書きを開く。件名は
-  //                 「[#NNNNN] チケットタイトル」、本文はテンプレ回答文、
-  //                 宛先は reporterEmail (取れていれば)。
-  //   どちらの宛先も取れない場合のみボタンを disable。
+  //                   正規 Reply 下書きを開かせる (検索キー: 送信時刻 + 送信者)
+  //   new モード:   メール履歴ゼロ → 新規メール下書き。
+  //                 件名: [#NNNNN] チケットタイトル
+  //                 本文: テンプレ回答文
+  //                 宛先: reporterEmail があればそれ、なければ空欄
   const latestExternalMail = comments
     .filter(c =>
       c.type === 'received' &&
@@ -79,29 +79,23 @@ export async function renderTicketDetail(ticketId: number): Promise<HTMLElement>
       !!c.sentAt
     )
     .slice(-1)[0];
-  const replyTarget: ReplyComposerTarget | undefined = (() => {
-    if (latestExternalMail) {
-      return {
+  const replyTarget: ReplyComposerTarget = latestExternalMail
+    ? {
         mode: 'reply',
         toEmail: latestExternalMail.fromEmail!,
         toName: latestExternalMail.fromName ?? '',
         sourceSentAt: latestExternalMail.sentAt,
         defaultSubject: `Re: ${formatTicketTag(t.id)} ${t.title}`,
         defaultBody: '',
-      };
-    }
-    if (t.reporterEmail) {
-      return {
+      }
+    : {
         mode: 'new',
-        toEmail: t.reporterEmail,
+        toEmail: t.reporterEmail ?? '',
         toName: t.reporterName ?? '',
         sourceSentAt: undefined,
         defaultSubject: `${formatTicketTag(t.id)} ${t.title}`,
         defaultBody: buildNewReplyTemplate(t),
       };
-    }
-    return undefined;
-  })();
 
   // Snapshot the user's PREVIOUS last-seen timestamp for this ticket
   // BEFORE stamping the current visit. Cards with sentAt > prevLastSeen
@@ -674,23 +668,20 @@ async function renderTabStrip(activeT: Ticket, _latestReceived: Comment | undefi
 function buildTicketActions(
   activeT: Ticket,
   latestReceived: Comment | undefined,
-  replyTarget: ReplyComposerTarget | undefined,
+  replyTarget: ReplyComposerTarget,
 ): HTMLElement[] {
-  // 返信メール作成ボタン: 返信ターゲットを relay 経由で operator の
-  // Outlook クライアントに渡して下書き表示する。reply / new の 2 モード
-  // (詳細は openReplyComposerModal / ReplyComposerTarget のコメント参照)。
+  // 返信メール作成ボタン: relay 経由で operator の Outlook クライアントに
+  // 下書きを開かせる。reply / new の 2 モード判定は renderTicketDetail 側
+  // で済んでおり、ここでは常時活性化する (宛先未取得でもモーダルで手入力可)。
+  const replyTitle = replyTarget.mode === 'reply'
+    ? `外部対応経緯の最後のメール (${replyTarget.toName || replyTarget.toEmail}) への返信下書きを Outlook で開きます`
+    : replyTarget.toEmail
+      ? `申請者 (${replyTarget.toName || replyTarget.toEmail}) 宛に問い合わせ回答メール (新規) を Outlook で開きます。次の返信は件名タグで自動紐付けされます`
+      : '問い合わせ回答メール (新規) を Outlook で開きます。宛先はモーダルで入力してください';
   const replyBtn = el('button', {
     class: 'spira-btn spira-btn--ghost spira-btn--sm',
-    title: replyTarget
-      ? (replyTarget.mode === 'reply'
-          ? `外部対応経緯の最後のメール (${replyTarget.toName || replyTarget.toEmail}) への返信下書きを Outlook で開きます`
-          : `申請者 (${replyTarget.toName || replyTarget.toEmail}) 宛に問い合わせ回答メール (新規) を Outlook で開きます。次の返信は件名タグで自動紐付け`)
-      : '宛先が取得できないため返信を作成できません (外部対応経緯にメール履歴がなく、申請者メールアドレスも未設定)',
-    disabled: !replyTarget,
-    onclick: () => {
-      if (!replyTarget) return;
-      openReplyComposerModal(activeT, replyTarget);
-    },
+    title: replyTitle,
+    onclick: () => openReplyComposerModal(activeT, replyTarget),
   }, [
     el('span', { html: icon('mail'), style: 'display:inline-flex;width:14px;height:14px' }),
     '返信メール作成',
@@ -1274,7 +1265,7 @@ function openTeamsPostConfirmModal(
 function renderTicketHeader(
   t: Ticket,
   latestReceived: Comment | undefined,
-  replyTarget: ReplyComposerTarget | undefined,
+  replyTarget: ReplyComposerTarget,
 ): HTMLElement {
   const idTag = formatTicketTag(t.id);
   const idDisplay = formatTicketIdShort(t.id);
