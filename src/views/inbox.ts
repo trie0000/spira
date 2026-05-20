@@ -82,6 +82,17 @@ const inboxFilter: InboxFilter = { query: '', fromEmail: '', hasAttachments: '',
 type InboxSortKey = 'subject' | 'from' | 'date';
 const inboxSort: { by: InboxSortKey; dir: 'asc' | 'desc' } = { by: 'date', dir: 'desc' };
 
+/** 差出人表示の整形。fromName / fromEmail のどちらかが欠落しても
+ *  「<undefined>」のような表示を出さない。 */
+function formatSender(m: InboxMail): string {
+  const name = (m.fromName ?? '').trim();
+  const email = (m.fromEmail ?? '').trim();
+  if (name && email) return `${name} <${email}>`;
+  if (name) return name;
+  if (email) return `<${email}>`;
+  return '(送信者不明)';
+}
+
 function applyInboxSort(rows: InboxMail[]): InboxMail[] {
   const { by, dir } = inboxSort;
   const sign = dir === 'asc' ? 1 : -1;
@@ -631,7 +642,7 @@ function renderHeaderRow(m: InboxMail): HTMLElement {
     el('td', { class: 'spira-tk-checkbox-cell', onclick: (e: Event) => e.stopPropagation() }, [checkbox]),
     el('td', {}, [arrow]),
     subjectCell,
-    el('td', {}, [`${m.fromName ?? ''} <${m.fromEmail}>`]),
+    el('td', {}, [formatSender(m)]),
     el('td', {}, [fmtDate(m.receivedAt)]),
     el('td', { class: 'spira-inbox-actions', style: 'display:flex;gap:var(--s-2)' }, actionBtns),
   ]);
@@ -649,7 +660,7 @@ function renderExpandedRow(m: InboxMail): HTMLElement {
     ]);
 
   const cell = el('td', { colspan: '6', style: 'background:var(--paper-2);padding:var(--s-5) var(--s-7)' }, [
-    meta('差出人', `${m.fromName ?? ''} <${m.fromEmail}>`),
+    meta('差出人', formatSender(m)),
     meta('受信日時', fmtDate(m.receivedAt)),
     meta('件名', m.subject),
     meta('ConversationId', m.conversationId ?? '(なし)'),

@@ -93,6 +93,10 @@ function renderUserTab(): HTMLElement {
 }
 
 // ── アーキテクチャ図 (SVG) ───────────────────────────────────────────
+// ★ SECURITY NOTE: 以下の SVG は完全に静的なソースリテラルで、ユーザー入力・
+//   チケットデータ・URL 等を一切埋め込んでいない。将来チケットタイトルや
+//   日付などを動的に差し込みたくなった場合は、XSS リスクを避けるため必ず
+//   テキストノードで挿入 (innerHTML 直挿入を避ける) すること。
 function renderArchDiagram(): HTMLElement {
   // Inline SVG. 800x520 内に 5 つのブロック (Sources / PA / SP / Spira / Admin) を配置。
   const svg = `

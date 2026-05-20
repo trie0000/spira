@@ -10,6 +10,8 @@ interface ModalOptions {
   onPrimary?: () => void | Promise<void>;
   cancelLabel?: string;
   hideCancel?: boolean;
+  /** モーダルが閉じる時 (× / Esc / backdrop / primary 完了後) に必ず呼ばれる。 */
+  onClose?: () => void;
 }
 
 // B2: モーダルのスタック。多階層モーダルで Esc / Ctrl+Enter が最前面のみに
@@ -84,6 +86,28 @@ export function openModal(root: HTMLElement, opts: ModalOptions): ModalHandle {
     } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
       e.stopImmediatePropagation();
       primaryBtn.click();
+    } else if (e.key === 'Tab') {
+      // M4: focus trap — フォーカスが modal 内をループするように制御。
+      // 最前面 modal でのみ動作。
+      const focusables = modal.querySelectorAll<HTMLElement>(
+        'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), ' +
+        'textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      );
+      if (focusables.length === 0) return;
+      const first = focusables[0]!;
+      const last = focusables[focusables.length - 1]!;
+      const active = document.activeElement as HTMLElement | null;
+      if (e.shiftKey) {
+        if (active === first || !modal.contains(active)) {
+          e.preventDefault();
+          last.focus();
+        }
+      } else {
+        if (active === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
     }
   }
 
@@ -92,6 +116,7 @@ export function openModal(root: HTMLElement, opts: ModalOptions): ModalHandle {
     document.removeEventListener('keydown', onKey);
     const idx = modalStack.indexOf(backdrop);
     if (idx >= 0) modalStack.splice(idx, 1);
+    try { opts.onClose?.(); } catch (e) { console.warn('[spira] modal onClose error:', e); }
   }
 
   modalStack.push(backdrop);
@@ -116,14 +141,26 @@ export function confirmModal(root: HTMLElement, opts: {
   primaryLabel?: string;
   primaryVariant?: 'primary' | 'danger';
   onConfirm: () => void | Promise<void>;
+  /** ユーザーがキャンセル / Esc / × で閉じた時のロールバック処理。 */
+  onCancel?: () => void;
 }): void {
   // Use a div with `white-space: pre-line` so newlines in the message are preserved.
   const body = el('div', { class: 'spira-modal-body', style: 'white-space:pre-line;line-height:1.7' }, [opts.message]);
-  openModal(root, {
+  let confirmed = false;
+  const handle = openModal(root, {
     title: opts.title,
     body,
     primaryLabel: opts.primaryLabel ?? 'OK',
     primaryVariant: opts.primaryVariant ?? 'primary',
-    onPrimary: opts.onConfirm,
+    onPrimary: async () => {
+      confirmed = true;
+      await opts.onConfirm();
+    },
+    onClose: () => {
+      // primary 押下で閉じた場合は何もしない (confirmed=true)。
+      // Esc / × / キャンセルボタンで閉じた場合のみロールバック。
+      if (!confirmed && opts.onCancel) opts.onCancel();
+    },
   });
+  void handle;
 }

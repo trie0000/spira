@@ -59,8 +59,10 @@ function deriveTicketMeta(comments: Comment[], ticket: Ticket): TicketMeta {
   // 完了チケットは updatedAt を基準時刻にして日数を凍結する。
   // (案 A: 完了 = 更新停止という近似。完了後に編集すると updatedAt が
   //  動くので厳密な closedAt ではないが、運用上ほぼ問題ない)
+  // M3: updatedAt が欠落している場合は createdAt にフォールバック (Date.now()
+  // に倒れて毎日経過日数が増える挙動を防ぐ)。
   const isClosed = ticket.status === '完了';
-  const refIso = isClosed ? ticket.updatedAt : undefined;
+  const refIso = isClosed ? (ticket.updatedAt || ticket.createdAt) : undefined;
   return {
     elapsedDays: daysBetween(ticket.createdAt, refIso),
     stagnantDays: last ? daysBetween(last.sentAt ?? null, refIso) : null,

@@ -248,14 +248,29 @@ export function openTicketPropertiesModal(ticket: Ticket): void {
       el('div', { style: VALUE_STYLE }, [current.priority]),
     );
 
-    // ソース (編集可能)
+    // ソース (編集可能)。M2: 即時 applyPatch だと誤クリックで unrecoverable に
+    // なるので、変更があれば確認ダイアログを挟む。キャンセル時は元の値に戻す。
+    const initialSource = current.source ?? '';
     const sourceSel = el('select', {
       class: 'spira-input',
       style: 'width:200px',
       onchange: () => {
         const v = (sourceSel as HTMLSelectElement).value;
         const next = (v === '' ? undefined : v) as Ticket['source'];
-        void applyPatch({ source: next });
+        const label =
+          v === '' ? '(未設定)' :
+          v === 'mail' ? '📧 メール' :
+          v === 'forms' ? '📋 Forms' :
+          v === 'teams' ? '💬 Teams' :
+          v === 'other' ? '📝 その他' :
+          v;
+        confirmModal(root, {
+          title: 'チケットのソースを変更',
+          message: `ソースを「${label}」に変更します。よろしいですか?`,
+          primaryLabel: '変更',
+          onConfirm: async () => { await applyPatch({ source: next }); },
+          onCancel: () => { (sourceSel as HTMLSelectElement).value = initialSource; },
+        });
       },
     }, [
       el('option', { value: '', ...(!current.source ? { selected: 'selected' } : {}) }, ['(未設定)']),
