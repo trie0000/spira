@@ -386,6 +386,88 @@ function renderTechTab(): HTMLElement {
       ]),
     ]),
 
+    el('h2', { style: H2 }, ['🛡 重複排除の仕組み']),
+    el('p', { style: P }, [
+      'Spira はサーバを持たず、',
+      el('strong', {}, ['ブラウザに開いているユーザー全員がそれぞれ独立して SP / PA を読み書きする']),
+      ' 構成です。複数ユーザーが同時に同じデータを操作した時の二重登録を防ぐため、',
+      '以下の 3 層で重複排除を行っています。',
+    ]),
+
+    el('h3', { style: H3 }, ['① 受信一覧 (起票前)']),
+    el('ul', { style: UL }, [
+      el('li', {}, [
+        el('strong', {}, ['IsProcessed フラグ + サーバ側フィルタ: ']),
+        '起票成功時に InboxMail の ',
+        el('code', { style: 'background:var(--paper-2);padding:1px 6px;border-radius:3px;font-size:0.92em' }, ['IsProcessed=true']),
+        ' をセット。受信一覧は ',
+        el('code', { style: 'background:var(--paper-2);padding:1px 6px;border-radius:3px;font-size:0.92em' }, ['unprocessedOnly=true']),
+        ' で取得するので、起票済み行は他ユーザーの画面でも自動的に消える。',
+      ]),
+      el('li', {}, [
+        el('strong', {}, ['手動同期 / 自動同期 (既定 60 秒): ']),
+        '画面右上の同期ボタン or タイマー駆動で受信一覧を再フェッチ。',
+        '別ユーザーが処理した行はここで自動消去。',
+      ]),
+    ]),
+
+    el('h3', { style: H3 }, ['② 起票 (二重チケット作成防止)']),
+    el('ul', { style: UL }, [
+      el('li', {}, [
+        el('strong', {}, ['保存直前の再チェック: ']),
+        '「起票」ボタン押下時、保存処理の冒頭で対象 InboxMail を SP から ',
+        el('strong', {}, ['再フェッチ']),
+        ' し IsProcessed を確認。既処理なら処理中断 + チケット詳細への誘導 toast を出す。',
+      ]),
+      el('li', {}, [
+        el('strong', {}, ['送信者 + 送信時刻による重複チケット検出: ']),
+        'チケット作成前に同じ送信者 (email/name) + 同じ送信時刻 (分単位) のチケットが既存にないかを ',
+        el('code', { style: 'background:var(--paper-2);padding:1px 6px;border-radius:3px;font-size:0.92em' }, ['findDuplicateTicket']),
+        ' で検索。ヒットすれば確認モーダル「重複しても起票」を表示し、ユーザーが明示的に承認するまで作成しない。',
+      ]),
+      el('li', {}, [
+        el('strong', {}, ['残るレース幅: ']),
+        '2 ユーザーが ms オーダーで完全同時に保存ボタンを押した時のみすり抜ける可能性あり (TOCTOU)。',
+        '実運用では起票判断に数秒〜要するため発生は極めて稀。',
+      ]),
+    ]),
+
+    el('h3', { style: H3 }, ['③ 履歴読み込み (Teams 返信 / メール返信の auto-link)']),
+    el('ul', { style: UL }, [
+      el('li', {}, [
+        el('strong', {}, ['同期前チェック: ']),
+        'syncInbox で auto-link する直前、対象 InboxMail の ',
+        el('code', { style: 'background:var(--paper-2);padding:1px 6px;border-radius:3px;font-size:0.92em' }, ['InternetMessageId']),
+        ' (= Teams messageId or RFC 822 Message-ID) が、対象チケットの Comments に既存ならコメント追加をスキップ。',
+      ]),
+      el('li', {}, [
+        el('strong', {}, ['書込後の物理削除: ']),
+        'auto-link 成功で deleteInboxMail を実行 → InboxMail 自体が消える。後続の syncInbox はその行を処理対象に含めない。',
+      ]),
+      el('li', {}, [
+        el('strong', {}, ['自己治癒 (listComments のクリーンアップ): ']),
+        'チケット詳細を開く際の listComments で、同 InternetMessageId のコメントが 2 件以上ある場合は',
+        ' 古い方を残して新しい方を物理削除 (fire-and-forget)。完全同時 sync によるレース起因の重複が万一発生しても、',
+        '次回そのチケットを開いた時点で自動的に修復される。',
+      ]),
+      el('li', {}, [
+        el('strong', {}, ['残るレース幅: ']),
+        '2 つのブラウザの syncInbox が ms オーダーで衝突した瞬間のみ一時的に重複が生じる可能性があるが、',
+        '上記の自己治癒で次回読込時に正常化される。',
+      ]),
+    ]),
+
+    el('div', {
+      style: 'margin-top:var(--s-4);padding:var(--s-3) var(--s-4);' +
+             'background:rgba(122,138,120,0.10);border-left:3px solid var(--accent);' +
+             'border-radius:var(--r-2);font-size:var(--fs-sm);line-height:1.7',
+    }, [
+      el('strong', {}, ['ポイント: ']),
+      'サーバ無しでも「複数ユーザー並行操作」を概ね正しく処理できる構成。',
+      '完全防御 (ETag / Optimistic Locking) は実装可能だが、現在の race 発生頻度では費用対効果が低いため見送り。',
+      '実運用で衝突が観測されたら ETag (If-Match) ベースの楽観ロックを追加する余地あり。',
+    ]),
+
     el('h2', { style: H2 }, ['🛠 管理者ができること']),
     el('ul', { style: UL }, [
       el('li', {}, ['設定モーダル (歯車 → 設定) で内部メンバー・部門・問い合わせ種別・チケット ID 形式を編集']),

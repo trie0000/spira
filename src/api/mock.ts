@@ -339,9 +339,29 @@ export class MockRepository implements Repository {
   }
 
   async listComments(ticketId: number): Promise<Comment[]> {
-    return store.comments
+    const items = store.comments
       .filter(c => c.ticketId === ticketId)
       .sort((a, b) => a.sentAt.localeCompare(b.sentAt));
+    // E: 同 InternetMessageId のコメントが 2 件以上あれば古い 1 件を残して
+    // 重複を物理削除 (自己治癒)。mock では同期処理で OK。
+    const byIMID = new Map<string, Comment[]>();
+    for (const c of items) {
+      if (c.internetMessageId && c.type === 'received') {
+        const arr = byIMID.get(c.internetMessageId) ?? [];
+        arr.push(c);
+        byIMID.set(c.internetMessageId, arr);
+      }
+    }
+    const dupIds = new Set<number>();
+    for (const arr of byIMID.values()) {
+      if (arr.length <= 1) continue;
+      arr.sort((a, b) => a.id - b.id);
+      for (let i = 1; i < arr.length; i++) dupIds.add(arr[i]!.id);
+    }
+    if (dupIds.size > 0) {
+      store.comments = store.comments.filter(c => !dupIds.has(c.id));
+    }
+    return items.filter(c => !dupIds.has(c.id));
   }
   async updateComment(
     id: number,

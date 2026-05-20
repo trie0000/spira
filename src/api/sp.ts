@@ -830,7 +830,35 @@ export class SpRepository implements Repository {
     const items = (res.value ?? []).map(asComment);
     // SentAt asc に戻す (display 側は古い順を期待)
     items.sort((a, b) => (a.sentAt ?? '').localeCompare(b.sentAt ?? ''));
-    return items;
+
+    // E: 同 InternetMessageId のコメントが 2 件以上あれば古い 1 件を残して
+    // 新しい方を物理削除する (自動同期 race による重複自己治癒)。削除は
+    // fire-and-forget — 失敗してもユーザーには影響させない (次回の閲覧で
+    // 再試行されるため)。
+    const byIMID = new Map<string, Comment[]>();
+    for (const c of items) {
+      if (c.internetMessageId && c.type === 'received') {
+        const arr = byIMID.get(c.internetMessageId) ?? [];
+        arr.push(c);
+        byIMID.set(c.internetMessageId, arr);
+      }
+    }
+    const dupIds = new Set<number>();
+    for (const arr of byIMID.values()) {
+      if (arr.length <= 1) continue;
+      // ID 昇順で最初のものを残し、それ以降を削除対象に
+      arr.sort((a, b) => a.id - b.id);
+      for (let i = 1; i < arr.length; i++) dupIds.add(arr[i]!.id);
+    }
+    if (dupIds.size > 0) {
+      console.warn(`[spira/comments] 重複コメント ${dupIds.size} 件を自動削除 (InternetMessageId 一致)`);
+      for (const id of dupIds) {
+        // 非同期 fire-and-forget。失敗時は warn のみ (UI には反映しない)。
+        this.tx.remove(this.listPath(this.cfg.listComments), id)
+          .catch((e: Error) => console.warn(`[spira/comments] 重複削除失敗 id=${id}:`, e.message));
+      }
+    }
+    return items.filter(c => !dupIds.has(c.id));
   }
 
   async updateComment(
