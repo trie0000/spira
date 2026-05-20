@@ -78,6 +78,34 @@ type InboxAttachFilter = '' | 'yes' | 'no';
 interface InboxFilter { query: string; fromEmail: string; hasAttachments: InboxAttachFilter; includeHidden: boolean }
 const inboxFilter: InboxFilter = { query: '', fromEmail: '', hasAttachments: '', includeHidden: false };
 
+// Inbox-local sort. 既定は受信日時の降順 (最新が上)。
+type InboxSortKey = 'subject' | 'from' | 'date';
+const inboxSort: { by: InboxSortKey; dir: 'asc' | 'desc' } = { by: 'date', dir: 'desc' };
+
+function applyInboxSort(rows: InboxMail[]): InboxMail[] {
+  const { by, dir } = inboxSort;
+  const sign = dir === 'asc' ? 1 : -1;
+  const norm = (s: string | undefined): string => (s ?? '').toLowerCase();
+  const out = [...rows];
+  out.sort((a, b) => {
+    let av: string; let bv: string;
+    if (by === 'subject') { av = norm(a.subject); bv = norm(b.subject); }
+    else if (by === 'from') {
+      // 表示名 (fromName) を優先、無ければ email
+      av = norm(a.fromName || a.fromEmail);
+      bv = norm(b.fromName || b.fromEmail);
+    }
+    else { // date — receivedAt がプライマリ、無ければ sentAt
+      av = String(a.receivedAt ?? a.sentAt ?? '');
+      bv = String(b.receivedAt ?? b.sentAt ?? '');
+    }
+    if (av < bv) return -1 * sign;
+    if (av > bv) return  1 * sign;
+    return 0;
+  });
+  return out;
+}
+
 function getRoot(): HTMLElement {
   return document.querySelector<HTMLElement>('#spira-root') ?? document.body;
 }
@@ -116,12 +144,13 @@ export async function renderInbox(): Promise<HTMLElement> {
   // タグ付き = 既存チケット関連の履歴として常に閲覧できる方が便利。
   const allMails = await getRepo().listInbox({ includeHidden: inboxFilter.includeHidden });
   const filtered = applyInboxFilters(allMails);
+  const sorted = applyInboxSort(filtered);
 
-  for (const id of Array.from(selectedInboxIds)) if (!filtered.find(m => m.id === id)) selectedInboxIds.delete(id);
+  for (const id of Array.from(selectedInboxIds)) if (!sorted.find(m => m.id === id)) selectedInboxIds.delete(id);
 
-  wrap.appendChild(renderSubBar(filtered.length));
+  wrap.appendChild(renderSubBar(sorted.length));
   wrap.appendChild(renderToolbar(allMails));
-  wrap.appendChild(renderList(filtered));
+  wrap.appendChild(renderList(sorted));
   return wrap;
 }
 
@@ -448,12 +477,31 @@ function renderList(mails: InboxMail[]): HTMLElement {
   selectAll.checked = allChecked;
   if (someChecked) selectAll.indeterminate = true;
 
+  // ソート可能なヘッダセル。クリックで same key なら方向反転、他キーは
+  // そのキーで desc に初期化。インジケータ ▲▼ を末尾に表示。
+  const sortHead = (label: string, key: InboxSortKey, extraStyle = ''): HTMLElement => {
+    const isActive = inboxSort.by === key;
+    const arrow = isActive ? (inboxSort.dir === 'asc' ? ' ▲' : ' ▼') : '';
+    return el('th', {
+      style: `cursor:pointer;user-select:none;${extraStyle};${isActive ? 'color:var(--ink)' : ''}`,
+      title: 'クリックでソート (再クリックで昇順/降順を切替)',
+      onclick: () => {
+        if (inboxSort.by === key) {
+          inboxSort.dir = inboxSort.dir === 'asc' ? 'desc' : 'asc';
+        } else {
+          inboxSort.by = key;
+          inboxSort.dir = key === 'date' ? 'desc' : 'asc';
+        }
+        setState({});
+      },
+    }, [label + arrow]);
+  };
   const head = el('tr', {}, [
     el('th', { class: 'spira-tk-checkbox-cell', style: 'width:34px' }, [selectAll]),
     el('th', { style: 'width:24px' }),
-    el('th', {}, ['件名']),
-    el('th', { style: 'width:240px' }, ['送信者']),
-    el('th', { style: 'width:140px' }, ['受信日時']),
+    sortHead('件名', 'subject'),
+    sortHead('送信者', 'from', 'width:240px'),
+    sortHead('受信日時', 'date', 'width:140px'),
     el('th', { style: 'width:200px' }, ['操作']),
   ]);
 
