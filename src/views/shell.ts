@@ -1961,45 +1961,126 @@ function buildPaFlowsBodyImpl(root: HTMLElement): HTMLElement {
     }),
 
     stepCard({
+      num: '3a',
+      title: 'メンション組み立て用の変数を 3 つ初期化 — 任意',
+      connector: 'コントロール',
+      action: '変数を初期化する (Initialize variable) ×3',
+      note: 'メンション機能を使う場合のみ必要。フロー先頭 (トリガーの直後) に「変数を初期化する」を 3 つ並べる。後段の Apply to each で順次 append していくため、ループの外で空状態を作っておく。\n\n名前 (Name) はコピペ前提のため厳密一致させること。STEP 3c / STEP 4 の式で同じ名前を参照する。',
+      params: [
+        { field: '#1 Name',  value: 'mentionsArray', type: 'static', hint: '型 (Type) = Array、Value = 空欄 (= 空配列)' },
+        { field: '#2 Name',  value: 'mentionsHtml',  type: 'static', hint: '型 (Type) = String、Value = 空欄 (= 空文字列)' },
+        { field: '#3 Name',  value: 'idx',           type: 'static', hint: '型 (Type) = Integer、Value = 0' },
+      ],
+    }),
+
+    stepCard({
       num: '3b',
       title: 'メンション対象 (MentionedEmails) を配列化 — 任意',
       connector: 'Data Operation',
-      action: '作成 (Compose) — 名前は「MentionEmails」にリネーム推奨',
+      action: '作成 (Compose) — 名前は「MentionEmails」にリネーム必須',
       note: 'Spira が MentionedEmails 列にメール CSV を入れてくる。後段の Apply to each で配列展開するために、ここで split() しておく。\n\n空のときは空配列を返すので、メンション無しの場合も安全に処理が進む。',
       params: [
-        { field: 'アクション名 (リネーム推奨)', value: 'MentionEmails', type: 'static' },
+        { field: 'アクション名 (リネーム)', value: 'MentionEmails', type: 'static' },
         { field: '入力 (fx)', value: "if(empty(triggerOutputs()?['body/MentionedEmails']), createArray(), split(triggerOutputs()?['body/MentionedEmails'], ','))", type: 'expression', hint: 'カンマ区切り文字列 → 配列。空文字なら空配列。' },
       ],
     }),
 
     stepCard({
       num: '3c',
-      title: '各メンション対象を AAD ObjectId に解決 — 任意',
-      connector: 'コントロール / Office 365 ユーザー',
-      action: 'Apply to each + 「ユーザー プロファイル (V2) の取得」',
-      note: 'Apply to each で MentionEmails の各要素について「Get user profile (V2)」を呼び、displayName と id (AAD ObjectId) を集める。\n\n配列の組み立ては内側の Compose で行う。',
+      title: 'Apply to each で 1 ユーザずつ AAD 解決 + 変数に追記 — 任意',
+      connector: 'コントロール',
+      action: 'Apply to each (内側に 4 アクション)',
+      note: 'MentionEmails の配列を 1 件ずつループし、ループ内で「AAD 解決」+「mentions[] に追記」+「<at> タグを HTML 文字列に追記」+「idx を +1」を行う。\n\nループ後には variables(\'mentionsArray\') と variables(\'mentionsHtml\') が STEP 4 (Teams 投稿) で使える形に組み上がる。',
       params: [
-        { field: 'Apply to each 入力', value: "outputs('MentionEmails')", type: 'expression' },
-        { field: '内側 STEP: User (UPN)', value: "items('Apply_to_each')", type: 'expression', hint: '「ユーザー プロファイル (V2) の取得」の User 欄に貼る。' },
+        { field: 'Apply to each / 入力', value: "outputs('MentionEmails')", type: 'expression', hint: 'fx タブに貼り付け。' },
       ],
       extra: [
-        el('p', { style: 'margin:var(--s-3) 0 var(--s-2);font-size:var(--fs-sm);color:var(--ink-2)' }, ['Apply to each の中で組み立てる「ユーザ別 mention オブジェクト」 (内側 Compose、名前: MentionObj):']),
-        codeBlock(
-          "{\n" +
-          "  \"id\": @{add(0, length(variables('mentionsArray')))},\n" +
-          "  \"mentionText\": \"@{body('ユーザー_プロファイル__V2__の取得')?['displayName']}\",\n" +
-          "  \"mentioned\": {\n" +
-          "    \"user\": {\n" +
-          "      \"id\": \"@{body('ユーザー_プロファイル__V2__の取得')?['id']}\",\n" +
-          "      \"displayName\": \"@{body('ユーザー_プロファイル__V2__の取得')?['displayName']}\",\n" +
-          "      \"userIdentityType\": \"aadUser\"\n" +
-          "    }\n" +
-          "  }\n" +
-          "}"
-        ),
-        el('p', { style: 'margin:var(--s-2) 0;font-size:var(--fs-xs);color:var(--ink-3);line-height:1.6' }, [
-          '※ 簡略化: id を 0, 1, 2... と振るために「変数」を使う必要があります。フロー先頭で variables(\'mentionsArray\') = []、変数 \'idx\' = 0 を初期化し、各ループで MentionObj を append + idx を increment、本文中の <at id="0"> も idx に合わせる方式が一般的。詳細はサンプルフローを参照。',
+        el('p', { style: 'margin:var(--s-3) 0 var(--s-2);font-size:var(--fs-sm);font-weight:600;color:var(--ink)' }, [
+          'Apply to each の内側に置くアクション (順番厳守):',
         ]),
+        // ループ内 ① Get user profile (V2)
+        el('div', {
+          style: 'border:1px solid var(--line);border-radius:var(--r-2);padding:var(--s-3) var(--s-4);margin:var(--s-2) 0;background:var(--paper-2)',
+        }, [
+          el('div', { style: 'font-size:var(--fs-sm);font-weight:600;color:var(--ink);margin-bottom:6px' }, [
+            '内側 ① ', el('code', { style: 'background:transparent;color:#c7254e' }, ['Office 365 ユーザー / ユーザー プロファイル (V2) の取得']),
+          ]),
+          el('table', { style: 'width:100%;border-collapse:collapse;font-size:12px' }, [
+            el('tbody', {}, [
+              row('User (UPN)', "items('Apply_to_each')", 'fx タブに貼り付け。ループの現在の email が渡る。アクション名はそのまま (= 後段で body(\'ユーザー_プロファイル__V2__の取得\') で参照する想定)。'),
+            ]),
+          ]),
+        ]),
+        // ループ内 ② Append to array variable (mentionsArray)
+        el('div', {
+          style: 'border:1px solid var(--line);border-radius:var(--r-2);padding:var(--s-3) var(--s-4);margin:var(--s-2) 0;background:var(--paper-2)',
+        }, [
+          el('div', { style: 'font-size:var(--fs-sm);font-weight:600;color:var(--ink);margin-bottom:6px' }, [
+            '内側 ② ', el('code', { style: 'background:transparent;color:#c7254e' }, ['コントロール / 配列変数に追加 (Append to array variable)']),
+          ]),
+          el('table', { style: 'width:100%;border-collapse:collapse;font-size:12px' }, [
+            el('tbody', {}, [
+              row('Name', 'mentionsArray', 'プルダウンから選択 (STEP 3a で初期化した配列変数)。'),
+              row('Value (fx)', "json(concat('{\\\"id\\\":', variables('idx'), ',\\\"mentionText\\\":\\\"', body('ユーザー_プロファイル__V2__の取得')?['displayName'], '\\\",\\\"mentioned\\\":{\\\"user\\\":{\\\"id\\\":\\\"', body('ユーザー_プロファイル__V2__の取得')?['id'], '\\\",\\\"displayName\\\":\\\"', body('ユーザー_プロファイル__V2__の取得')?['displayName'], '\\\",\\\"userIdentityType\\\":\\\"aadUser\\\"}}}'))",
+                'fx タブに貼り付け (改行せず 1 行で OK)。json(concat(...)) で文字列を組み立てて JSON オブジェクトとしてパース。配列変数の Value にはオブジェクトを渡せる。'),
+            ]),
+          ]),
+          el('p', {
+            style: 'margin:var(--s-2) 0 0;font-size:var(--fs-xs);color:var(--ink-3);line-height:1.6',
+          }, [
+            '※ 整形して読みやすくしたバージョン:',
+          ]),
+          codeBlock(
+            "json(concat(\n" +
+            "  '{\"id\":', variables('idx'),\n" +
+            "  ',\"mentionText\":\"', body('ユーザー_プロファイル__V2__の取得')?['displayName'],\n" +
+            "  '\",\"mentioned\":{\"user\":{\"id\":\"', body('ユーザー_プロファイル__V2__の取得')?['id'],\n" +
+            "  '\",\"displayName\":\"', body('ユーザー_プロファイル__V2__の取得')?['displayName'],\n" +
+            "  '\",\"userIdentityType\":\"aadUser\"}}}'\n" +
+            "))"
+          ),
+        ]),
+        // ループ内 ③ Append to string variable (mentionsHtml)
+        el('div', {
+          style: 'border:1px solid var(--line);border-radius:var(--r-2);padding:var(--s-3) var(--s-4);margin:var(--s-2) 0;background:var(--paper-2)',
+        }, [
+          el('div', { style: 'font-size:var(--fs-sm);font-weight:600;color:var(--ink);margin-bottom:6px' }, [
+            '内側 ③ ', el('code', { style: 'background:transparent;color:#c7254e' }, ['コントロール / 文字列変数に追加 (Append to string variable)']),
+          ]),
+          el('table', { style: 'width:100%;border-collapse:collapse;font-size:12px' }, [
+            el('tbody', {}, [
+              row('Name', 'mentionsHtml', 'プルダウンから選択 (STEP 3a の文字列変数)。'),
+              row('Value (fx)', "concat('<at id=\"', variables('idx'), '\">', body('ユーザー_プロファイル__V2__の取得')?['displayName'], '</at> ')",
+                'fx タブに貼り付け。<at id="N">表示名</at> + 半角スペースを 1 件ぶん追記。'),
+            ]),
+          ]),
+        ]),
+        // ループ内 ④ Increment variable (idx)
+        el('div', {
+          style: 'border:1px solid var(--line);border-radius:var(--r-2);padding:var(--s-3) var(--s-4);margin:var(--s-2) 0;background:var(--paper-2)',
+        }, [
+          el('div', { style: 'font-size:var(--fs-sm);font-weight:600;color:var(--ink);margin-bottom:6px' }, [
+            '内側 ④ ', el('code', { style: 'background:transparent;color:#c7254e' }, ['コントロール / 変数の値を増やす (Increment variable)']),
+          ]),
+          el('table', { style: 'width:100%;border-collapse:collapse;font-size:12px' }, [
+            el('tbody', {}, [
+              row('Name', 'idx', 'プルダウンから選択。'),
+              row('Value', '1', '直接入力 (静的整数)。これで次のループの id が 1 つ進む。'),
+            ]),
+          ]),
+        ]),
+        // 完成イメージ
+        el('p', {
+          style: 'margin:var(--s-4) 0 var(--s-2);font-size:var(--fs-sm);font-weight:600;color:var(--ink)',
+        }, ['ループ完了後の状態 (メール 2 件 alice@..., bob@... の場合):']),
+        codeBlock(
+          "variables('mentionsArray') = [\n" +
+          "  { id: 0, mentionText: \"Alice\", mentioned: { user: { id: \"<aad-A>\", displayName: \"Alice\", userIdentityType: \"aadUser\" }}},\n" +
+          "  { id: 1, mentionText: \"Bob\",   mentioned: { user: { id: \"<aad-B>\", displayName: \"Bob\",   userIdentityType: \"aadUser\" }}}\n" +
+          "]\n" +
+          "variables('mentionsHtml') = '<at id=\"0\">Alice</at> <at id=\"1\">Bob</at> '\n" +
+          "variables('idx') = 2"
+        ),
       ],
     }),
 
