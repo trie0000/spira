@@ -1177,29 +1177,33 @@ function renderSplitPanes(t: Ticket, comments: Comment[], lastSeen: number | nul
     }, [buildColumn('👥 外部スレッド', externalComments, 'external', true)]);
   } else {
     // both モード: 内部 / 外部 を横並びにして、間にドラッグ可能なリサイザを挟む。
+    // 並列表示の配置は ★ 外部 (左) / 内部 (右) ★ に統一。
+    // 顧客対応スレッド (= 外部) が常に視線の起点になるレイアウト。
     // 幅比率は localStorage に永続化、ダブルクリックで 50/50 に戻す。
     const internalCol = buildColumn('🏢 内部スレッド', internalComments, 'internal', false);
     const externalCol = buildColumn('👥 外部スレッド', externalComments, 'external', false);
     const innerResizer = el('div', {
       class: 'spira-split-resizer',
-      'aria-label': '内部/外部スレッドの幅を変更',
+      'aria-label': '外部/内部スレッドの幅を変更',
       style: 'flex:0 0 6px;cursor:col-resize;background:var(--paper-3);transition:background 0.1s',
     });
 
     columnsContainer = el('div', {
       style: 'flex:1;min-height:0;display:flex;overflow:hidden',
-    }, [internalCol, innerResizer, externalCol]);
+    }, [externalCol, innerResizer, internalCol]);
 
-    // 永続化済み比率を復元 + ドラッグハンドラ装着
-    const RATIO_KEY = 'spira:thread-inner-split';
+    // 永続化済み比率を復元 + ドラッグハンドラ装着。
+    // 配置を反転したのでキー名も v2 に切替 (旧キーの値は内部=左 を想定して
+    // いたため再利用すると違和感が出る)。
+    const RATIO_KEY = 'spira:thread-inner-split:v2-ext-left';
     try {
       const saved = parseFloat(localStorage.getItem(RATIO_KEY) ?? '');
       if (Number.isFinite(saved) && saved > 0.1 && saved < 0.9) {
-        internalCol.style.flex = `0 0 ${(saved * 100).toFixed(2)}%`;
-        externalCol.style.flex = '1 1 0';
+        externalCol.style.flex = `0 0 ${(saved * 100).toFixed(2)}%`;
+        internalCol.style.flex = '1 1 0';
       }
     } catch { /* ignore */ }
-    attachInnerColumnResizer(innerResizer, internalCol, externalCol, RATIO_KEY);
+    attachInnerColumnResizer(innerResizer, externalCol, internalCol, RATIO_KEY);
   }
 
   const leftPane = el('div', {
