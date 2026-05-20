@@ -1255,6 +1255,8 @@ export function openNewTicketModal(m: InboxMail): void {
         } else if (src === 'mail' || src === 'forms') {
           // mail / forms どちらも HTML 本文をそのまま履歴として登録する流れ。
           // 受信箱由来 (PA 経由) なら m.bodyHtml をそのまま、手動入力時は textarea を採用。
+          // Forms は顧客からの不具合問い合わせ専用 (内部 Forms 運用は無し) なので
+          // 明示的に外部スレッドへ振り分ける。mail も同じく外部扱い。
           const content = fromInbox ? (m.bodyHtml || m.bodyText) : bodyArea.value;
           const isHtml = fromInbox ? !!m.bodyHtml : false;
           if (content.trim()) {
@@ -1267,6 +1269,7 @@ export function openNewTicketModal(m: InboxMail): void {
               hasAttachments: fromInbox ? m.hasAttachments : undefined,
               internetMessageId: fromInbox ? m.internetMessageId : undefined,
               source: src,
+              threadKind: 'external',
             });
           }
         } else {
