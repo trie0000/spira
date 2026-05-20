@@ -15,6 +15,7 @@ import { getRepo } from '../api/repo';
 import { isDeveloperMode, setDeveloperMode } from '../utils/devMode';
 import { getFontSize, setFontSize, type FontSize } from '../utils/fontSize';
 import { getFormsAnalyticsUrl, setFormsAnalyticsUrl, extractFormId, normalizeAnalyticsUrl } from '../utils/formsSettings';
+import { getReplyMlRaw, setReplyMlRaw, parseAddressList } from '../utils/mailSettings';
 
 // 既存設定モーダル群
 import {
@@ -311,6 +312,85 @@ function renderFontSizePanel(): SettingPanel {
   return { body }; // 即時反映なので保存ボタン不要
 }
 
+// ── メール返信 — 共通 ML (Cc / Reply-To) ──────────────────────────
+//
+// 「📧 返信メール作成」モーダルを開いた時に自動的に Cc 欄に入り、relay 経由で
+// Outlook 下書きの ReplyRecipientNames (= Reply-To) にもセットされる ML を
+// 1〜数件登録する。SpiraSettings (key: mail.reply-ml) に文字列 1 行で保存。
+function buildMailReplySettingsPanel(): { body: HTMLElement; save: () => Promise<void> } {
+  // 既存値ロード (非同期だが、初期表示は空にしておいて流し込む)
+  const input = el('input', {
+    type: 'text',
+    class: 'spira-input',
+    placeholder: 'support-ml@example.com, alt-ml@example.com',
+    style: 'width:100%;font-family:ui-monospace,Menlo,monospace;font-size:12px',
+  }) as HTMLInputElement;
+  void getReplyMlRaw().then(v => { input.value = v; refreshPreview(); });
+
+  const previewLabel = el('span', {
+    style: 'color:var(--ink-3);font-size:var(--fs-xs);width:80px;flex-shrink:0',
+  }, ['解析結果:']);
+  const previewValue = el('div', {
+    style: 'font-family:ui-monospace,Menlo,monospace;font-size:12px;color:var(--ink-2);' +
+           'background:var(--paper-2);padding:4px 8px;border-radius:3px;word-break:break-all;flex:1',
+  }, ['(未入力)']);
+  const previewRow = el('div', {
+    style: 'display:flex;gap:var(--s-2);align-items:flex-start;margin-top:var(--s-2);min-height:24px',
+  }, [previewLabel, previewValue]);
+
+  const refreshPreview = (): void => {
+    const list = parseAddressList(input.value);
+    if (list.length === 0) {
+      previewValue.textContent = input.value.trim() ? '⚠ 有効な email アドレスが見つかりません' : '(未入力)';
+      previewValue.style.color = input.value.trim() ? 'var(--danger)' : 'var(--ink-3)';
+    } else {
+      previewValue.textContent = list.join(' / ');
+      previewValue.style.color = 'var(--ink-2)';
+    }
+  };
+  input.addEventListener('input', refreshPreview);
+
+  const save = async (): Promise<void> => {
+    const raw = input.value.trim();
+    if (!raw) {
+      await setReplyMlRaw(null);
+      toast(getRoot(), '返信用 ML の登録を解除しました', 'ok');
+      return;
+    }
+    const list = parseAddressList(raw);
+    if (list.length === 0) {
+      toast(getRoot(), '有効な email アドレスが見つかりません', 'error');
+      throw new Error('invalid');
+    }
+    // 正規化済みリストで保存 (重複・空白除去後の表記揺れを抑える)
+    await setReplyMlRaw(list.join(', '));
+    toast(getRoot(), `返信用 ML を保存しました (${list.length} 件)`, 'ok');
+  };
+
+  const body = el('div', {}, [
+    el('h2', { style: TITLE }, ['メール返信 — 共通 ML']),
+    el('div', { style: DESC }, [
+      'チケット詳細の「📧 返信メール作成」モーダルを開いた瞬間に自動的に Cc 欄に入り、',
+      'さらに Outlook 下書きの ', el('strong', {}, ['Reply-To']),
+      ' ヘッダにも設定される ML / 共有アドレスを登録します。',
+      el('br'),
+      '複数指定する場合はカンマ区切り (例: ', el('code', {}, ['support-ml@example.com, alt@example.com']), ')。',
+      el('br'),
+      el('br'),
+      '★ ', el('strong', {}, ['なぜ Reply-To に入れるか']),
+      ': 申請者が普通に「返信」を押したときに自動で ML 宛になり、',
+      'チーム全員が引き続き Spira に取り込めるようにするため。',
+      '「全員に返信」を押し忘れて返事が個人 1 人だけに行くケースを防げます。',
+    ]),
+    el('div', { class: 'spira-field' }, [
+      el('label', { class: 'spira-field-label' }, ['ML / 共有アドレス']),
+      input,
+      previewRow,
+    ]),
+  ]);
+  return { body, save };
+}
+
 // ── インライン: 開発者モード ────────────────────────────────────────
 function renderDeveloperModePanel(): SettingPanel {
   const checkbox = el('input', {
@@ -477,6 +557,21 @@ function buildGroups(): SettingGroup[] {
           key: 'forms',
           label: 'Forms 連携',
           render: () => renderFormsSettingsPanel(),
+        },
+        {
+          key: 'mail-reply',
+          label: 'メール返信 — 共通 ML',
+          render: () => {
+            const { body, save } = buildMailReplySettingsPanel();
+            return inlinePanel({
+              title: 'メール返信 — 共通 ML',
+              hint:
+                '「📧 返信メール作成」モーダルを開いたときに、自動的に Cc と Reply-To にセットされる ' +
+                '共有 ML / グループアドレスを登録します。複数指定する場合はカンマ区切り。Reply-To に入れて' +
+                'おくことで、申請者が「全員に返信」しなくても ML に確実に届く運用ができます。',
+              body, save,
+            });
+          },
         },
         {
           key: 'sync-interval',

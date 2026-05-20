@@ -459,6 +459,13 @@ function Invoke-OutlookReplyHandler {
             }
             $null = $reply.Recipients.ResolveAll()
         }
+        # Reply-To 設定 (Spira 設定の「メール返信 — 共通 ML」)。
+        # MailItem.ReplyRecipientNames はセミコロン区切りで複数指定可。
+        # 受信者がこの下書きから送るメールに「返信」した時の宛先を制御できる。
+        if ($payload.replyTo) {
+            $rtList = @($payload.replyTo | Where-Object { $_ }) -join '; '
+            if ($rtList) { $reply.ReplyRecipientNames = $rtList }
+        }
         # ★ 設計上ここで .Send() は絶対に呼ばない。下書きを表示するだけ。
         # ★ 最終的な「送信」ボタン操作は operator 本人が Outlook クライアントで
         # ★ 確認した上で行う。誤送信防止のため、この方針は変更しないこと。
@@ -522,6 +529,11 @@ function Invoke-OutlookNewHandler {
         if ($payload.cc) {
             $ccLine = ($payload.cc | Where-Object { $_ }) -join '; '
             if ($ccLine) { $mail.CC = $ccLine }
+        }
+        # Reply-To (Spira 設定「メール返信 — 共通 ML」由来)。
+        if ($payload.replyTo) {
+            $rtList = @($payload.replyTo | Where-Object { $_ }) -join '; '
+            if ($rtList) { $mail.ReplyRecipientNames = $rtList }
         }
         # 新規メールも reply と同じく、和文フォントを明示しないと Outlook が
         # HTML 既定の Times New Roman で描画してしまうため、<div style=...> で

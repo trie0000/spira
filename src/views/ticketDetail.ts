@@ -5,6 +5,7 @@ import { getRepo } from '../api/repo';
 import { setState, getState } from '../state';
 import { renderMailBody } from '../utils/sanitize';
 import { openOutlookReplyDraft, openOutlookNewDraft, pingRelay, getRelayOrigin } from '../utils/spiraRelay';
+import { getReplyMlAddresses } from '../utils/mailSettings';
 import { createNoteEditor, htmlToMarkdown } from '../lib/note-editor';
 import { formatTicketTag, formatTicketIdShort, buildCopyableSubject } from '../utils/ticketTag';
 
@@ -1071,6 +1072,18 @@ function openReplyComposerModal(activeT: Ticket, target: ReplyComposerTarget): v
     value: '',
     placeholder: 'Cc (カンマ区切りで複数可、任意)',
   }) as HTMLInputElement;
+
+  // 設定済みの共通 ML を非同期取得 → Cc 入力にプリフィル + Reply-To にも使う。
+  // (空文字 / 取得失敗時は何もしない)
+  let replyToAddresses: string[] = [];
+  void (async () => {
+    try {
+      replyToAddresses = await getReplyMlAddresses();
+      if (replyToAddresses.length > 0 && !ccInput.value.trim()) {
+        ccInput.value = replyToAddresses.join(', ');
+      }
+    } catch { /* ignore */ }
+  })();
   const subjectInput = el('input', {
     type: 'text', class: 'spira-input', style: 'width:100%',
     value: target.defaultSubject,
@@ -1182,18 +1195,23 @@ function openReplyComposerModal(activeT: Ticket, target: ReplyComposerTarget): v
       const cc = ccInput.value
         .split(/[,\s]+/).map(s => s.trim()).filter(Boolean);
 
+      // 共通 ML 設定があれば Reply-To にも入れる。Cc は上で operator が
+      // 編集できるので、Reply-To は「設定値」を相互独立に渡す。
+      const replyTo = replyToAddresses;
       const result = isReply
         ? await openOutlookReplyDraft({
             sentAtIso: target.sourceSentAt ?? '',
             fromEmail: target.toEmail,
             bodyHtml,
             cc,
+            replyTo,
           })
         : await openOutlookNewDraft({
             to,
             subject,
             bodyHtml,
             cc,
+            replyTo,
           });
 
       if (result.ok) {

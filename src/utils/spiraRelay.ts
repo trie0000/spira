@@ -62,10 +62,10 @@ export interface RelayResult {
 /** /spira/outlook/reply: 既存メールへの正規 Reply 下書きを Outlook で開く。
  *
  *  メール検索キーは「送信時刻 (sentAtIso) + 送信者 (fromEmail)」の組み合わせ。
- *  送信時刻は分単位の精度で照合される (operator の Outlook に届いた同じ
- *  メールであれば確実に一意に決まる前提)。InternetMessageId は不要。 */
+ *  Outlook の MAPI も Spira の sentAt も秒精度で揃うので完全一致で照合。
+ *  InternetMessageId は不要。 */
 export async function openOutlookReplyDraft(input: {
-  /** 元メールの送信時刻 (ISO 8601 文字列)。relay 側は分単位に丸めて検索。 */
+  /** 元メールの送信時刻 (ISO 8601 文字列)。 */
   sentAtIso: string;
   /** 元メールの送信者メールアドレス (= 申請者の email)。 */
   fromEmail: string;
@@ -73,6 +73,9 @@ export async function openOutlookReplyDraft(input: {
   bodyHtml: string;
   /** 追加 Cc アドレス (任意)。元メールから引き継いだ Cc に追記される。 */
   cc?: string[];
+  /** Reply-To として下書きにセットする ML アドレス (任意、複数可)。
+   *  relay 側で MailItem.ReplyRecipientNames に '; ' 区切りで入れる。 */
+  replyTo?: string[];
 }): Promise<RelayResult> {
   const url = `${getRelayOrigin()}/spira/outlook/reply`;
   let res: Response;
@@ -85,6 +88,7 @@ export async function openOutlookReplyDraft(input: {
         fromEmail: input.fromEmail,
         bodyHtml: input.bodyHtml,
         cc: input.cc ?? [],
+        replyTo: input.replyTo ?? [],
       }),
     });
   } catch {
@@ -113,6 +117,8 @@ export async function openOutlookNewDraft(input: {
   bodyHtml: string;
   /** Cc (任意)。 */
   cc?: string[];
+  /** Reply-To として下書きにセットする ML アドレス (任意、複数可)。 */
+  replyTo?: string[];
 }): Promise<RelayResult> {
   const url = `${getRelayOrigin()}/spira/outlook/new`;
   let res: Response;
@@ -125,6 +131,7 @@ export async function openOutlookNewDraft(input: {
         subject: input.subject,
         bodyHtml: input.bodyHtml,
         cc: input.cc ?? [],
+        replyTo: input.replyTo ?? [],
       }),
     });
   } catch {
