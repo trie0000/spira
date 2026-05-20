@@ -1095,7 +1095,7 @@ export function openNewTicketModal(m: InboxMail): void {
   // ---- メタデータ -------------------------------------------------------
   const statusSel = el('select', { class: 'spira-input', style: 'width:100%' },
     ticketStatusList().map(v => el('option', { value: v, selected: v === '新規' }, [v]))) as HTMLSelectElement;
-  // 優先度の初期値: Forms 経由なら応答値から抽出、それ以外は Medium。
+  // 影響度の初期値: Forms 経由なら応答値から抽出、それ以外は Medium。
   // (このセレクト要素の生成タイミングでは initialFormsPriority がまだ
   //  宣言されていないので、生成後に setTimeout で反映する流れにせず、
   //  Medium をデフォルトにしておき、後段で値を上書きする。)
@@ -1113,7 +1113,7 @@ export function openNewTicketModal(m: InboxMail): void {
     el('option', { value: '' }, ['(未設定)']),
   ]) as HTMLSelectElement;
 
-  // Forms 経由のメール本文から特定ラベル (カテゴリ / 優先度 等) の値を抽出。
+  // Forms 経由のメール本文から特定ラベル (カテゴリ / 影響度 等) の値を抽出。
   // L5: 厳密パターン優先 (`<strong>カテゴリ:</strong> <value>`) で誤抽出を防ぐ。
   // PA フロー③ が生成する BodyHtml は <p><strong>カテゴリ:</strong> X</p> 形式
   // 固定なので、まずこのパターンで試し、見つからなければ緩いフォールバック。
@@ -1139,12 +1139,12 @@ export function openNewTicketModal(m: InboxMail): void {
   };
   const initialFormsCategory = extractFormsField(m, 'カテゴリ');
 
-  // 優先度の自動マッピング:
+  // 影響度の自動マッピング:
   //   Forms 応答は "High（業務が停止している / 緊急対応が必要）" のような
   //   長い文字列で返ってくる場合がある。先頭の High / Medium / Low を
   //   切り出して Spira の Priority enum に揃える。
   const extractFormsPriority = (mm: InboxMail): Priority | undefined => {
-    const raw = extractFormsField(mm, '優先度');
+    const raw = extractFormsField(mm, '影響度');
     if (!raw) return undefined;
     const head = raw.match(/^\s*(High|Medium|Low)/i);
     if (!head) return undefined;
@@ -1219,7 +1219,7 @@ export function openNewTicketModal(m: InboxMail): void {
              'border-top:1px solid var(--line);padding-top:var(--s-3);margin-top:var(--s-2)',
     }, ['チケット属性']),
     el('label', { style: LABEL_STYLE }, ['ステータス']), statusSel,
-    el('label', { style: LABEL_STYLE }, ['優先度']),    prioSel,
+    el('label', { style: LABEL_STYLE }, ['影響度']),    prioSel,
     el('label', { style: LABEL_STYLE }, ['担当者']),    assigneePicker.el,
     el('label', { style: LABEL_STYLE }, ['期限']),      dueInput,
     el('label', { style: LABEL_STYLE }, ['部門']),      deptSel,

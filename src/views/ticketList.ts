@@ -144,10 +144,10 @@ function renderSubBar(visibleCount: number, visibleTickets: Ticket[]): HTMLEleme
       onclick: (e: Event) => {
         e.stopPropagation();
         openInlineSelectMenu<Priority>(prioBtn, priorityList(), undefined, async (next) => {
-          await onBulkUpdate({ priority: next }, `優先度を「${next}」に変更`);
+          await onBulkUpdate({ priority: next }, `影響度を「${next}」に変更`);
         });
       },
-    }, ['優先度 ▾']);
+    }, ['影響度 ▾']);
 
     const assigneeBtn = el('button', {
       class: 'spira-btn spira-btn--secondary spira-btn--sm',
@@ -222,7 +222,7 @@ function exportTicketsCsv(tickets: Ticket[]): void {
     return;
   }
   const header = [
-    'ID', 'タイトル', 'ステータス', '優先度', '担当者', '担当者メール',
+    'ID', 'タイトル', 'ステータス', '影響度', '担当者', '担当者メール',
     '部門', '問い合わせ種別', '起票者', '起票者メール',
     '期限', '作成日', '最終更新',
     'Teams 内部スレッド', 'Teams 外部スレッド',
@@ -393,7 +393,7 @@ function renderFilterChips(): HTMLElement {
     const u = s.users.find(x => x.email === f.assignee);
     chip(`担当者: ${f.assignee === '__unset__' ? '未割当' : (u?.displayName ?? f.assignee)}`, 'assignee');
   }
-  if (f.priority) chip(`優先度: ${f.priority}`, 'priority');
+  if (f.priority) chip(`影響度: ${f.priority}`, 'priority');
 
   if (chips.length === 0) return el('div', { style: 'display:none' });
 
@@ -420,7 +420,7 @@ function openFilterPopover(anchor: HTMLElement): void {
         { v: '__unset__', label: '(未割当)' },
         ...users.map(u => ({ v: u.email, label: u.displayName })),
     ] },
-    { key: 'priority', label: '優先度',     values: priorityList().map(v => ({ v, label: v })) },
+    { key: 'priority', label: '影響度',     values: priorityList().map(v => ({ v, label: v })) },
   ];
 
   const rowsWrap = el('div', { class: 'spira-fpop-body' });
@@ -537,7 +537,7 @@ function renderTable(rows: Ticket[], metaMap: Map<number, TicketMeta>): HTMLElem
 
   const tableKey = 'tickets';
   // 列順 (renderHeaderRow と renderRow と必ず一致させること):
-  //   ☐ / # / 件名 / ステータス / 担当 / 優先度 / 種別 / 部門 / 期限 /
+  //   ☐ / # / 件名 / ステータス / 担当 / 影響度 / 種別 / 部門 / 期限 /
   //   内部スレ / 外部スレ / 最終返信 / 滞留日 / 経過日 / 更新
   const colKeys: (string | null)[] = [
     null, 'id', 'title', 'status', 'assignee', 'priority', 'category', 'dept',
@@ -574,8 +574,8 @@ function renderHeaderRow(visibleRows: Ticket[]): HTMLElement {
     { label: '件名',        sortKey: 'title' },
     { label: 'ステータス',  sortKey: 'status' },
     { label: '担当',        sortKey: 'assignee' },
-    { label: '優先度',      sortKey: 'priority' },
-    { label: '種別' },                                // 問い合わせ種別 (優先度の隣)
+    { label: '影響度',      sortKey: 'priority' },
+    { label: '種別' },                                // 問い合わせ種別 (影響度の隣)
     { label: '部門' },
     { label: '期限',        sortKey: 'due' },
     { label: '内部スレ' },                             // 内部スレッド DeepLink
@@ -822,7 +822,7 @@ function renderRow(t: Ticket, meta?: TicketMeta): HTMLElement {
       onclick: (e: Event) => {
         e.stopPropagation();
         openInlineSelectMenu<Priority>(prio, priorityList(), t.priority, async (v) => {
-          await inlineUpdate(t, { priority: v }, '優先度');
+          await inlineUpdate(t, { priority: v }, '影響度');
         });
       },
     }, [prio]);

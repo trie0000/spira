@@ -389,6 +389,34 @@ function buildGroups(): SettingGroup[] {
           },
         },
         {
+          key: 'status',
+          label: 'ステータスの選択肢',
+          render: (root) => {
+            const { body, save } = buildOptionsPanel(root, 'status');
+            return inlinePanel({
+              title: 'ステータスの選択肢',
+              hint:
+                'チケット「ステータス」のプルダウン候補。並び順は変更可能。' +
+                '※ SP の Tickets リスト側 Status 列 (Choice) にも同名の選択肢が必要 (既存値を変更する場合は SP リスト設定でも手動追加してください)。',
+              body, save,
+            });
+          },
+        },
+        {
+          key: 'priority',
+          label: '影響度の選択肢',
+          render: (root) => {
+            const { body, save } = buildOptionsPanel(root, 'priority');
+            return inlinePanel({
+              title: '影響度の選択肢',
+              hint:
+                'チケット「影響度」(旧 影響度) のプルダウン候補。Forms 自動マッピングと整合させるには英語の High/Medium/Low 推奨。' +
+                '※ SP の Tickets リスト側 Priority 列 (Choice) にも同名の選択肢が必要。',
+              body, save,
+            });
+          },
+        },
+        {
           key: 'dept',
           label: '部門の選択肢',
           render: (root) => {

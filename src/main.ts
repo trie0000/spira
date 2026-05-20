@@ -66,7 +66,69 @@ export async function restartAutoSync(): Promise<void> {
   await startAutoSync(autoSyncRoot);
 }
 
+/** install.html / dev index.html / file:// 等、SharePoint 外で起動された場合に
+ *  全画面表示せず、警告ダイアログだけ出して終了する。 */
+function isInvalidLaunchContext(): boolean {
+  // 1) install.html 上で直接押されたケース (一番多いミス)
+  if (/install\.html?$/i.test(location.pathname)) return true;
+  // 2) file:// (ローカルファイル開き)
+  if (location.protocol === 'file:') return true;
+  // 3) SharePoint ドメインでも mock でもない他社サイト等
+  //    `?mock=1` を明示的に付けた dev は許可
+  const params = new URLSearchParams(location.search);
+  if (params.has('mock')) return false;
+  if (location.hostname.endsWith('.sharepoint.com')) return false;
+  // localhost / 127.0.0.1 等の dev は許可 (mock 動作)
+  if (location.hostname === 'localhost' || /^127\./.test(location.hostname)) return false;
+  return true;
+}
+
+function showInvalidContextWarning(): void {
+  // ブックマークレットの mount より前に呼ばれるため、CSS なしで素の HTML を使う。
+  const backdrop = document.createElement('div');
+  backdrop.style.cssText =
+    'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:2147483700;' +
+    'display:flex;align-items:center;justify-content:center;' +
+    'font-family:system-ui,-apple-system,"Segoe UI",sans-serif';
+  const panel = document.createElement('div');
+  panel.style.cssText =
+    'background:#fff;color:#1f1f1f;border-radius:8px;padding:24px 28px;' +
+    'box-shadow:0 12px 40px rgba(0,0,0,0.25);max-width:520px;width:90%';
+  panel.innerHTML = `
+    <h2 style="margin:0 0 12px;font-size:18px;font-weight:600">⚠ ここでは Spira を起動できません</h2>
+    <p style="margin:0 0 12px;font-size:14px;line-height:1.7">
+      Spira は <strong>SharePoint サイト上</strong> で動作するブックマークレットです。
+      <br>現在のページ (<code style="background:#f5f5f3;padding:1px 6px;border-radius:3px;font-size:12px">${location.host || location.protocol}</code>) では起動できません。
+    </p>
+    <p style="margin:0 0 16px;font-size:13px;color:#555;line-height:1.6">
+      使用するには:
+    </p>
+    <ol style="margin:0 0 16px;padding-left:1.4em;font-size:13px;color:#555;line-height:1.7">
+      <li>ブラウザで対象の SharePoint サイト (例: <code style="background:#f5f5f3;padding:1px 6px;border-radius:3px;font-size:12px">https://&lt;tenant&gt;.sharepoint.com/sites/&lt;site&gt;</code>) を開く</li>
+      <li>その状態でブックマークの <strong>Spira</strong> をクリック</li>
+    </ol>
+    <div style="text-align:right">
+      <button id="spira-warn-close" style="padding:8px 18px;background:#4a7c59;color:#fff;border:0;border-radius:4px;cursor:pointer;font-size:14px">閉じる</button>
+    </div>
+  `;
+  backdrop.appendChild(panel);
+  const close = (): void => { backdrop.remove(); };
+  panel.querySelector('#spira-warn-close')?.addEventListener('click', close);
+  backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); });
+  const onKey = (e: KeyboardEvent): void => {
+    if (e.key === 'Escape') { close(); document.removeEventListener('keydown', onKey); }
+  };
+  document.addEventListener('keydown', onKey);
+  document.body.appendChild(backdrop);
+}
+
 export async function mount(): Promise<void> {
+  // ★ SharePoint 外で起動された場合は警告だけ出して終了 (install.html 上で
+  //   ブックマークを押してしまったケース等)
+  if (isInvalidLaunchContext()) {
+    showInvalidContextWarning();
+    return;
+  }
   // A1: 再 mount 前に既存 auto-sync timer を必ず停止 (多重 setInterval 防止)。
   stopAutoSync();
   syncing = false;
@@ -143,6 +205,14 @@ export async function mount(): Promise<void> {
       if (r.created.length > 0) msgs.push(`リスト作成: ${r.created.join(' / ')}`);
       if (r.addedFields && r.addedFields.length > 0) msgs.push(`列追加: ${r.addedFields.length}件`);
       if (msgs.length > 0) toast(root, `初期セットアップ完了 — ${msgs.join(' / ')}`, 'ok', 8000);
+    }
+
+    // 設定モーダルから編集可能な選択肢リスト (ステータス / 影響度 / 部門 /
+    // 種別) をキャッシュに温める。ticketStatusList() / priorityList() は同期版で
+    // 呼ばれることがあるので、ここで先に await しておく。
+    {
+      const { warmOptionLists } = await import('./utils/optionLists');
+      await warmOptionLists();
     }
 
     // load counts & users & current user + site title (ワークスペース表記用)

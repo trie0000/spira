@@ -25,6 +25,8 @@ import {
 import {
   getDepartmentOptions, setDepartmentOptions,
   getInquiryCategoryOptions, setInquiryCategoryOptions,
+  getStatusOptions, setStatusOptions,
+  getPriorityOptions, setPriorityOptions,
 } from '../utils/optionLists';
 
 export function renderShell(): HTMLElement {
@@ -865,11 +867,16 @@ export function openTeamsChannelsModal(root: HTMLElement): void {
 /** 選択肢編集モーダル (部門 / 問い合わせ種別 共通)。
  *  リスト表示 + 行ごとの削除ボタン + 末尾に追加入力。並び順は保持。
  *  保存先は SpiraSettings (全ユーザー共有)。 */
-export function buildOptionsPanel(root: HTMLElement, kind: 'dept' | 'category'): { body: HTMLElement; save: () => Promise<void>; title: string } {
-  const title = kind === 'dept' ? '部門の選択肢' : '問い合わせ種別の選択肢';
-  const getter = kind === 'dept' ? getDepartmentOptions : getInquiryCategoryOptions;
-  const setter = kind === 'dept' ? setDepartmentOptions : setInquiryCategoryOptions;
-  const placeholder = kind === 'dept' ? '例: 営業部 / 開発部 / 管理部' : '例: 不具合・エラーの報告';
+export type OptionsPanelKind = 'dept' | 'category' | 'status' | 'priority';
+
+export function buildOptionsPanel(root: HTMLElement, kind: OptionsPanelKind): { body: HTMLElement; save: () => Promise<void>; title: string } {
+  const meta = {
+    dept:     { title: '部門の選択肢',        getter: getDepartmentOptions,       setter: setDepartmentOptions,       placeholder: '例: 営業部 / 開発部 / 管理部' },
+    category: { title: '問い合わせ種別の選択肢', getter: getInquiryCategoryOptions, setter: setInquiryCategoryOptions, placeholder: '例: 不具合・エラーの報告' },
+    status:   { title: 'ステータスの選択肢',    getter: getStatusOptions,          setter: setStatusOptions,          placeholder: '例: 新規 / 対応中 / 確認待ち / 完了' },
+    priority: { title: '影響度の選択肢',        getter: getPriorityOptions,        setter: setPriorityOptions,        placeholder: '例: High / Medium / Low' },
+  }[kind];
+  const { title, getter, setter, placeholder } = meta;
 
   let draft: string[] = [];
 
@@ -993,7 +1000,7 @@ export function buildOptionsPanel(root: HTMLElement, kind: 'dept' | 'category'):
   return { body, save, title };
 }
 
-export function openOptionsModal(root: HTMLElement, kind: 'dept' | 'category'): void {
+export function openOptionsModal(root: HTMLElement, kind: OptionsPanelKind): void {
   const { body, save, title } = buildOptionsPanel(root, kind);
   openModal(root, {
     title,
@@ -1534,7 +1541,7 @@ function buildPaFlowsBodyImpl(root: HTMLElement): HTMLElement {
       title: 'Tickets リストからチケット情報を取得',
       connector: 'SharePoint',
       action: '項目の取得 (Get item)',
-      note: 'Teams 投稿の本文に件名・説明・優先度・ステータスを埋め込むためにチケット行を取得。',
+      note: 'Teams 投稿の本文に件名・説明・影響度・ステータスを埋め込むためにチケット行を取得。',
       params: [
         { field: 'Site Address', value: 'https://<tenant>.sharepoint.com/sites/<site>', type: 'choose' },
         { field: 'List Name', value: 'Tickets', type: 'choose' },
@@ -1559,7 +1566,7 @@ function buildPaFlowsBodyImpl(root: HTMLElement): HTMLElement {
         el('p', { style: 'margin:var(--s-3) 0 var(--s-2);font-size:var(--fs-sm);color:var(--ink-2)' }, ['投稿本文 HTML サンプル:']),
         codeBlock(
           '<h3>[#@{triggerOutputs()?[\'body/TicketId\']}] @{body(\'項目の取得\')?[\'Title\']}</h3>\n' +
-          '<p><b>優先度:</b> @{body(\'項目の取得\')?[\'Priority\']} / <b>ステータス:</b> @{body(\'項目の取得\')?[\'Status\']}</p>\n' +
+          '<p><b>影響度:</b> @{body(\'項目の取得\')?[\'Priority\']} / <b>ステータス:</b> @{body(\'項目の取得\')?[\'Status\']}</p>\n' +
           '<p>@{body(\'項目の取得\')?[\'Description\']}</p>\n' +
           '<hr><p><i>このメッセージは Spira から自動投稿されています。</i></p>'
         ),
@@ -1689,7 +1696,7 @@ function buildPaFlowsBodyImpl(root: HTMLElement): HTMLElement {
     el('tbody', {}, [
       row('Title', "concat('[Forms] ', <件名相当の質問への回答>)", 'SP 必須列。一覧での識別用なので件名と同じで OK。'),
       row('Subject', "concat('[Forms] ', <件名相当の質問への回答>)", 'Spira の受信メール一覧に表示される件名。'),
-      row('BodyHtml', "Q&A を HTML 整形した文字列", '質問ラベル + 回答を <p><strong>カテゴリ:</strong> ...</p> 形式で並べる。Spira の起票モーダルが「カテゴリ:」「優先度:」ラベルを自動抽出。'),
+      row('BodyHtml', "Q&A を HTML 整形した文字列", '質問ラベル + 回答を <p><strong>カテゴリ:</strong> ...</p> 形式で並べる。Spira の起票モーダルが「カテゴリ:」「影響度:」ラベルを自動抽出。'),
       row('BodyText', "Q&A を改行区切りのテキストにした文字列", 'フォールバック用。HTML が無いケースでも同じ抽出が動くようにしておくと安心。'),
       row('FromEmail', "回答者のメールアドレス", 'Forms「応答者の Email」動的コンテンツを使用。匿名 Form の場合は空欄でも OK。'),
       row('FromName', "回答者の表示名", 'AD ユーザ情報から取得 (Office 365 ユーザー「ユーザー プロファイル取得」アクションで補完)。'),
@@ -1704,11 +1711,11 @@ function buildPaFlowsBodyImpl(root: HTMLElement): HTMLElement {
   ]);
 
   const formsFlow = el('div', {}, [
-    pn('Microsoft Forms の応答を Spira の「受信メール」に流し込むフローです。Forms はチケットタグを件名に持たないので、Spira は ', code('ConversationId'), ' が ', code('forms-'), ' で始まるかどうかで Forms 経由メールを識別し、起票モーダルでフォーム回答 (カテゴリ・優先度) を自動マッピングします。'),
+    pn('Microsoft Forms の応答を Spira の「受信メール」に流し込むフローです。Forms はチケットタグを件名に持たないので、Spira は ', code('ConversationId'), ' が ', code('forms-'), ' で始まるかどうかで Forms 経由メールを識別し、起票モーダルでフォーム回答 (カテゴリ・影響度) を自動マッピングします。'),
 
     h('1. 前提'),
     el('ul', { style: 'margin:0 0 var(--s-3);padding-left:1.2em;line-height:1.8;font-size:var(--fs-sm);color:var(--ink)' }, [
-      el('li', {}, ['Forms フォームに ', el('strong', {}, ['「カテゴリ」']), ' (選択肢)・', el('strong', {}, ['「優先度」']), ' (High / Medium / Low) の質問を含めることを推奨。値を BodyHtml に含めると、Spira が起票モーダルで自動選択します。']),
+      el('li', {}, ['Forms フォームに ', el('strong', {}, ['「カテゴリ」']), ' (選択肢)・', el('strong', {}, ['「影響度」']), ' (High / Medium / Low) の質問を含めることを推奨。値を BodyHtml に含めると、Spira が起票モーダルで自動選択します。']),
       el('li', {}, ['カテゴリの選択肢は Spira 設定 → ', el('em', {}, ['問い合わせ種別の選択肢']), ' と揃えるとマッピングが完全一致']),
       el('li', {}, ['Forms 応答取り込みは Standard ライセンスで完結 (Graph API 不要)']),
     ]),
@@ -1753,7 +1760,7 @@ function buildPaFlowsBodyImpl(root: HTMLElement): HTMLElement {
       num: 4,
       title: 'BodyHtml を組み立てる',
       action: 'コントロール / 作成 (Compose)',
-      note: 'Q&A を HTML で整形。Spira が <strong>カテゴリ:</strong> / <strong>優先度:</strong> のラベルを正規表現で抽出するので、ラベルは厳密に日本語の「カテゴリ:」「優先度:」を使うこと。',
+      note: 'Q&A を HTML で整形。Spira が <strong>カテゴリ:</strong> / <strong>影響度:</strong> のラベルを正規表現で抽出するので、ラベルは厳密に日本語の「カテゴリ:」「影響度:」を使うこと。',
       params: [
         { field: '入力 (Inputs)', value: '(下記サンプル参照)', type: 'static' },
       ],
@@ -1761,7 +1768,7 @@ function buildPaFlowsBodyImpl(root: HTMLElement): HTMLElement {
         el('p', { style: 'margin:var(--s-3) 0 var(--s-2);font-size:var(--fs-sm);color:var(--ink-2)' }, ['BodyHtml サンプル (Compose の「入力」欄):']),
         codeBlock(
           '<p><strong>カテゴリ:</strong> @{outputs(\'応答の詳細を取得\')?[\'body/<カテゴリ質問の internal name>\']}</p>\n' +
-          '<p><strong>優先度:</strong> @{outputs(\'応答の詳細を取得\')?[\'body/<優先度質問の internal name>\']}</p>\n' +
+          '<p><strong>影響度:</strong> @{outputs(\'応答の詳細を取得\')?[\'body/<影響度質問の internal name>\']}</p>\n' +
           '<p><strong>内容:</strong></p>\n' +
           '<p>@{outputs(\'応答の詳細を取得\')?[\'body/<本文質問の internal name>\']}</p>'
         ),
@@ -1805,14 +1812,14 @@ function buildPaFlowsBodyImpl(root: HTMLElement): HTMLElement {
       el('div', {}, ['PA の実行履歴で成功を確認 → SP の ', code('InboxMails'), ' リストに行が追加されているか確認']),
       el('div', {}, [code('ConversationId'), ' 列が ', code('forms-...'), ' で始まっているか必ず確認 (このプレフィクスが無いと Spira がタグ無しメールと同じ扱いになり、Forms 用の特別処理が動きません)']),
       el('div', {}, ['Spira の「受信メール」に Forms 経由のメールが表示され、件名横に ', el('strong', {}, ['Forms バッジ']), ' が付いていれば成功']),
-      el('div', {}, ['受信メールから「起票」をクリック → 起票モーダルでカテゴリ/優先度が自動選択されることを確認']),
+      el('div', {}, ['受信メールから「起票」をクリック → 起票モーダルでカテゴリ/影響度が自動選択されることを確認']),
     ]),
 
     h('4. トラブルシューティング'),
     el('ul', { style: 'margin:0;padding-left:1.2em;line-height:1.8;font-size:var(--fs-sm);color:var(--ink)' }, [
       el('li', {}, [
-        el('strong', {}, ['カテゴリ/優先度が自動選択されない']),
-        ': BodyHtml に ', code('<strong>カテゴリ:</strong> 値'), ' / ', code('<strong>優先度:</strong> High'),
+        el('strong', {}, ['カテゴリ/影響度が自動選択されない']),
+        ': BodyHtml に ', code('<strong>カテゴリ:</strong> 値'), ' / ', code('<strong>影響度:</strong> High'),
         ' のフォーマットで含まれているか確認。',
       ]),
       el('li', {}, [

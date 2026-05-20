@@ -10,6 +10,8 @@ import { getRepo } from '../api/repo';
 
 const KEY_DEPARTMENTS = 'options:departments';
 const KEY_CATEGORIES = 'options:categories';
+const KEY_STATUSES = 'options:statuses';
+const KEY_PRIORITIES = 'options:priorities';
 
 /** 問い合わせ種別のデフォルト (初回参照時に SpiraSettings へ書き込まれる)。
  *  この一覧は Forms 側の選択肢と一致させること (自動マッピング条件)。 */
@@ -24,6 +26,15 @@ export const DEFAULT_INQUIRY_CATEGORIES: string[] = [
 
 /** 部門のデフォルト (空)。管理者が設定で追加する想定。 */
 export const DEFAULT_DEPARTMENTS: string[] = [];
+
+/** ステータスのデフォルト。SP の Choice 列にも同値が設定されている。
+ *  設定で追加した値は SP リスト側の Choice にも手動追加が必要 (column 制約)。 */
+export const DEFAULT_STATUSES: string[] = ['新規', '対応中', '確認待ち', '完了'];
+
+/** 影響度 (= 旧 Priority) のデフォルト。Forms 自動マッピングと整合させるため
+ *  英語の High/Medium/Low をデフォルトに。日本語ラベルに変えたい場合は
+ *  設定モーダルで上書き可能。 */
+export const DEFAULT_PRIORITIES: string[] = ['High', 'Medium', 'Low'];
 
 const cache: Record<string, string[] | undefined> = {};
 
@@ -58,3 +69,29 @@ export const setDepartmentOptions = (list: string[]): Promise<void> => writeList
 
 export const getInquiryCategoryOptions = (): Promise<string[]> => readList(KEY_CATEGORIES, DEFAULT_INQUIRY_CATEGORIES);
 export const setInquiryCategoryOptions = (list: string[]): Promise<void> => writeList(KEY_CATEGORIES, list);
+
+export const getStatusOptions = (): Promise<string[]> => readList(KEY_STATUSES, DEFAULT_STATUSES);
+export const setStatusOptions = (list: string[]): Promise<void> => writeList(KEY_STATUSES, list);
+
+export const getPriorityOptions = (): Promise<string[]> => readList(KEY_PRIORITIES, DEFAULT_PRIORITIES);
+export const setPriorityOptions = (list: string[]): Promise<void> => writeList(KEY_PRIORITIES, list);
+
+/** 同期版アクセサ (キャッシュにあれば返す、無ければデフォルト)。
+ *  ticketStatusList() / priorityList() のような同期呼び出しから利用。
+ *  起動時に warmOptionLists() でキャッシュを温めておくことを想定。 */
+export function getStatusOptionsSync(): string[] {
+  return cache[KEY_STATUSES] ?? DEFAULT_STATUSES;
+}
+export function getPriorityOptionsSync(): string[] {
+  return cache[KEY_PRIORITIES] ?? DEFAULT_PRIORITIES;
+}
+
+/** 起動時に呼び出すウォーマー (非同期だが先に await できる)。 */
+export async function warmOptionLists(): Promise<void> {
+  await Promise.all([
+    getStatusOptions().catch(() => {}),
+    getPriorityOptions().catch(() => {}),
+    getDepartmentOptions().catch(() => {}),
+    getInquiryCategoryOptions().catch(() => {}),
+  ]);
+}

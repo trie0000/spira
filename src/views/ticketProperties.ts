@@ -244,7 +244,7 @@ export function openTicketPropertiesModal(ticket: Ticket): void {
       el('div', { style: VALUE_STYLE }, [current.title || '(未設定)']),
       el('label', { style: LABEL_STYLE }, ['ステータス']),
       el('div', { style: VALUE_STYLE }, [current.status]),
-      el('label', { style: LABEL_STYLE }, ['優先度']),
+      el('label', { style: LABEL_STYLE }, ['影響度']),
       el('div', { style: VALUE_STYLE }, [current.priority]),
     );
 
@@ -297,7 +297,7 @@ export function openTicketPropertiesModal(ticket: Ticket): void {
           'background:var(--paper-2);padding:var(--s-3);' +
           'border-radius:var(--r-2);line-height:1.6;margin-top:var(--s-2)',
       }, [
-        '※ ステータス・優先度・担当者・期限はチケット詳細のヘッダから直接編集できます。',
+        '※ ステータス・影響度・担当者・期限はチケット詳細のヘッダから直接編集できます。',
         el('br'),
         '※ Teams スレッド「解除」は Spira 側のリンク情報のみ削除し、Teams 上のメッセージは残ります。',
         el('br'),

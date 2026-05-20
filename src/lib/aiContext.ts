@@ -63,7 +63,7 @@ export function buildTicketContext(
   lines.push(`- ID: #${String(t.id).padStart(5, '0')}`);
   lines.push(`- タイトル: ${t.title ?? ''}`);
   lines.push(`- ステータス: ${t.status ?? ''}`);
-  lines.push(`- 優先度: ${t.priority ?? ''}`);
+  lines.push(`- 影響度: ${t.priority ?? ''}`);
   if (t.assigneeNames && t.assigneeNames.length > 0) {
     lines.push(`- 担当者: ${t.assigneeNames.join(', ')}`);
   } else {

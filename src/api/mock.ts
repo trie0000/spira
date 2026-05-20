@@ -149,11 +149,11 @@ export function seedMock(): void {
       isProcessed: false,
     },
     // Forms 経由 (タグ無しだが受信に表示される — 管理者の起票判断待ち)
-    // bodyHtml 内の「カテゴリ:」「優先度:」が自動マッピングに使われる。
+    // bodyHtml 内の「カテゴリ:」「影響度:」が自動マッピングに使われる。
     {
       id: 10, subject: '[Forms] パスワードリセットができない',
-      bodyHtml: '<div><b>お名前と所属:</b> 山田太郎 / 営業部</div><div><b>カテゴリ:</b> アカウント・権限の問題</div><div><b>優先度:</b> High（業務が停止している / 緊急対応が必要）</div><div><b>詳細:</b> ログイン画面で「パスワードを忘れた」を押しても再設定メールが届きません。</div>',
-      bodyText: 'お名前と所属: 山田太郎 / 営業部\nカテゴリ: アカウント・権限の問題\n優先度: High（業務が停止している / 緊急対応が必要）\n詳細: パスワードリセット問い合わせ',
+      bodyHtml: '<div><b>お名前と所属:</b> 山田太郎 / 営業部</div><div><b>カテゴリ:</b> アカウント・権限の問題</div><div><b>影響度:</b> High（業務が停止している / 緊急対応が必要）</div><div><b>詳細:</b> ログイン画面で「パスワードを忘れた」を押しても再設定メールが届きません。</div>',
+      bodyText: 'お名前と所属: 山田太郎 / 営業部\nカテゴリ: アカウント・権限の問題\n影響度: High（業務が停止している / 緊急対応が必要）\n詳細: パスワードリセット問い合わせ',
       fromEmail: 'yamada@partner.example', fromName: '山田 太郎',
       receivedAt: minus(1), hasAttachments: false,
       conversationId: 'forms-aBcDeFgH-12345', owaLink: '#',

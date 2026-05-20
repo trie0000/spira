@@ -819,11 +819,11 @@ function renderTicketHeader(t: Ticket, latestReceived: Comment | undefined): HTM
   prioBtn.classList.add('spira-prop-edit');
   prioBtn.setAttribute('role', 'button');
   prioBtn.setAttribute('tabindex', '0');
-  prioBtn.title = 'クリックで優先度を変更';
+  prioBtn.title = 'クリックで影響度を変更';
   prioBtn.addEventListener('click', (e: Event) => {
     e.stopPropagation();
     openSelectMenu(prioBtn, priorityList(), t.priority, async (next) => {
-      await updateField(t, { priority: next }, '優先度');
+      await updateField(t, { priority: next }, '影響度');
     });
   });
 
@@ -885,7 +885,7 @@ function renderTicketHeader(t: Ticket, latestReceived: Comment | undefined): HTM
   const deptBtn = buildOptionButton('department', getDepartmentOptions, '部門');
   const categoryBtn = buildOptionButton('inquiryCategory', getInquiryCategoryOptions, '問い合わせ種別');
 
-  // 他の要素 (ステータス・優先度ボタン、部門/種別ボタン) と高さを揃えるため
+  // 他の要素 (ステータス・影響度ボタン、部門/種別ボタン) と高さを揃えるため
   // padding を小さくして枠サイズを統一。
   const dueInput = el('input', {
     type: 'date',
@@ -916,7 +916,7 @@ function renderTicketHeader(t: Ticket, latestReceived: Comment | undefined): HTM
     el('div', { class: 'spira-detail-title-row' }, [idLabel, titleInput]),
     el('div', { style: 'display:flex;flex-wrap:wrap;gap:var(--s-4);align-items:center;margin-top:var(--s-3)' }, [
       label('ステータス'), statusBtn,
-      label('優先度'), prioBtn,
+      label('影響度'), prioBtn,
       label('担当者'), assigneeCell,
       label('期限'), dueInput,
       label('部門'), deptBtn,

@@ -1784,11 +1784,14 @@ function auditLogFieldSpecs(): FieldSpec[] {
 }
 
 // ---------------------------------------------------------------- helpers reused by views
+// 設定モーダルから編集可能 (warmOptionLists で起動時にキャッシュ済み)。
+// 型は as cast でゆるく扱う (ユーザー追加値も許容)。
+import { getStatusOptionsSync, getPriorityOptionsSync } from '../utils/optionLists';
 export function ticketStatusList(): TicketStatus[] {
-  return ['新規', '対応中', '確認待ち', '完了'];
+  return getStatusOptionsSync() as TicketStatus[];
 }
 export function priorityList(): Priority[] {
-  return ['High', 'Medium', 'Low'];
+  return getPriorityOptionsSync() as Priority[];
 }
 
 // SP error message patterns indicating "field/column already exists".

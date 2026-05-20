@@ -40,7 +40,7 @@ function renderUserTab(): HTMLElement {
       el('li', {}, ['📋 Microsoft Forms の回答を起票画面に自動取り込み']),
       el('li', {}, ['💬 Teams スレッドでの議論・返信をチケット履歴に自動反映']),
       el('li', {}, ['🏢👥 1 チケット内で「内部スレッド (社内議論)」と「外部スレッド (顧客向け)」を並列管理']),
-      el('li', {}, ['🔍 全文検索・ステータス/担当者/優先度フィルタ・CSV エクスポート']),
+      el('li', {}, ['🔍 全文検索・ステータス/担当者/影響度フィルタ・CSV エクスポート']),
       el('li', {}, ['📊 ダッシュボード (オープン件数・担当別ワークロード・経過日数等)']),
       el('li', {}, ['🤖 AI チャット (社内 Azure OpenAI ゲートウェイ) でチケット内容について質問・要約']),
       el('li', {}, ['🗑 ゴミ箱から復元可能なソフトデリート + 監査ログ']),
@@ -303,7 +303,7 @@ function renderTechTab(): HTMLElement {
       ]),
       el('tr', {}, [
         el('td', { style: 'padding:6px 8px;border-bottom:1px solid var(--line)' }, [CODE('Tickets')]),
-        el('td', { style: 'padding:6px 8px;border-bottom:1px solid var(--line)' }, ['チケット本体。件名・ステータス・優先度・担当者・部門・期日・Teams スレッド ID 等']),
+        el('td', { style: 'padding:6px 8px;border-bottom:1px solid var(--line)' }, ['チケット本体。件名・ステータス・影響度・担当者・部門・期日・Teams スレッド ID 等']),
       ]),
       el('tr', {}, [
         el('td', { style: 'padding:6px 8px;border-bottom:1px solid var(--line)' }, [CODE('Comments')]),
