@@ -974,11 +974,22 @@ export class SpRepository implements Repository {
     const dupCandidates: number[] = [];
     for (const arr of byIMID.values()) {
       if (arr.length <= 1) continue;
-      arr.sort((a, b) => a.id - b.id);
-      for (let i = 1; i < arr.length; i++) {
-        const id = arr[i]!.id;
-        if (healFailureCache.has(id)) continue;   // 過去に失敗したものはスキップ
-        dupCandidates.push(id);
+      // L7: 残すコメントの選択ロジック:
+      //   1. ユーザー編集 (updatedAt > createdAt) が入っているものを最優先で残す
+      //      → 受信本文を手で直したケースで編集を失わない
+      //   2. なければ ID 昇順 (= 古い順) で先頭を残す
+      const editedFirst = arr.filter(c =>
+        c.updatedAt && c.createdAt && new Date(c.updatedAt).getTime() > new Date(c.createdAt).getTime() + 1000
+      );
+      const sorted = editedFirst.length > 0
+        ? [...editedFirst, ...arr.filter(c => !editedFirst.includes(c))].sort((a, b) => a.id - b.id)
+        : [...arr].sort((a, b) => a.id - b.id);
+      // sorted[0] を残す。それ以外を削除候補に。
+      const keep = sorted[0]!;
+      for (const c of sorted) {
+        if (c.id === keep.id) continue;
+        if (healFailureCache.has(c.id)) continue;
+        dupCandidates.push(c.id);
       }
     }
     const dupConfirmed = new Set<number>();
@@ -1087,6 +1098,19 @@ export class SpRepository implements Repository {
       body: JSON.stringify(body),
     });
     const c = asComment(created);
+    // L9: POST レスポンスでは Author/Editor が expand されていないので
+    // createdBy / updatedBy が undefined になる。UI で「登録者なし」と
+    // 表示されるのを避けるため、現在ユーザーの displayName で暫定的に埋める。
+    // 次回 listComments で正規の値に上書きされる。
+    if (!c.createdBy || !c.updatedBy) {
+      try {
+        const me = await this.getCurrentUser();
+        if (me) {
+          if (!c.createdBy) c.createdBy = me.displayName;
+          if (!c.updatedBy) c.updatedBy = me.displayName;
+        }
+      } catch { /* swallow */ }
+    }
     void emitAudit({
       action: input.type === 'note' ? 'note.create' : 'comment.add',
       ticketId: input.ticketId,
