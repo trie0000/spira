@@ -137,6 +137,9 @@ export interface Repository {
   listInbox(opts?: { unprocessedOnly?: boolean; includeHidden?: boolean }): Promise<InboxMail[]>;
   /** 1 件取得 (起票直前の IsProcessed 再チェック等に利用)。存在しない場合は null。 */
   getInboxItem(id: number): Promise<InboxMail | null>;
+  /** findDuplicateTicket など重複検知のみ目的で listComments を呼ぶ用。
+   *  通常版と違って自己治癒 (重複コメント DELETE) を行わない。 */
+  listCommentsForLookup?(ticketId: number): Promise<import('../types').Comment[]>;
   markInboxProcessed(id: number, patch: { ticketId: number; result: InboxState }): Promise<void>;
   hideInboxItems(ids: number[]): Promise<void>;
   unhideInboxItems(ids: number[]): Promise<void>;

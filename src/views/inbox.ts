@@ -46,7 +46,13 @@ async function findDuplicateTicket(opts: {
   const tickets = await repo.listTickets();
   for (const t of tickets) {
     let comments;
-    try { comments = await repo.listComments(t.id); }
+    try {
+      // M1: lookup 専用版を使う (自己治癒 DELETE をトリガしない)。フォールバックは
+      // 通常 listComments。
+      comments = repo.listCommentsForLookup
+        ? await repo.listCommentsForLookup(t.id)
+        : await repo.listComments(t.id);
+    }
     catch { continue; }
     for (const c of comments) {
       if (c.type !== 'received') continue;
@@ -1007,21 +1013,27 @@ export function openNewTicketModal(m: InboxMail): void {
   ]) as HTMLSelectElement;
 
   // Forms 経由のメール本文から特定ラベル (カテゴリ / 優先度 等) の値を抽出。
-  // BodyHtml の `<strong>カテゴリ:</strong> <value></p>` 形式と
-  // BodyText の `カテゴリ: <value>` 形式の両方に対応。
+  // L5: 厳密パターン優先 (`<strong>カテゴリ:</strong> <value>`) で誤抽出を防ぐ。
+  // PA フロー③ が生成する BodyHtml は <p><strong>カテゴリ:</strong> X</p> 形式
+  // 固定なので、まずこのパターンで試し、見つからなければ緩いフォールバック。
+  // 緩いマッチで顧客本文中の「カテゴリ: ○○」を誤って拾わないように、
+  // フォールバックは bodyText の冒頭 1KB に限定。
   const extractFormsField = (mm: InboxMail, label: string): string | undefined => {
     if (!mm.conversationId?.startsWith('forms-')) return undefined;
-    const candidates: string[] = [];
-    if (mm.bodyText) candidates.push(mm.bodyText);
+    // 1) 厳密: HTML の <strong>label:</strong> を探す
     if (mm.bodyHtml) {
-      const stripped = mm.bodyHtml.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
-      candidates.push(stripped);
+      const escLabel = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const strict = new RegExp(`<strong[^>]*>\\s*${escLabel}\\s*[::]?\\s*</strong>\\s*([^<\\n]+?)(?:<|$)`, 'i');
+      const m1 = mm.bodyHtml.match(strict);
+      if (m1 && m1[1]) return m1[1].trim();
     }
-    const re = new RegExp(`${label}\\s*[::]\\s*([^\\n<]+?)(?:\\s{2,}|<|\\n|$)`);
-    for (const txt of candidates) {
-      const mm2 = txt.match(re);
-      if (mm2 && mm2[1]) return mm2[1].trim();
-    }
+    // 2) 緩いフォールバック: bodyText の先頭 1KB に限定 (顧客本文の誤マッチ抑止)
+    const txt = (mm.bodyText ?? '').slice(0, 1024);
+    if (!txt) return undefined;
+    const escLabel = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp(`(?:^|\\n)\\s*${escLabel}\\s*[::]\\s*([^\\n]+?)\\s*$`, 'm');
+    const mm2 = txt.match(re);
+    if (mm2 && mm2[1]) return mm2[1].trim();
     return undefined;
   };
   const initialFormsCategory = extractFormsField(m, 'カテゴリ');

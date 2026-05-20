@@ -338,6 +338,13 @@ export class MockRepository implements Repository {
     store.comments = store.comments.filter(c => !ids.includes(c.ticketId));
   }
 
+  async listCommentsForLookup(ticketId: number): Promise<Comment[]> {
+    // mock では自己治癒が同期だが、副作用無しのスナップショットを返す。
+    return store.comments
+      .filter(c => c.ticketId === ticketId)
+      .sort((a, b) => a.sentAt.localeCompare(b.sentAt));
+  }
+
   async listComments(ticketId: number): Promise<Comment[]> {
     const items = store.comments
       .filter(c => c.ticketId === ticketId)

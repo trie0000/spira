@@ -933,6 +933,19 @@ export class SpRepository implements Repository {
 
   // ---- comments
 
+  /** M1: lookup 専用 (自己治癒スキップ)。findDuplicateTicket 等の重複検知で
+   *  全チケットを舐めるときに、各チケットの listComments で DELETE が大量に
+   *  飛ぶのを防ぐ。 */
+  async listCommentsForLookup(ticketId: number): Promise<Comment[]> {
+    const url = `${this.listPath(this.cfg.listComments)}/items` +
+      `?$top=500&$orderby=SentAt desc&$filter=TicketId eq ${ticketId}` +
+      `&$select=Id,TicketId,Type,FromEmail,FromName,Content,IsHtml,SentAt,SourceEmailId,HasAttachments,InternetMessageId,Source,ThreadKind,Created,Modified`;
+    const res = await this.tx.req<ListItemsResp<SpListItem>>(url);
+    const items = (res.value ?? []).map(asComment);
+    items.sort((a, b) => (a.sentAt ?? '').localeCompare(b.sentAt ?? ''));
+    return items;
+  }
+
   async listComments(ticketId: number): Promise<Comment[]> {
     // Author / Editor を expand して登録者・最終更新者の表示名も取得。
     // ★ orderby=desc + top=500 で「最新の 500 件」を取得し、クライアントで
@@ -1538,9 +1551,9 @@ export class SpRepository implements Repository {
     const nowIso = new Date().toISOString();
     const url =
       `${this.listPath(this.cfg.listAuditLog)}/items?$select=Id` +
-      `&$filter=ExpiresAt lt datetime'${nowIso}'&$top=500`;
-    const res = await this.tx.req<ListItemsResp<{ Id: number }>>(url);
-    const ids = (res.value ?? []).map(r => r.Id);
+      `&$filter=ExpiresAt lt datetime'${fmtOdataDateTime(nowIso)}'&$top=500`;
+    const all = await this.fetchAllPaged<SpListItem>(url);
+    const ids = all.map(r => r.Id);
     for (const id of ids) {
       try { await this.tx.remove(this.listPath(this.cfg.listAuditLog), id); }
       catch (e) { console.warn('[spira/audit] cleanup remove failed:', e); }
