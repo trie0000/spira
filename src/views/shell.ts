@@ -1962,14 +1962,12 @@ function buildPaFlowsBodyImpl(root: HTMLElement): HTMLElement {
 
     stepCard({
       num: '3a',
-      title: 'メンション組み立て用の変数を 3 つ初期化 — 任意',
+      title: 'メンション組み立て用の文字列変数を初期化 — 任意',
       connector: 'コントロール',
-      action: '変数を初期化する (Initialize variable) ×3',
-      note: 'メンション機能を使う場合のみ必要。フロー先頭 (トリガーの直後) に「変数を初期化する」を 3 つ並べる。後段の Apply to each で順次 append していくため、ループの外で空状態を作っておく。\n\n名前 (Name) はコピペ前提のため厳密一致させること。STEP 3c / STEP 4 の式で同じ名前を参照する。',
+      action: '変数を初期化する (Initialize variable)',
+      note: 'メンション機能を使う場合のみ必要。フロー先頭 (トリガーの直後) に 1 つだけ「変数を初期化する」を置く。\n\n後段の Apply to each で <at> トークンを順次連結していくため、ループの外で空文字列の状態を作っておく。「ユーザーの @mention トークンを取得する」アクションが返す文字列をそのまま追記していくだけなので、配列やインデックスの管理は不要。',
       params: [
-        { field: '#1 Name',  value: 'mentionsArray', type: 'static', hint: '型 (Type) = Array、Value = 空欄 (= 空配列)' },
-        { field: '#2 Name',  value: 'mentionsHtml',  type: 'static', hint: '型 (Type) = String、Value = 空欄 (= 空文字列)' },
-        { field: '#3 Name',  value: 'idx',           type: 'static', hint: '型 (Type) = Integer、Value = 0' },
+        { field: 'Name',  value: 'mentionsHtml', type: 'static', hint: '型 (Type) = String、Value = 空欄 (= 空文字列)。' },
       ],
     }),
 
@@ -1987,10 +1985,10 @@ function buildPaFlowsBodyImpl(root: HTMLElement): HTMLElement {
 
     stepCard({
       num: '3c',
-      title: 'Apply to each で 1 ユーザずつ AAD 解決 + 変数に追記 — 任意',
+      title: 'Apply to each で 1 ユーザずつ @mention トークンを取得 + 連結 — 任意',
       connector: 'コントロール',
-      action: 'Apply to each (内側に 4 アクション)',
-      note: 'MentionEmails の配列を 1 件ずつループし、ループ内で「AAD 解決」+「mentions[] に追記」+「<at> タグを HTML 文字列に追記」+「idx を +1」を行う。\n\nループ後には variables(\'mentionsArray\') と variables(\'mentionsHtml\') が STEP 4 (Teams 投稿) で使える形に組み上がる。',
+      action: 'Apply to each (内側に 2 アクション)',
+      note: 'MentionEmails の配列を 1 件ずつループし、内側で「Teams の @mention トークン取得」アクションを呼んで、戻ってきた <at> タグ文字列を mentionsHtml 変数に連結していく。\n\n★ 重要: 「Post message in a chat or channel」アクションには Mentions という独立パラメータは無い。Teams コネクタが提供する「ユーザーの @mention トークンを取得する」アクションが返すトークン文字列を本文に直接埋め込むのが正しい運用 (Standard tier 標準機能)。トークン側に AAD 情報が紐付いているので、本文に貼るだけで Teams 側で正規の @ メンション化される。',
       params: [
         { field: 'Apply to each / 入力', value: "outputs('MentionEmails')", type: 'expression', hint: 'fx タブに貼り付け。' },
       ],
@@ -1998,74 +1996,39 @@ function buildPaFlowsBodyImpl(root: HTMLElement): HTMLElement {
         el('p', { style: 'margin:var(--s-3) 0 var(--s-2);font-size:var(--fs-sm);font-weight:600;color:var(--ink)' }, [
           'Apply to each の内側に置くアクション (順番厳守):',
         ]),
-        // ループ内 ① Get user profile (V2)
+        // 内側 ① Get an @mention token for a user
         el('div', {
           style: 'border:1px solid var(--line);border-radius:var(--r-2);padding:var(--s-3) var(--s-4);margin:var(--s-2) 0;background:var(--paper-2)',
         }, [
           el('div', { style: 'font-size:var(--fs-sm);font-weight:600;color:var(--ink);margin-bottom:6px' }, [
-            '内側 ① ', el('code', { style: 'background:transparent;color:#c7254e' }, ['Office 365 ユーザー / ユーザー プロファイル (V2) の取得']),
+            '内側 ① ', el('code', { style: 'background:transparent;color:#c7254e' }, ['Microsoft Teams / ユーザーの @mention トークンを取得する (Get an @mention token for a user)']),
           ]),
           el('table', { style: 'width:100%;border-collapse:collapse;font-size:12px' }, [
             el('tbody', {}, [
-              row('User (UPN)', "items('Apply_to_each')", 'fx タブに貼り付け。ループの現在の email が渡る。アクション名はそのまま (= 後段で body(\'ユーザー_プロファイル__V2__の取得\') で参照する想定)。'),
-            ]),
-          ]),
-        ]),
-        // ループ内 ② Append to array variable (mentionsArray)
-        el('div', {
-          style: 'border:1px solid var(--line);border-radius:var(--r-2);padding:var(--s-3) var(--s-4);margin:var(--s-2) 0;background:var(--paper-2)',
-        }, [
-          el('div', { style: 'font-size:var(--fs-sm);font-weight:600;color:var(--ink);margin-bottom:6px' }, [
-            '内側 ② ', el('code', { style: 'background:transparent;color:#c7254e' }, ['コントロール / 配列変数に追加 (Append to array variable)']),
-          ]),
-          el('table', { style: 'width:100%;border-collapse:collapse;font-size:12px' }, [
-            el('tbody', {}, [
-              row('Name', 'mentionsArray', 'プルダウンから選択 (STEP 3a で初期化した配列変数)。'),
-              row('Value (fx)', "json(concat('{\\\"id\\\":', variables('idx'), ',\\\"mentionText\\\":\\\"', body('ユーザー_プロファイル__V2__の取得')?['displayName'], '\\\",\\\"mentioned\\\":{\\\"user\\\":{\\\"id\\\":\\\"', body('ユーザー_プロファイル__V2__の取得')?['id'], '\\\",\\\"displayName\\\":\\\"', body('ユーザー_プロファイル__V2__の取得')?['displayName'], '\\\",\\\"userIdentityType\\\":\\\"aadUser\\\"}}}'))",
-                'fx タブに貼り付け (改行せず 1 行で OK)。json(concat(...)) で文字列を組み立てて JSON オブジェクトとしてパース。配列変数の Value にはオブジェクトを渡せる。'),
+              row('User', "items('Apply_to_each')", 'fx タブに貼り付け。ループの現在のメールアドレス (UPN) が渡る。'),
             ]),
           ]),
           el('p', {
             style: 'margin:var(--s-2) 0 0;font-size:var(--fs-xs);color:var(--ink-3);line-height:1.6',
           }, [
-            '※ 整形して読みやすくしたバージョン:',
+            '★ このアクションの出力は ',
+            el('code', { style: 'background:transparent;color:#c7254e' }, ['<at id="N">表示名</at>']),
+            ' 形式の文字列で、Teams コネクタ内部で AAD 情報と紐付いている。',
+            'この文字列を Teams 投稿アクションの本文に貼ると、Teams 側で正規の @ メンション (青文字 + 通知) として展開される。',
           ]),
-          codeBlock(
-            "json(concat(\n" +
-            "  '{\"id\":', variables('idx'),\n" +
-            "  ',\"mentionText\":\"', body('ユーザー_プロファイル__V2__の取得')?['displayName'],\n" +
-            "  '\",\"mentioned\":{\"user\":{\"id\":\"', body('ユーザー_プロファイル__V2__の取得')?['id'],\n" +
-            "  '\",\"displayName\":\"', body('ユーザー_プロファイル__V2__の取得')?['displayName'],\n" +
-            "  '\",\"userIdentityType\":\"aadUser\"}}}'\n" +
-            "))"
-          ),
         ]),
-        // ループ内 ③ Append to string variable (mentionsHtml)
+        // 内側 ② Append to string variable (mentionsHtml)
         el('div', {
           style: 'border:1px solid var(--line);border-radius:var(--r-2);padding:var(--s-3) var(--s-4);margin:var(--s-2) 0;background:var(--paper-2)',
         }, [
           el('div', { style: 'font-size:var(--fs-sm);font-weight:600;color:var(--ink);margin-bottom:6px' }, [
-            '内側 ③ ', el('code', { style: 'background:transparent;color:#c7254e' }, ['コントロール / 文字列変数に追加 (Append to string variable)']),
+            '内側 ② ', el('code', { style: 'background:transparent;color:#c7254e' }, ['コントロール / 文字列変数に追加 (Append to string variable)']),
           ]),
           el('table', { style: 'width:100%;border-collapse:collapse;font-size:12px' }, [
             el('tbody', {}, [
-              row('Name', 'mentionsHtml', 'プルダウンから選択 (STEP 3a の文字列変数)。'),
-              row('Value (fx)', "concat('<at id=\"', variables('idx'), '\">', body('ユーザー_プロファイル__V2__の取得')?['displayName'], '</at> ')",
-                'fx タブに貼り付け。<at id="N">表示名</at> + 半角スペースを 1 件ぶん追記。'),
-            ]),
-          ]),
-        ]),
-        // ループ内 ④ Increment variable (idx)
-        el('div', {
-          style: 'border:1px solid var(--line);border-radius:var(--r-2);padding:var(--s-3) var(--s-4);margin:var(--s-2) 0;background:var(--paper-2)',
-        }, [
-          el('div', { style: 'font-size:var(--fs-sm);font-weight:600;color:var(--ink);margin-bottom:6px' }, [
-            '内側 ④ ', el('code', { style: 'background:transparent;color:#c7254e' }, ['コントロール / 変数の値を増やす (Increment variable)']),
-          ]),
-          el('table', { style: 'width:100%;border-collapse:collapse;font-size:12px' }, [
-            el('tbody', {}, [
-              row('Name', 'idx', 'プルダウンから選択。'),
-              row('Value', '1', '直接入力 (静的整数)。これで次のループの id が 1 つ進む。'),
+              row('Name', 'mentionsHtml', 'プルダウンから選択 (STEP 3a で初期化した文字列変数)。'),
+              row('Value (fx)', "concat(body('ユーザーの_@mention_トークンを取得する'), ' ')",
+                'fx タブに貼り付け。先に取得した @mention トークン文字列に半角スペースを足して mentionsHtml に追記する。アクション名がテナントで違う場合は body(\'<実際のアクション名 (アンスコ化)>\') に置き換える (新デザイナーの式エディタの候補をクリックでも OK)。'),
             ]),
           ]),
         ]),
@@ -2074,12 +2037,11 @@ function buildPaFlowsBodyImpl(root: HTMLElement): HTMLElement {
           style: 'margin:var(--s-4) 0 var(--s-2);font-size:var(--fs-sm);font-weight:600;color:var(--ink)',
         }, ['ループ完了後の状態 (メール 2 件 alice@..., bob@... の場合):']),
         codeBlock(
-          "variables('mentionsArray') = [\n" +
-          "  { id: 0, mentionText: \"Alice\", mentioned: { user: { id: \"<aad-A>\", displayName: \"Alice\", userIdentityType: \"aadUser\" }}},\n" +
-          "  { id: 1, mentionText: \"Bob\",   mentioned: { user: { id: \"<aad-B>\", displayName: \"Bob\",   userIdentityType: \"aadUser\" }}}\n" +
-          "]\n" +
-          "variables('mentionsHtml') = '<at id=\"0\">Alice</at> <at id=\"1\">Bob</at> '\n" +
-          "variables('idx') = 2"
+          "variables('mentionsHtml') =\n" +
+          "  '<at id=\"...AAD-id-A...\">Alice</at> <at id=\"...AAD-id-B...\">Bob</at> '\n" +
+          "\n" +
+          "(各 <at> タグの id 属性には連番ではなく AAD ObjectId が入っている。\n" +
+          " Teams コネクタが自動で紐付け、投稿後に青文字 + 通知付きメンションになる)"
         ),
       ],
     }),
@@ -2095,8 +2057,7 @@ function buildPaFlowsBodyImpl(root: HTMLElement): HTMLElement {
         { field: 'Team', value: "triggerOutputs()?['body/TeamId']", type: 'expression', hint: 'チームの一覧から選ぶのではなく、「カスタム値を入力」タブで TeamId を直接渡す。' },
         { field: 'Channel', value: "triggerOutputs()?['body/ChannelId']", type: 'expression', hint: '同上 — カスタム値タブで ChannelId を渡す。' },
         { field: 'Subject', value: "if(empty(triggerOutputs()?['body/Subject']), concat('[#', triggerOutputs()?['body/TicketId'], '] ', body('項目の取得')?['Title']), triggerOutputs()?['body/Subject'])", type: 'expression', hint: 'Spira 起票モーダルで入力された Subject 列があればそれを優先、空ならチケットタイトルからテンプレ生成。fx タブから入力。' },
-        { field: 'Message (HTML)', value: "if(empty(triggerOutputs()?['body/BodyHtml']), '<下記サンプル参照>', concat(variables('mentionsHtml'), triggerOutputs()?['body/BodyHtml']))", type: 'expression', hint: 'BodyHtml 列 (起票モーダルで編集された本文) を使い、先頭に mentionsHtml (<at> タグ列) を連結する。空のときは下のサンプル HTML をテンプレに使う構成も可。' },
-        { field: 'Mentions (詳細オプション)', value: "variables('mentionsArray')", type: 'expression', hint: 'STEP 3c で組み立てた mentions オブジェクトの配列。空配列でも OK。' },
+        { field: 'Message (HTML)', value: "if(empty(triggerOutputs()?['body/BodyHtml']), '<下記サンプル参照>', concat(variables('mentionsHtml'), triggerOutputs()?['body/BodyHtml']))", type: 'expression', hint: 'BodyHtml (起票モーダルで編集した本文) の先頭に mentionsHtml (= <at> トークン群) を連結。これだけでメンションが効く (Mentions という独立パラメータはこのアクションには存在しない)。' },
       ],
       extra: [
         el('p', { style: 'margin:var(--s-3) 0 var(--s-2);font-size:var(--fs-sm);color:var(--ink-2)' }, [
@@ -2109,11 +2070,11 @@ function buildPaFlowsBodyImpl(root: HTMLElement): HTMLElement {
           '<hr><p><i>このメッセージは Spira から自動投稿されています。</i></p>'
         ),
         el('p', { style: 'margin:var(--s-3) 0 var(--s-2);font-size:var(--fs-sm);color:var(--ink-2)' }, [
-          'mentionsHtml の組み立て (フロー先頭で文字列変数として初期化、STEP 3c のループ内で <at> タグを追記):',
+          'mentionsHtml の中身イメージ (「@mention トークンを取得する」の出力を順次連結):',
         ]),
         codeBlock(
-          '<!-- variables(\'mentionsHtml\') の中身イメージ -->\n' +
-          '<at id="0">山田 太郎</at> <at id="1">佐藤 花子</at> '
+          '<!-- variables(\'mentionsHtml\') -->\n' +
+          '<at id="...AAD-id-A...">山田 太郎</at> <at id="...AAD-id-B...">佐藤 花子</at> '
         ),
       ],
     }),
