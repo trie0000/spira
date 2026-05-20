@@ -165,6 +165,24 @@ class SpTransport {
  *  1 度失敗したらこのセッションでは再試行しない (ブラウザリロードでリセット)。 */
 const healFailureCache = new Set<number>();
 
+/** M13: OData の文字列リテラル安全エスケープ。
+ *  - シングルクォートは '' に二重化 (OData 仕様)
+ *  - 結果を encodeURIComponent で URL 安全に
+ *  使い方: `$filter=Field eq '${escOdataString(value)}'` */
+function escOdataString(s: string): string {
+  return encodeURIComponent(s.replace(/'/g, "''"));
+}
+
+/** M13: OData の datetime リテラル組み立て。ISO 文字列を期待し、検証して
+ *  不正値ならエラー。古い `datetime'…'` 形式と裸 ISO 形式の両方の互換性が
+ *  あるが、新 SP に合わせて裸の ISO を返す。 */
+function fmtOdataDateTime(iso: string): string {
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(iso)) {
+    throw new Error(`Invalid ISO datetime for OData filter: ${iso}`);
+  }
+  return iso;
+}
+
 interface SpListItem {
   Id: number;
   Title?: string;
@@ -716,17 +734,42 @@ export class SpRepository implements Repository {
 
   // ---- tickets
 
+  /** M14: SP REST のページング (`__next` URL) を辿って全件取得するヘルパ。
+   *  $top で 1 ページ件数を指定。`maxPages` で暴走を防止 (既定 20 = 最大 1 万件)。
+   *  値の上限を超えた場合は警告を出して中断する。 */
+  private async fetchAllPaged<T extends SpListItem>(
+    initialUrl: string,
+    maxPages = 20,
+  ): Promise<T[]> {
+    let url: string | undefined = initialUrl;
+    const out: T[] = [];
+    let pages = 0;
+    while (url && pages < maxPages) {
+      const res = await this.tx.req<ListItemsResp<T> & { 'odata.nextLink'?: string; '__next'?: string }>(url);
+      if (res.value) out.push(...res.value);
+      // nodata の場合 odata.nextLink、verbose の場合 __next
+      const next = (res as { 'odata.nextLink'?: string; '__next'?: string })['odata.nextLink']
+        ?? (res as { '__next'?: string }).__next;
+      url = next;
+      pages++;
+    }
+    if (url) {
+      console.warn(`[spira/paging] maxPages=${maxPages} 到達 (中断)。初期 URL: ${initialUrl}`);
+    }
+    return out;
+  }
+
   async listTickets(opts: { includeDeleted?: boolean } = {}): Promise<Ticket[]> {
     const filter = opts.includeDeleted ? '' : `&$filter=IsDeleted eq 0`;
     const url = `${this.listPath(this.cfg.listTickets)}/items?$top=500&$orderby=Modified desc${filter}`;
-    const res = await this.tx.req<ListItemsResp<SpListItem>>(url);
-    return (res.value ?? []).map(asTicket);
+    const all = await this.fetchAllPaged<SpListItem>(url);
+    return all.map(asTicket);
   }
 
   async listDeletedTickets(): Promise<Ticket[]> {
     const url = `${this.listPath(this.cfg.listTickets)}/items?$top=500&$orderby=DeletedAt desc&$filter=IsDeleted eq 1`;
-    const res = await this.tx.req<ListItemsResp<SpListItem>>(url);
-    return (res.value ?? []).map(asTicket);
+    const all = await this.fetchAllPaged<SpListItem>(url);
+    return all.map(asTicket);
   }
 
   async searchAll(query: string): Promise<{ tickets: Ticket[]; commentsByTicket: Map<number, Comment[]> }> {
@@ -842,10 +885,20 @@ export class SpRepository implements Repository {
   }
 
   async hardDeleteTicket(id: number): Promise<void> {
-    // delete related Comments first (avoid orphans)
-    const comments = await this.listComments(id);
-    for (const c of comments) {
-      await this.tx.remove(this.listPath(this.cfg.listComments), c.id);
+    // M15: コメントを残さず全件削除する (孤児防止)。listComments は最大 500
+    // 件しか返さないので、Id のみのページング取得で全件 ID を集めてから削除。
+    const url = `${this.listPath(this.cfg.listComments)}/items` +
+      `?$select=Id&$top=2000&$filter=TicketId eq ${id}`;
+    const allIds = (await this.fetchAllPaged<SpListItem>(url, /* maxPages */ 50))
+      .map(it => it.Id);
+    let purged = 0;
+    for (const cid of allIds) {
+      try {
+        await this.tx.remove(this.listPath(this.cfg.listComments), cid);
+        purged++;
+      } catch (e) {
+        console.warn(`[spira/hardDeleteTicket] コメント ${cid} 削除失敗:`, (e as Error).message);
+      }
     }
     await this.tx.remove(this.listPath(this.cfg.listTickets), id);
     void emitAudit({
@@ -853,7 +906,7 @@ export class SpRepository implements Repository {
       ticketId: id,
       targetType: 'ticket',
       targetId: id,
-      details: { purgedComments: comments.length },
+      details: { purgedComments: purged, totalComments: allIds.length },
     });
   }
 
@@ -1038,8 +1091,8 @@ export class SpRepository implements Repository {
     if (opts.unprocessedOnly) conds.push('IsProcessed eq 0');
     const filter = conds.length > 0 ? `&$filter=${encodeURIComponent(conds.join(' and '))}` : '';
     const url = `${this.listPath(this.cfg.listInbox)}/items?$top=500&$orderby=ReceivedAt desc${filter}`;
-    const res = await this.tx.req<ListItemsResp<SpListItem>>(url);
-    return (res.value ?? []).map(asInbox);
+    const all = await this.fetchAllPaged<SpListItem>(url);
+    return all.map(asInbox);
   }
 
   async hideInboxItems(ids: number[]): Promise<void> {
@@ -1101,6 +1154,21 @@ export class SpRepository implements Repository {
       if (t.internalThreadId) threadMap.set(t.internalThreadId, { ticketId: t.id, threadType: 'internal' });
       if (t.userThreadId)     threadMap.set(t.userThreadId,     { ticketId: t.id, threadType: 'user' });
     }
+    // M8: チケットごとの InternetMessageId 集合をメモ化。同 syncInbox 内で
+    // 同じチケットへの auto-link が複数発生した時に listComments を 1 回しか
+    // 呼ばないようにする (起票多数時の N×listComments 爆発を抑止)。
+    const imidCache = new Map<number, Set<string>>();
+    const fetchImids = async (ticketId: number): Promise<Set<string>> => {
+      let s = imidCache.get(ticketId);
+      if (s) return s;
+      const cs = await this.listComments(ticketId);
+      s = new Set<string>();
+      for (const c of cs) {
+        if (c.type === 'received' && c.internetMessageId) s.add(c.internetMessageId);
+      }
+      imidCache.set(ticketId, s);
+      return s;
+    };
     let autoLinked = 0;
     // 既存コメントと InternetMessageId 一致のため auto-link 不要だが、行だけ削除
     // した件数 (UI 上は autoLinked と区別しない既存挙動だがログには出す)。
@@ -1133,12 +1201,9 @@ export class SpRepository implements Repository {
                 console.warn(`[spira/sync] inbox #${m.id}: Teams 返信に InternetMessageId が無いため手動トリアージ送り (PA フローで messageId をマップしてください)`);
                 continue;
               }
-              // 重複防止
-              const existing = await this.listComments(ticket.id);
-              const dup = existing.some(
-                (c) => c.type === 'received' && c.internetMessageId === m.internetMessageId,
-              );
-              if (dup) {
+              // 重複防止 (M8: per-ticket cache 経由で listComments を抑止)
+              const imids = await fetchImids(ticket.id);
+              if (imids.has(m.internetMessageId)) {
                 await this.deleteInboxMail(m.id).catch((e: Error) => {
                   console.warn(`[spira/sync] inbox #${m.id}: 重複行の削除失敗:`, e.message);
                 });
@@ -1157,6 +1222,7 @@ export class SpRepository implements Repository {
                 // 'user' → 'external' (顧客向けスレッド)、'internal' → 'internal'。
                 threadKind: hit.threadType === 'user' ? 'external' : 'internal',
               });
+              imids.add(m.internetMessageId);
               // A5: deleteInboxMail 失敗時のフォールバック → markInboxProcessed で
               // 「処理済み」マーキング。これで次回 sync で再 add されない。
               try {
@@ -1182,9 +1248,13 @@ export class SpRepository implements Repository {
             // 起票判断を待つ。
             console.warn(`[spira/sync] inbox #${m.id}: Forms entry kept for manual triage`);
           } else {
-            // メールでタグ無し = 無関係メール。物理削除して受信箱を綺麗に。
-            console.warn(`[spira/sync] inbox #${m.id}: no tag mail → delete`);
-            await this.deleteInboxMail(m.id);
+            // M10: メールでタグ無し = 無関係メール。物理削除ではなく非表示化
+            // (論理削除) して、後から「非表示も表示」トグルで復元可能にする。
+            // 重要メールがタグ忘れで物理消失するリスクを排除。
+            console.warn(`[spira/sync] inbox #${m.id}: no tag mail → hide (論理削除)`);
+            await this.hideInboxItems([m.id]).catch((e: Error) => {
+              console.warn(`[spira/sync] inbox #${m.id}: 非表示化失敗:`, e.message);
+            });
           }
           continue;
         }
@@ -1199,13 +1269,9 @@ export class SpRepository implements Repository {
           console.warn(`[spira/sync] inbox #${m.id}: メールに InternetMessageId が無いため手動トリアージ送り`);
           continue;
         }
-        // Idempotency: PA が同じメールを 2 回投入したり、前回 sync が
-        // 途中で落ちた場合の保険。internetMessageId 一致で重複検知。
-        const existing = await this.listComments(tid);
-        const dup = existing.some(
-          (c) => c.type === 'received' && c.internetMessageId === m.internetMessageId,
-        );
-        if (dup) {
+        // Idempotency (M8: per-ticket cache 経由で listComments を抑止)
+        const imids = await fetchImids(tid);
+        if (imids.has(m.internetMessageId)) {
           await this.deleteInboxMail(m.id).catch((e: Error) => {
             console.warn(`[spira/sync] inbox #${m.id}: 重複行の削除失敗:`, e.message);
           });
@@ -1223,6 +1289,7 @@ export class SpRepository implements Repository {
           // メール経由はすべて外部 (顧客/外部ユーザーとのやり取り) として扱う
           threadKind: 'external',
         });
+        imids.add(m.internetMessageId);
         // A5: 削除失敗時の markInboxProcessed フォールバック (永久増殖防止)
         try {
           await this.deleteInboxMail(m.id);
@@ -1327,7 +1394,7 @@ export class SpRepository implements Repository {
   async getSetting(key: string): Promise<string | null> {
     const url =
       `${this.listPath(this.cfg.listSettings)}/items?$select=Id,SettingKey,SettingValue` +
-      `&$filter=SettingKey eq '${encodeURIComponent(key)}'&$top=1`;
+      `&$filter=SettingKey eq '${escOdataString(key)}'&$top=1`;
     const res = await this.tx.req<ListItemsResp<{ Id: number; SettingKey: string; SettingValue: string }>>(url);
     const row = res.value?.[0];
     return row?.SettingValue ?? null;
@@ -1338,7 +1405,7 @@ export class SpRepository implements Repository {
   async setSetting(key: string, value: string | null): Promise<void> {
     const url =
       `${this.listPath(this.cfg.listSettings)}/items?$select=Id&` +
-      `$filter=SettingKey eq '${encodeURIComponent(key)}'&$top=1`;
+      `$filter=SettingKey eq '${escOdataString(key)}'&$top=1`;
     const res = await this.tx.req<ListItemsResp<{ Id: number }>>(url);
     const existing = res.value?.[0];
     if (value == null) {
@@ -1422,10 +1489,12 @@ export class SpRepository implements Repository {
 
   async listAudit(opts: ListAuditOpts = {}): Promise<AuditRecord[]> {
     const filters: string[] = [];
-    if (opts.fromTime) filters.push(`Timestamp ge datetime'${opts.fromTime}'`);
-    if (opts.toTime)   filters.push(`Timestamp le datetime'${opts.toTime}'`);
+    if (opts.fromTime) filters.push(`Timestamp ge datetime'${fmtOdataDateTime(opts.fromTime)}'`);
+    if (opts.toTime)   filters.push(`Timestamp le datetime'${fmtOdataDateTime(opts.toTime)}'`);
     if (opts.ticketId != null) filters.push(`TicketId eq ${opts.ticketId}`);
-    if (opts.action) filters.push(`Action eq '${opts.action}'`);
+    // M13: action / actorEmail を escOdataString で安全に。encodeURIComponent は
+    // 後段の filterStr で一括適用されるのでここでは ' のエスケープのみ。
+    if (opts.action) filters.push(`Action eq '${opts.action.replace(/'/g, "''")}'`);
     if (opts.actorEmail) filters.push(`ActorEmail eq '${opts.actorEmail.replace(/'/g, "''")}'`);
     const limit = Math.max(1, Math.min(opts.limit ?? 500, 2000));
     const filterStr = filters.length > 0 ? `&$filter=${encodeURIComponent(filters.join(' and '))}` : '';

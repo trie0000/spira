@@ -575,9 +575,10 @@ export class MockRepository implements Repository {
             // 起票判断を待つ。
             console.warn(`[spira/sync] inbox #${m.id}: Forms entry kept for manual triage`);
           } else {
-            // メールでタグ無し = 無関係メール。物理削除して受信箱を綺麗に。
-            console.warn(`[spira/sync] inbox #${m.id}: no tag mail → delete`);
-            await this.deleteInboxMail(m.id);
+            // M10: タグ無しメールは物理削除ではなく非表示化 (論理削除)。
+            console.warn(`[spira/sync] inbox #${m.id}: no tag mail → hide`);
+            await this.hideInboxItems([m.id]).catch((e: Error) =>
+              console.warn(`[spira/sync] inbox #${m.id}: 非表示化失敗:`, e.message));
           }
           continue;
         }
