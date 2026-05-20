@@ -655,7 +655,11 @@ export class MockRepository implements Repository {
               continue;
             }
           }
-          console.warn(`[spira/sync] inbox #${m.id}: Teams reply (parent=${parentId}) not matched, kept for manual triage`);
+          // ハズレ (= Spira 管理外スレッドへの post) → 受信箱から物理削除
+          // (sp.ts と同じ挙動。詳細はそちらのコメント参照)。
+          console.warn(`[spira/sync] inbox #${m.id}: Teams reply (parent=${parentId}) は Spira 管理外スレッド → 物理削除`);
+          await this.deleteInboxMail(m.id);
+          dedupedRemoved++;
           continue;
         }
 

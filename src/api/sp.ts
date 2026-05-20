@@ -1460,8 +1460,15 @@ export class SpRepository implements Repository {
               continue;
             }
           }
-          // ハズレ → 受信箱に残す (手動トリアージ)
-          console.warn(`[spira/sync] inbox #${m.id}: Teams reply (parent=${parentId}) not matched, kept for manual triage`);
+          // ハズレ (= Spira 管理外スレッドへの post) → 受信箱から物理削除。
+          // Teams チャネルで Spira を介さずに立てられたスレッド、
+          // ハード削除されたチケットの thread への返信などが該当。
+          // ノイズ排除を優先する運用判断 (元データは Teams 上に残っている)。
+          console.warn(`[spira/sync] inbox #${m.id}: Teams reply (parent=${parentId}) は Spira 管理外スレッド → 物理削除`);
+          await this.deleteInboxMail(m.id).catch((e: Error) => {
+            console.warn(`[spira/sync] inbox #${m.id}: 管理外スレッド reply の削除失敗:`, e.message);
+          });
+          dedupedRemoved++;
           continue;
         }
 
