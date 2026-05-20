@@ -208,11 +208,13 @@ export async function mount(): Promise<void> {
     }
 
     // 設定モーダルから編集可能な選択肢リスト (ステータス / 影響度 / 部門 /
-    // 種別) をキャッシュに温める。ticketStatusList() / priorityList() は同期版で
-    // 呼ばれることがあるので、ここで先に await しておく。
+    // 種別 / タグ辞書) をキャッシュに温める。
     {
-      const { warmOptionLists } = await import('./utils/optionLists');
-      await warmOptionLists();
+      const [{ warmOptionLists }, { warmTagDictionary }] = await Promise.all([
+        import('./utils/optionLists'),
+        import('./utils/tagDictionary'),
+      ]);
+      await Promise.all([warmOptionLists(), warmTagDictionary()]);
     }
 
     // load counts & users & current user + site title (ワークスペース表記用)

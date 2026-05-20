@@ -48,6 +48,8 @@ export interface CreateTicketInput {
   rawSubject?: string;
   initialConversationId?: string;
   source?: import('../types').SourceKind;
+  /** 起票時に付けるタグ (辞書から選択した名前の配列)。 */
+  tags?: string[];
 }
 
 export interface AddCommentInput {
@@ -147,6 +149,13 @@ export interface Repository {
    *  戻り値: 更新件数 + 行ごとのエラーメッセージ。 */
   bulkMigrateTicketField(
     field: 'status' | 'priority' | 'department' | 'inquiryCategory',
+    renames: Map<string, string>,
+    deletions: Set<string>,
+  ): Promise<{ updated: number; errors: string[] }>;
+  /** タグ辞書の改名・削除に伴い、各チケットの tags 配列を一括更新する。
+   *  - renames: 配列内の旧名を新名に置換 (重複したら 1 つにまとめる)
+   *  - deletions: 配列から該当名を除去 */
+  bulkMigrateTicketTags?(
     renames: Map<string, string>,
     deletions: Set<string>,
   ): Promise<{ updated: number; errors: string[] }>;

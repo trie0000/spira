@@ -24,6 +24,8 @@ import { createDateTime } from '../components/datetime';
 import { parseTeamsPaste, resolveTeamsTimeToISO, normalizeForDedup, detectLeadingOrphan } from '../lib/teams-paste';
 import { parseEml, parseOutlookDragText, parseMsgFile, looksLikeEml, looksLikeOutlookDrag } from '../lib/eml-parser';
 import { getFormsAnalyticsUrl } from '../utils/formsSettings';
+import { getTagDictionarySync, findTag } from '../utils/tagDictionary';
+import { renderTagPill } from './shell';
 import { createAiChatPane, isAiPanelOpen, toggleAiPanel } from './aiChat';
 import type { Ticket, Comment } from '../types';
 
@@ -922,7 +924,116 @@ function renderTicketHeader(t: Ticket, latestReceived: Comment | undefined): HTM
       label('部門'), deptBtn,
       label('種別'), categoryBtn,
     ]),
+    // タグ行 (タグ辞書が登録されている時のみ表示)
+    renderTagRow(t),
   ]);
+}
+
+/** チケット詳細ヘッダのタグ行。現在のタグピル + 編集ボタン。 */
+function renderTagRow(t: Ticket): HTMLElement {
+  const wrap = el('div', {
+    style: 'display:flex;flex-wrap:wrap;gap:var(--s-2);align-items:center;margin-top:var(--s-2)',
+  }, []);
+  const refresh = (current: string[] | undefined): void => {
+    wrap.replaceChildren();
+    wrap.appendChild(label('タグ'));
+    const dict = getTagDictionarySync();
+    if (dict.length === 0) {
+      wrap.appendChild(el('span', { style: 'color:var(--ink-3);font-size:var(--fs-xs)' }, [
+        '(タグ未登録 — 設定 → タグ辞書 で追加)',
+      ]));
+      return;
+    }
+    const tags = current ?? [];
+    if (tags.length === 0) {
+      wrap.appendChild(el('span', { style: 'color:var(--ink-3);font-size:var(--fs-xs)' }, ['(未設定)']));
+    } else {
+      for (const name of tags) wrap.appendChild(renderTagPill(findTag(name)));
+    }
+    const editBtn = el('button', {
+      class: 'spira-btn spira-btn--ghost spira-btn--sm',
+      title: 'タグを編集',
+      onclick: (e: Event) => {
+        e.stopPropagation();
+        openTagPicker(editBtn, tags, async (next) => {
+          try {
+            await getRepo().updateTicket(t.id, { tags: next });
+            t.tags = next;
+            refresh(next);
+            toast(getRoot(), 'タグを更新しました', 'ok');
+          } catch (err) {
+            toast(getRoot(), `更新失敗: ${(err as Error).message}`, 'error');
+          }
+        });
+      },
+    }, ['+ 編集']);
+    wrap.appendChild(editBtn);
+  };
+  refresh(t.tags);
+  return wrap;
+}
+
+/** タグ辞書から複数選択するピッカー。チェックボックス UI。 */
+function openTagPicker(
+  anchor: HTMLElement,
+  current: string[],
+  onSelect: (next: string[]) => void,
+): void {
+  document.querySelectorAll('.spira-tag-picker').forEach(n => n.remove());
+  const dict = getTagDictionarySync();
+  if (dict.length === 0) {
+    toast(getRoot(), 'タグ辞書が空です。設定 → タグ辞書 で追加してください', 'warn');
+    return;
+  }
+  const selected = new Set(current);
+  const menu = el('div', {
+    class: 'spira-tag-picker spira-menu',
+    style: 'position:fixed;z-index:var(--z-modal);min-width:240px;max-height:60vh;overflow-y:auto;padding:var(--s-2)',
+  }, []);
+  const close = (): void => {
+    menu.remove();
+    document.removeEventListener('click', outsideClose);
+  };
+  const outsideClose = (ev: Event): void => {
+    if (!menu.contains(ev.target as Node) && ev.target !== anchor) close();
+  };
+  for (const tag of dict) {
+    const cb = el('input', {
+      type: 'checkbox',
+      ...(selected.has(tag.name) ? { checked: 'checked' } : {}),
+      style: 'margin:0',
+    }) as HTMLInputElement;
+    cb.addEventListener('change', () => {
+      if (cb.checked) selected.add(tag.name);
+      else selected.delete(tag.name);
+    });
+    menu.appendChild(el('label', {
+      class: 'spira-menu-item',
+      style: 'display:flex;align-items:center;gap:var(--s-2);cursor:pointer',
+    }, [cb, renderTagPill(tag)]));
+  }
+  const footer = el('div', {
+    style: 'display:flex;gap:var(--s-2);padding:var(--s-2);border-top:1px solid var(--line);justify-content:flex-end',
+  }, [
+    el('button', {
+      class: 'spira-btn spira-btn--ghost spira-btn--sm',
+      onclick: close,
+    }, ['キャンセル']),
+    el('button', {
+      class: 'spira-btn spira-btn--primary spira-btn--sm',
+      onclick: () => {
+        const next = dict.map(t => t.name).filter(n => selected.has(n));
+        close();
+        onSelect(next);
+      },
+    }, ['適用']),
+  ]);
+  menu.appendChild(footer);
+  const rect = anchor.getBoundingClientRect();
+  menu.style.top = `${rect.bottom + 4}px`;
+  menu.style.left = `${rect.left}px`;
+  getRoot().appendChild(menu);
+  setTimeout(() => document.addEventListener('click', outsideClose), 0);
 }
 
 function label(text: string): HTMLElement {

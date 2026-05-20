@@ -35,6 +35,9 @@ export interface Ticket {
   /** チケットの起源ソース。新規起票時に設定 (inbox 由来なら推定、新規ボタンなら
    *  ユーザー選択)。チケット詳細プロパティから後で変更可能。 */
   source?: SourceKind;
+  /** タグ (辞書から選択した名前のリスト)。SP の Tickets.Tags 列に JSON 配列で保存。
+   *  色や説明は SpiraSettings の tags.dictionary 側に持つので、ここは名前のみ。 */
+  tags?: string[];
   isDeleted?: boolean;
   deletedAt?: string;
   createdAt: string;

@@ -8,6 +8,8 @@ import { toast } from '../components/toast';
 import { attachColumnResize, savedColWidth } from '../utils/colResize';
 import { formatTicketIdShort } from '../utils/ticketTag';
 import { isInternalAuthor } from '../utils/members';
+import { findTag } from '../utils/tagDictionary';
+import { renderTagPill } from './shell';
 import { getLastSeen, hasNewSince } from '../utils/seenState';
 import type { Ticket, TicketStatus, Priority, Comment } from '../types';
 
@@ -890,7 +892,12 @@ function renderRow(t: Ticket, meta?: TicketMeta): HTMLElement {
           }, ['NEW'])]
         : []),
     ]),
-    el('td', { class: 'spira-tk-title' }, [t.title]),
+    el('td', { class: 'spira-tk-title' }, [
+      el('div', { style: 'display:flex;align-items:center;flex-wrap:wrap;gap:var(--s-2)' }, [
+        el('span', {}, [t.title]),
+        ...((t.tags ?? []).map(name => renderTagPill(findTag(name)))),
+      ]),
+    ]),
     statusCell,
     assigneeCell,
     priorityCell,

@@ -23,6 +23,7 @@ import {
   buildInternalMembersPanel,
   buildVersionPanel,
   buildOptionsPanel,
+  buildTagDictionaryPanel,
   openResetConfirmModal,
 } from './shell';
 import { buildAiSettingsPanel } from './aiSettingsModal';
@@ -412,6 +413,20 @@ function buildGroups(): SettingGroup[] {
               hint:
                 'チケット「影響度」(旧 影響度) のプルダウン候補。Forms 自動マッピングと整合させるには英語の High/Medium/Low 推奨。' +
                 '※ SP の Tickets リスト側 Priority 列 (Choice) にも同名の選択肢が必要。',
+              body, save,
+            });
+          },
+        },
+        {
+          key: 'tags',
+          label: 'タグ辞書',
+          render: (root) => {
+            const { body, save } = buildTagDictionaryPanel(root);
+            return inlinePanel({
+              title: 'タグ辞書',
+              hint:
+                'チケットに付けるタグの辞書 (admin 管理)。利用者はここに登録された名前から選択します。' +
+                ' 色・説明を設定するとチケット一覧/詳細で色付きピル表示されます。',
               body, save,
             });
           },

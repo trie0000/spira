@@ -218,6 +218,7 @@ function asTicket(it: SpListItem): Ticket {
     rawSubject: it.RawSubject ? String(it.RawSubject) : undefined,
     initialConversationId: it.InitialConversationId ? String(it.InitialConversationId) : undefined,
     source: normalizeSource(it.Source),
+    tags: parseTagsField(it.Tags),
     isDeleted: Boolean(it.IsDeleted),
     deletedAt: it.DeletedAt ? String(it.DeletedAt) : undefined,
     createdAt: it.Created,
@@ -315,6 +316,23 @@ function normalizeSource(v: unknown): 'mail' | 'forms' | 'teams' | 'other' | und
   return undefined;
 }
 
+/** Ticket.Tags 列 (Note) の JSON 配列パース。失敗時 / 空は undefined。 */
+function parseTagsField(v: unknown): string[] | undefined {
+  if (v == null) return undefined;
+  const s = String(v).trim();
+  if (!s) return undefined;
+  try {
+    const arr = JSON.parse(s);
+    if (Array.isArray(arr)) {
+      const cleaned = arr.filter((x): x is string => typeof x === 'string' && x.trim() !== '');
+      return cleaned.length > 0 ? cleaned : undefined;
+    }
+  } catch { /* fall through to CSV fallback */ }
+  // フォールバック: カンマ区切りでも受け入れ (旧データ互換)
+  const csv = s.split(',').map(x => x.trim()).filter(Boolean);
+  return csv.length > 0 ? csv : undefined;
+}
+
 function normalizeThreadKind(v: unknown): 'internal' | 'external' | undefined {
   if (typeof v !== 'string') return undefined;
   const s = v.trim().toLowerCase();
@@ -369,6 +387,10 @@ function ticketBody(input: Partial<Ticket> | CreateTicketInput): Record<string, 
   if ('rawSubject' in input) b.RawSubject = input.rawSubject ?? null;
   if ('initialConversationId' in input) b.InitialConversationId = input.initialConversationId ?? null;
   if ('source' in input) b.Source = (input as { source?: string }).source ?? null;
+  if ('tags' in input) {
+    const arr = (input as { tags?: string[] }).tags;
+    b.Tags = arr && arr.length > 0 ? JSON.stringify(arr) : null;
+  }
   if ('isDeleted' in input) b.IsDeleted = input.isDeleted ?? false;
   if ('deletedAt' in input) b.DeletedAt = input.deletedAt ?? null;
   if ('customerTeam' in input) b.CustomerTeam = input.customerTeam ?? null;
@@ -1186,6 +1208,61 @@ export class SpRepository implements Repository {
     return { updated, errors };
   }
 
+  async bulkMigrateTicketTags(
+    renames: Map<string, string>,
+    deletions: Set<string>,
+  ): Promise<{ updated: number; errors: string[] }> {
+    let updated = 0;
+    const errors: string[] = [];
+    // タグは Note 列に JSON 文字列で保存されており $filter で値検索ができない
+    // (substringof は文字列マッチが不安定)。よって IsDeleted=false の全
+    // チケットをスキャンして判定する。listTickets は paged 取得済み。
+    const tickets = await this.listTickets();
+    for (const t of tickets) {
+      const cur = t.tags;
+      if (!cur || cur.length === 0) continue;
+      // 改名 + 削除をまとめて 1 パスで処理
+      const next: string[] = [];
+      let changed = false;
+      const seen = new Set<string>();
+      for (const name of cur) {
+        if (deletions.has(name)) { changed = true; continue; }
+        const newName = renames.get(name) ?? name;
+        if (newName !== name) changed = true;
+        if (!seen.has(newName)) {
+          seen.add(newName);
+          next.push(newName);
+        } else {
+          changed = true;
+        }
+      }
+      if (!changed) continue;
+      try {
+        await this.tx.update(this.listPath(this.cfg.listTickets), t.id, {
+          Tags: next.length > 0 ? JSON.stringify(next) : null,
+        });
+        updated++;
+      } catch (e) {
+        errors.push(`#${t.id}: ${(e as Error).message}`);
+      }
+    }
+    if (updated > 0 || errors.length > 0) {
+      void emitAudit({
+        action: 'ticket.update',
+        ticketId: 0,
+        targetType: 'ticket',
+        details: {
+          bulkMigrateTags: true,
+          renames: Array.from(renames.entries()),
+          deletions: Array.from(deletions),
+          updated,
+          errors: errors.length,
+        },
+      });
+    }
+    return { updated, errors };
+  }
+
   async getInboxItem(id: number): Promise<InboxMail | null> {
     try {
       const it = await this.tx.req<SpListItem>(`${this.listPath(this.cfg.listInbox)}/items(${id})`);
@@ -1734,6 +1811,9 @@ function ticketFieldSpecs(): FieldSpec[] {
     { name: 'InitialConversationId', type: 'Text' },
     // チケットの起源ソース (mail / forms / teams / other)。詳細プロパティから変更可能。
     { name: 'Source', type: 'Text' },
+    // タグ (辞書 SpiraSettings.tags.dictionary から選択した名前を JSON 配列で保存)。
+    // 色・説明はチケット本体には持たない (辞書側で一元管理)。
+    { name: 'Tags', type: 'Note' },
     { name: 'IsDeleted', type: 'Boolean' },
     { name: 'DeletedAt', type: 'DateTime' },
     // Teams 連携 (Forms → Spira → Teams 運用案)

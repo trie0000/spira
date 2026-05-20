@@ -28,6 +28,11 @@ import {
   getStatusOptions, setStatusOptions,
   getPriorityOptions, setPriorityOptions,
 } from '../utils/optionLists';
+import {
+  getTagDictionary, setTagDictionary,
+  TAG_COLORS, TAG_COLOR_STYLE,
+  type TagDef, type TagColor,
+} from '../utils/tagDictionary';
 
 export function renderShell(): HTMLElement {
   // id + class — ID セレクタで host CSS の !important / ID rules を上書きできる
@@ -1115,6 +1120,261 @@ export function openOptionsModal(root: HTMLElement, kind: OptionsPanelKind): voi
     primaryLabel: '保存',
     onPrimary: save,
   });
+}
+
+/** タグ辞書設定パネル。各タグ = name + color + description。
+ *  既存チケットの一括更新も対応 (改名は配列内置換、削除は配列から除去)。 */
+export function buildTagDictionaryPanel(root: HTMLElement): { body: HTMLElement; save: () => Promise<void> } {
+  let initialSnapshot: TagDef[] = [];
+  let draft: TagDef[] = [];
+  let rowOrigin: (string | null)[] = []; // 改名差分追跡用 (各 draft 行の元の name)
+
+  const listHost = el('div', { style: 'display:flex;flex-direction:column;gap:var(--s-2);max-height:50vh;overflow-y:auto' });
+
+  const colorChip = (c: TagColor, selected: boolean): HTMLElement => {
+    const s = TAG_COLOR_STYLE[c];
+    return el('span', {
+      style:
+        `display:inline-block;width:18px;height:18px;border-radius:50%;` +
+        `background:${s.border};cursor:pointer;` +
+        `box-shadow:${selected ? '0 0 0 2px var(--ink),0 0 0 4px ' + s.border : 'none'};` +
+        `transition:box-shadow 0.1s`,
+      title: c,
+    });
+  };
+
+  const renderList = (): void => {
+    listHost.replaceChildren();
+    if (draft.length === 0) {
+      listHost.appendChild(el('div', {
+        style: 'color:var(--ink-3);font-size:var(--fs-sm);padding:var(--s-3);background:var(--paper-2);border-radius:var(--r-2);text-align:center',
+      }, ['(タグ未登録 — 下の入力欄から追加してください)']));
+      return;
+    }
+    draft.forEach((tag, i) => {
+      // 名前 input
+      const nameInput = el('input', {
+        type: 'text',
+        class: 'spira-input',
+        value: tag.name,
+        style: 'flex:1 1 140px;min-width:120px;font-size:var(--fs-sm);' +
+               'padding:4px 8px;border:1px solid var(--line);border-radius:var(--r-2)',
+        onblur: () => {
+          const next = nameInput.value.trim();
+          if (!next) { nameInput.value = tag.name; return; }
+          if (next === tag.name) return;
+          const dupIdx = draft.findIndex((t, idx) => idx !== i && t.name === next);
+          if (dupIdx >= 0) {
+            toast(getRoot(), `「${next}」はすでに存在します`, 'warn');
+            nameInput.value = tag.name;
+            return;
+          }
+          tag.name = next;
+        },
+        onkeydown: (e: KeyboardEvent) => {
+          if (e.key === 'Enter') nameInput.blur();
+          if (e.key === 'Escape') { nameInput.value = tag.name; nameInput.blur(); }
+        },
+      }) as HTMLInputElement;
+
+      // 色ピッカー
+      const colorWrap = el('div', {
+        style: 'display:flex;gap:4px;flex-wrap:wrap;align-items:center',
+      }, TAG_COLORS.map(c => {
+        const chip = colorChip(c, c === tag.color);
+        chip.addEventListener('click', () => {
+          tag.color = c;
+          renderList();
+        });
+        return chip;
+      }));
+
+      // 説明 input
+      const descInput = el('input', {
+        type: 'text',
+        class: 'spira-input',
+        value: tag.description ?? '',
+        placeholder: '(任意) 説明',
+        style: 'flex:1 1 180px;min-width:140px;font-size:var(--fs-xs);' +
+               'padding:4px 8px;border:1px solid var(--line);border-radius:var(--r-2);color:var(--ink-2)',
+        onblur: () => { tag.description = descInput.value.trim() || undefined; },
+      }) as HTMLInputElement;
+
+      // プレビューピル
+      const preview = renderTagPill(tag);
+
+      const row = el('div', {
+        style:
+          'display:flex;flex-wrap:wrap;gap:var(--s-2);align-items:center;' +
+          'padding:var(--s-2) var(--s-3);background:var(--paper);' +
+          'border:1px solid var(--line);border-radius:var(--r-2)',
+      }, [
+        preview,
+        nameInput,
+        colorWrap,
+        descInput,
+        el('button', {
+          type: 'button', class: 'spira-btn spira-btn--ghost spira-btn--sm',
+          title: '上へ移動', disabled: i === 0,
+          onclick: () => {
+            if (i === 0) return;
+            [draft[i - 1], draft[i]] = [draft[i]!, draft[i - 1]!];
+            [rowOrigin[i - 1], rowOrigin[i]] = [rowOrigin[i]!, rowOrigin[i - 1]!];
+            renderList();
+          },
+        }, ['↑']),
+        el('button', {
+          type: 'button', class: 'spira-btn spira-btn--ghost spira-btn--sm',
+          title: '下へ移動', disabled: i === draft.length - 1,
+          onclick: () => {
+            if (i === draft.length - 1) return;
+            [draft[i + 1], draft[i]] = [draft[i]!, draft[i + 1]!];
+            [rowOrigin[i + 1], rowOrigin[i]] = [rowOrigin[i]!, rowOrigin[i + 1]!];
+            renderList();
+          },
+        }, ['↓']),
+        el('button', {
+          type: 'button', class: 'spira-btn spira-btn--ghost spira-btn--sm',
+          style: 'color:var(--danger)', title: '削除',
+          onclick: () => {
+            draft.splice(i, 1);
+            rowOrigin.splice(i, 1);
+            renderList();
+          },
+        }, ['×']),
+      ]);
+      listHost.appendChild(row);
+    });
+  };
+
+  // 新規追加
+  const addNameInput = el('input', {
+    type: 'text', class: 'spira-input',
+    placeholder: '新しいタグ名 (例: セキュリティ / 緊急 / 顧客A)',
+    style: 'flex:1;min-width:0',
+  }) as HTMLInputElement;
+  let newColor: TagColor = 'gray';
+  const newColorWrap = el('div', { style: 'display:flex;gap:4px' }, []);
+  const refreshNewColor = (): void => {
+    newColorWrap.replaceChildren(...TAG_COLORS.map(c => {
+      const chip = colorChip(c, c === newColor);
+      chip.addEventListener('click', () => { newColor = c; refreshNewColor(); });
+      return chip;
+    }));
+  };
+  refreshNewColor();
+  const addBtn = el('button', {
+    type: 'button', class: 'spira-btn spira-btn--primary spira-btn--sm',
+    onclick: () => {
+      const v = addNameInput.value.trim();
+      if (!v) return;
+      if (draft.find(t => t.name === v)) {
+        toast(getRoot(), `「${v}」はすでに存在します`, 'warn');
+        return;
+      }
+      draft.push({ name: v, color: newColor });
+      rowOrigin.push(null);
+      addNameInput.value = '';
+      renderList();
+      addNameInput.focus();
+    },
+  }, ['追加']);
+  addNameInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); addBtn.click(); }
+  });
+
+  const body = el('div', { style: 'display:flex;flex-direction:column;gap:var(--s-3)' }, [
+    listHost,
+    el('div', {
+      style: 'display:flex;flex-direction:column;gap:var(--s-2);padding:var(--s-3);' +
+             'background:var(--paper-2);border-radius:var(--r-2)',
+    }, [
+      el('div', { style: 'font-size:var(--fs-xs);color:var(--ink-3);font-weight:600' }, ['新規タグの追加']),
+      el('div', { style: 'display:flex;gap:var(--s-2);align-items:center' }, [addNameInput, addBtn]),
+      el('div', { style: 'display:flex;gap:var(--s-2);align-items:center' }, [
+        el('span', { style: 'font-size:var(--fs-xs);color:var(--ink-3)' }, ['色:']),
+        newColorWrap,
+      ]),
+    ]),
+    el('div', {
+      style: 'font-size:var(--fs-xs);color:var(--ink-3);background:var(--paper-2);' +
+             'padding:var(--s-3);border-radius:var(--r-2);line-height:1.6',
+    }, [
+      '※ タグはチケット本体に紐付きます (コメント / メモには付きません)。',
+      el('br'),
+      '※ ユーザーは ', el('strong', {}, ['この辞書から選択']),
+      ' してチケットに付けます (自由追加は不可、混沌防止のため)。',
+      el('br'),
+      '※ ', el('strong', {}, ['保存ボタンを押すと既存チケットも一括更新']),
+      ' されます: タグ名変更 → 旧名を新名に置換 / タグ削除 → 該当チケットのタグ配列から除去。',
+      el('br'),
+      '※ 色・説明はチケット表示時のピル装飾とツールチップに使われます。',
+    ]),
+  ]);
+
+  void getTagDictionary().then((list) => {
+    initialSnapshot = list.map(t => ({ ...t }));
+    draft = list.map(t => ({ ...t }));
+    rowOrigin = list.map(t => t.name);
+    renderList();
+  });
+  renderList();
+
+  const save = async (): Promise<void> => {
+    try {
+      const renames = new Map<string, string>();
+      const presentOrigins = new Set<string>();
+      for (let i = 0; i < draft.length; i++) {
+        const o = rowOrigin[i];
+        if (!o) continue;
+        presentOrigins.add(o);
+        if (o !== draft[i]!.name) renames.set(o, draft[i]!.name);
+      }
+      const deletions = new Set<string>(
+        initialSnapshot.map(t => t.name).filter(n => !presentOrigins.has(n))
+      );
+
+      await setTagDictionary(draft);
+
+      if (renames.size > 0 || deletions.size > 0) {
+        const repo = getRepo();
+        const result = await repo.bulkMigrateTicketTags?.(renames, deletions);
+        const parts: string[] = ['タグ辞書を保存'];
+        if (renames.size > 0) parts.push(`改名 ${renames.size} 件`);
+        if (deletions.size > 0) parts.push(`削除 ${deletions.size} 件`);
+        if (result && result.updated > 0) parts.push(`既存チケット ${result.updated} 件を一括更新`);
+        if (result && result.errors.length > 0) {
+          toast(root, `${parts.join(' / ')} (エラー ${result.errors.length} 件)`, 'warn', 8000);
+          console.warn('[spira/tags] bulk migrate errors:', result.errors);
+        } else {
+          toast(root, parts.join(' / '), 'ok', 6000);
+        }
+        initialSnapshot = draft.map(t => ({ ...t }));
+        rowOrigin = draft.map(t => t.name);
+      } else {
+        toast(root, `タグ辞書を保存しました (${draft.length} 件)`, 'ok', 4000);
+      }
+      setState({});
+    } catch (e) {
+      toast(root, `保存失敗: ${(e as Error).message}`, 'error');
+      throw e;
+    }
+  };
+
+  return { body, save };
+}
+
+/** TagDef からチケット表示用のピル DOM を生成。 */
+export function renderTagPill(tag: TagDef): HTMLElement {
+  const s = TAG_COLOR_STYLE[tag.color];
+  return el('span', {
+    class: 'spira-tag-pill',
+    style:
+      `display:inline-flex;align-items:center;padding:1px 8px;` +
+      `border-radius:10px;font-size:var(--fs-xs);` +
+      `background:${s.bg};color:${s.fg};border:1px solid ${s.border}`,
+    title: tag.description ?? tag.name,
+  }, [tag.name]);
 }
 
 /** バージョン管理モーダル。

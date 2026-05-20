@@ -263,6 +263,7 @@ export class MockRepository implements Repository {
       rawSubject: input.rawSubject,
       initialConversationId: input.initialConversationId,
       source: input.source,
+      tags: input.tags ?? undefined,
       createdAt: now(),
       updatedAt: now(),
     };
@@ -483,6 +484,38 @@ export class MockRepository implements Repository {
         t.updatedAt = nowIso;
         updated++;
       }
+    }
+    return { updated, errors: [] };
+  }
+
+  async bulkMigrateTicketTags(
+    renames: Map<string, string>,
+    deletions: Set<string>,
+  ): Promise<{ updated: number; errors: string[] }> {
+    let updated = 0;
+    const nowIso = now();
+    for (const t of store.tickets) {
+      if (t.isDeleted) continue;
+      const cur = t.tags;
+      if (!cur || cur.length === 0) continue;
+      const next: string[] = [];
+      let changed = false;
+      const seen = new Set<string>();
+      for (const name of cur) {
+        if (deletions.has(name)) { changed = true; continue; }
+        const newName = renames.get(name) ?? name;
+        if (newName !== name) changed = true;
+        if (!seen.has(newName)) {
+          seen.add(newName);
+          next.push(newName);
+        } else {
+          changed = true;
+        }
+      }
+      if (!changed) continue;
+      t.tags = next.length > 0 ? next : undefined;
+      t.updatedAt = nowIso;
+      updated++;
     }
     return { updated, errors: [] };
   }
