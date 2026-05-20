@@ -934,6 +934,16 @@ export class SpRepository implements Repository {
 
   // ---- inbox
 
+  async getInboxItem(id: number): Promise<InboxMail | null> {
+    try {
+      const it = await this.tx.req<SpListItem>(`${this.listPath(this.cfg.listInbox)}/items(${id})`);
+      return it ? asInbox(it) : null;
+    } catch (e) {
+      if (e instanceof SpError && e.status === 404) return null;
+      throw e;
+    }
+  }
+
   async listInbox(opts: { unprocessedOnly?: boolean; includeHidden?: boolean } = {}): Promise<InboxMail[]> {
     const conds: string[] = [];
     if (!opts.includeHidden) conds.push('IsHidden ne 1');

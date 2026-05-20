@@ -436,6 +436,10 @@ export class MockRepository implements Repository {
     return c;
   }
 
+  async getInboxItem(id: number): Promise<InboxMail | null> {
+    return store.inbox.find(m => m.id === id) ?? null;
+  }
+
   async listInbox(opts: { unprocessedOnly?: boolean; includeHidden?: boolean } = {}): Promise<InboxMail[]> {
     let all = opts.includeHidden ? store.inbox.slice() : store.inbox.filter(m => !m.isHidden);
     if (opts.unprocessedOnly) all = all.filter(m => !m.isProcessed);

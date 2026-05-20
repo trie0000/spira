@@ -135,6 +135,8 @@ export interface Repository {
 
   // inbox
   listInbox(opts?: { unprocessedOnly?: boolean; includeHidden?: boolean }): Promise<InboxMail[]>;
+  /** 1 件取得 (起票直前の IsProcessed 再チェック等に利用)。存在しない場合は null。 */
+  getInboxItem(id: number): Promise<InboxMail | null>;
   markInboxProcessed(id: number, patch: { ticketId: number; result: InboxState }): Promise<void>;
   hideInboxItems(ids: number[]): Promise<void>;
   unhideInboxItems(ids: number[]): Promise<void>;

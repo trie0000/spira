@@ -142,7 +142,12 @@ export async function renderInbox(): Promise<HTMLElement> {
   // unprocessedOnly は外す。タグ付きメールは auto-sync で processed に
   // なるので、unprocessed フィルターを掛けると Inbox に何も残らない。
   // タグ付き = 既存チケット関連の履歴として常に閲覧できる方が便利。
-  const allMails = await getRepo().listInbox({ includeHidden: inboxFilter.includeHidden });
+  // B: 起票済み (IsProcessed=true) 行は一覧から自動的に消す。
+  // 過去履歴を見たい場合は SP リストで直接確認可能 (UI には残さない)。
+  const allMails = await getRepo().listInbox({
+    includeHidden: inboxFilter.includeHidden,
+    unprocessedOnly: true,
+  });
   const filtered = applyInboxFilters(allMails);
   const sorted = applyInboxSort(filtered);
 
@@ -423,7 +428,7 @@ function onBulkHide(): void {
         await getRepo().hideInboxItems(ids);
         toast(getRoot(), `${ids.length} 件を非表示にしました`, 'ok');
         selectedInboxIds.clear();
-        const fresh = await getRepo().listInbox({});
+        const fresh = await getRepo().listInbox({ unprocessedOnly: true });
         setState({ inboxCount: inboxRowsWithTag(fresh).length });
       } catch (e) {
         toast(getRoot(), `失敗: ${(e as Error).message}`, 'error');
@@ -441,7 +446,7 @@ function renderList(mails: InboxMail[]): HTMLElement {
         try {
           const r = await getRepo().addSampleInbox();
           toast(getRoot(), `サンプルメール ${r.count} 件を追加しました`, 'ok');
-          const fresh = await getRepo().listInbox({});
+          const fresh = await getRepo().listInbox({ unprocessedOnly: true });
           setState({ inboxCount: inboxRowsWithTag(fresh).length });
         } catch (e) {
           toast(getRoot(), `追加失敗: ${(e as Error).message}`, 'error');
@@ -587,7 +592,7 @@ function renderHeaderRow(m: InboxMail): HTMLElement {
         try {
           await getRepo().unhideInboxItems([m.id]);
           toast(getRoot(), '再表示しました', 'ok');
-          const fresh = await getRepo().listInbox({});
+          const fresh = await getRepo().listInbox({ unprocessedOnly: true });
           setState({ inboxCount: inboxRowsWithTag(fresh).length });
         } catch (err) {
           toast(getRoot(), `失敗: ${(err as Error).message}`, 'error');
@@ -603,7 +608,7 @@ function renderHeaderRow(m: InboxMail): HTMLElement {
         try {
           await getRepo().hideInboxItems([m.id]);
           toast(getRoot(), '非表示にしました', 'ok');
-          const fresh = await getRepo().listInbox({});
+          const fresh = await getRepo().listInbox({ unprocessedOnly: true });
           setState({ inboxCount: inboxRowsWithTag(fresh).length });
         } catch (err) {
           toast(getRoot(), `失敗: ${(err as Error).message}`, 'error');
@@ -1147,6 +1152,34 @@ export function openNewTicketModal(m: InboxMail): void {
     onPrimary: async () => {
       const repo = getRepo();
       const src = sourceSel.value as Source;
+
+      // A: 受信箱由来の起票では、保存直前に IsProcessed を再フェッチ。
+      // 他ユーザー / 同一ユーザーの並行操作で先に起票済みになっていれば、
+      // 二重起票を防いでチケットへ誘導する。
+      if (fromInbox) {
+        try {
+          const fresh = await repo.getInboxItem(m.id);
+          if (fresh == null) {
+            toast(getRoot(), 'この受信メールはすでに削除されています', 'warn', 6000);
+            throw new Error('inbox-already-removed');
+          }
+          if (fresh.isProcessed && fresh.ticketId) {
+            toast(getRoot(),
+              `他のユーザーが既に起票しています (チケット #${fresh.ticketId})`,
+              'warn', 6000);
+            // チケット詳細へ誘導
+            setState({ selectedTicketId: fresh.ticketId });
+            throw new Error('inbox-already-processed');
+          }
+        } catch (e) {
+          // 再チェック自体が失敗した場合 (ネットワーク等) は警告だけ出して継続。
+          // 重大なエラーは throw して保存をブロック。
+          const msg = (e as Error).message;
+          if (msg === 'inbox-already-processed' || msg === 'inbox-already-removed') throw e;
+          console.warn('[spira] IsProcessed 再チェック失敗 (起票継続):', msg);
+        }
+      }
+
       const title = titleInput.value.trim() || m.subject || '(無題)';
       const fromName = authorInput.value.trim() || undefined;
       const fromEmail = authorEmailInput.value.trim() || undefined;

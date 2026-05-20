@@ -131,7 +131,7 @@ export async function mount(): Promise<void> {
 
     // load counts & users & current user
     const [inbox, trash, users, currentUser] = await Promise.all([
-      repo.listInbox({}),
+      repo.listInbox({ unprocessedOnly: true }),
       repo.listDeletedTickets(),
       repo.listSiteUsers(),
       repo.getCurrentUser(),
@@ -198,7 +198,7 @@ async function doSync(root: HTMLElement, silent = false): Promise<void> {
   if (!silent) syncBtn?.classList.add('spira-spin');
   try {
     const r = await repo.syncInbox();
-    const inbox = await repo.listInbox({});
+    const inbox = await repo.listInbox({ unprocessedOnly: true });
     const newCount = inboxRowsWithTag(inbox).length;
     if (silent) {
       // 自動同期では画面全体の再描画 (paintMain) を起こしたくないので
