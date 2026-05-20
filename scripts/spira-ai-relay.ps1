@@ -266,8 +266,16 @@ function Send-Error {
 # ローカル機能 (= Outlook クライアント操作 / 死活確認) もこの relay で
 # 受ける。/spira/* で始まるパスは forwarding せず、PowerShell 内で処理。
 #   - GET  /spira/health           : 死活確認 (Spira UI のフォールバック判定)
-#   - POST /spira/outlook/reply    : 指定 InternetMessageId に対する正規 Reply
-#                                    下書きを Outlook デスクトップで開く
+#   - POST /spira/outlook/reply    : 既存メールに対する正規 Reply 下書きを開く
+#   - POST /spira/outlook/new      : 新規メール下書きを開く
+#
+# ★★★ 重要な設計方針 ★★★
+# Outlook 系ハンドラ (reply / new) は MailItem.Display() で
+# 「下書き作成画面を表示する」 までしか行わない。
+# .Send() は絶対に呼ばないこと。最終的な「送信」操作は operator 本人が
+# Outlook クライアントで内容を確認した上で行う設計。
+# (誤送信防止 / Outlook 標準の確認フロー / 個人 Sent Items への記録の
+#  ためにも、この方針は変更しない。)
 
 function Send-Json {
     param(
@@ -439,6 +447,9 @@ function Invoke-OutlookReplyHandler {
             }
             $null = $reply.Recipients.ResolveAll()
         }
+        # ★ 設計上ここで .Send() は絶対に呼ばない。下書きを表示するだけ。
+        # ★ 最終的な「送信」ボタン操作は operator 本人が Outlook クライアントで
+        # ★ 確認した上で行う。誤送信防止のため、この方針は変更しないこと。
         $reply.Display()
         Send-Json -Response $Response -Status 200 -Body @{ ok = $true }
     } catch {
@@ -496,6 +507,9 @@ function Invoke-OutlookNewHandler {
             if ($ccLine) { $mail.CC = $ccLine }
         }
         $mail.HTMLBody = [string]$payload.bodyHtml
+        # ★ 設計上ここで .Send() は絶対に呼ばない。下書きを表示するだけ。
+        # ★ 最終的な「送信」ボタン操作は operator 本人が Outlook クライアントで
+        # ★ 確認した上で行う。誤送信防止のため、この方針は変更しないこと。
         $mail.Display()
         Send-Json -Response $Response -Status 200 -Body @{ ok = $true }
     } catch {
