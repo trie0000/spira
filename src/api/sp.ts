@@ -1333,7 +1333,12 @@ export class SpRepository implements Repository {
 
   async syncInbox(): Promise<SyncResult> {
     const unprocessed = await this.listInbox({ unprocessedOnly: true });
-    const tickets = await this.listTickets();
+    // 削除済みチケットも取得して "削除済みスレッド" の検出に使う。
+    // 削除されたチケットに紐づく Teams スレッドへの返信が PA 経由で
+    // InboxMails に積まれ続けると一覧に紛れ込むので、それを判別して
+    // 物理削除するため。生きているチケットの threadMap だけ別途用意する。
+    const allTickets = await this.listTickets({ includeDeleted: true });
+    const tickets = allTickets.filter(t => !t.isDeleted);
     const byId = new Map(tickets.map(t => [t.id, t]));
     // Teams スレッド ID → チケット ID の逆引き map (internalThreadId と
     // userThreadId 両方を 1 つの map に詰める)。PA フロー④ が
@@ -1341,9 +1346,17 @@ export class SpRepository implements Repository {
     // それを使って既存チケットに自動紐付けする。
     const threadMap = new Map<string, { ticketId: number; threadType: 'internal' | 'user' }>();
     for (const t of tickets) {
-      if (t.isDeleted) continue;
       if (t.internalThreadId) threadMap.set(t.internalThreadId, { ticketId: t.id, threadType: 'internal' });
       if (t.userThreadId)     threadMap.set(t.userThreadId,     { ticketId: t.id, threadType: 'user' });
+    }
+    // 削除済みチケットの thread ID 集合。Teams 返信がこれにヒットしたら
+    // 「死んだスレッドへの post」なので InboxMails から物理削除する
+    // (チケット復元後の再収集よりも、ノイズ排除を優先する運用判断)。
+    const deletedThreadIds = new Set<string>();
+    for (const t of allTickets) {
+      if (!t.isDeleted) continue;
+      if (t.internalThreadId) deletedThreadIds.add(t.internalThreadId);
+      if (t.userThreadId)     deletedThreadIds.add(t.userThreadId);
     }
     // M8: チケットごとの InternetMessageId 集合をメモ化。同 syncInbox 内で
     // 同じチケットへの auto-link が複数発生した時に listComments を 1 回しか
@@ -1385,6 +1398,20 @@ export class SpRepository implements Repository {
           // 元の大小ケースを保ったまま prefix 部分のみ削除 (parentId は
           // Teams の messageId なので case-sensitive 比較されうる)。
           const parentId = convId.slice('teams-'.length).trim();
+
+          // 削除済みチケットの thread への返信は受信箱の純粋なノイズ。
+          // 表示させたくないので InboxMails 行を物理削除して終了。
+          // (チケット復元後にチャットを再収集したい運用なら、
+          //  hideInboxItems への置換も検討余地あり。)
+          if (deletedThreadIds.has(parentId)) {
+            console.warn(`[spira/sync] inbox #${m.id}: Teams reply to deleted ticket's thread (parent=${parentId}) → 物理削除`);
+            await this.deleteInboxMail(m.id).catch((e: Error) => {
+              console.warn(`[spira/sync] inbox #${m.id}: 削除済みスレッド宛 reply の削除失敗:`, e.message);
+            });
+            dedupedRemoved++;
+            continue;
+          }
+
           const hit = threadMap.get(parentId);
           if (hit) {
             const ticket = byId.get(hit.ticketId);

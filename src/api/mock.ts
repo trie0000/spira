@@ -586,6 +586,14 @@ export class MockRepository implements Repository {
       if (t.internalThreadId) threadMap.set(t.internalThreadId, { ticketId: t.id, threadType: 'internal' });
       if (t.userThreadId)     threadMap.set(t.userThreadId,     { ticketId: t.id, threadType: 'user' });
     }
+    // 削除済みチケットの thread ID 集合 (sp.ts と同じく Teams 返信のノイズ
+    // を InboxMails から物理削除する用途)。
+    const deletedThreadIds = new Set<string>();
+    for (const t of store.tickets) {
+      if (!t.isDeleted) continue;
+      if (t.internalThreadId) deletedThreadIds.add(t.internalThreadId);
+      if (t.userThreadId)     deletedThreadIds.add(t.userThreadId);
+    }
     // 走査対象を先にコピー (削除しながら回ると iteration がズレるため)
     const targets = store.inbox.filter(x => !x.isProcessed).slice();
     for (const m of targets) {
@@ -599,6 +607,16 @@ export class MockRepository implements Repository {
         // Teams 返信の自動紐付け (sp.ts と同じロジック)
         if (isTeams) {
           const parentId = convId.slice('teams-'.length).trim();
+
+          // 削除済みチケットの thread への返信は InboxMails から物理削除
+          // (sp.ts と同じ挙動。詳細はそちらのコメント参照)。
+          if (deletedThreadIds.has(parentId)) {
+            console.warn(`[spira/sync] inbox #${m.id}: Teams reply to deleted ticket's thread (parent=${parentId}) → 物理削除`);
+            await this.deleteInboxMail(m.id);
+            dedupedRemoved++;
+            continue;
+          }
+
           const hit = threadMap.get(parentId);
           if (hit) {
             const ticket = store.tickets.find(t => t.id === hit.ticketId && !t.isDeleted);
