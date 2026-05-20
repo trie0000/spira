@@ -232,6 +232,27 @@ export function openTicketPropertiesModal(ticket: Ticket): void {
       el('div', { style: VALUE_STYLE }, [current.priority]),
     );
 
+    // ソース (編集可能)
+    const sourceSel = el('select', {
+      class: 'spira-input',
+      style: 'width:200px',
+      onchange: () => {
+        const v = (sourceSel as HTMLSelectElement).value;
+        const next = (v === '' ? undefined : v) as Ticket['source'];
+        void applyPatch({ source: next });
+      },
+    }, [
+      el('option', { value: '', ...(!current.source ? { selected: 'selected' } : {}) }, ['(未設定)']),
+      el('option', { value: 'mail',  ...(current.source === 'mail'  ? { selected: 'selected' } : {}) }, ['📧 メール']),
+      el('option', { value: 'forms', ...(current.source === 'forms' ? { selected: 'selected' } : {}) }, ['📋 Forms']),
+      el('option', { value: 'teams', ...(current.source === 'teams' ? { selected: 'selected' } : {}) }, ['💬 Teams']),
+      el('option', { value: 'other', ...(current.source === 'other' ? { selected: 'selected' } : {}) }, ['📝 その他']),
+    ]) as HTMLSelectElement;
+    grid.append(
+      el('label', { style: LABEL_STYLE }, ['ソース']),
+      sourceSel,
+    );
+
     // 内部スレッド / ユーザースレッド
     appendThreadRows(grid, current, 'internal', applyPatch);
     appendThreadRows(grid, current, 'user', applyPatch);

@@ -47,6 +47,7 @@ export interface CreateTicketInput {
   dueDate?: string;
   rawSubject?: string;
   initialConversationId?: string;
+  source?: import('../types').SourceKind;
 }
 
 export interface AddCommentInput {
@@ -60,7 +61,7 @@ export interface AddCommentInput {
   sourceEmailId?: number;
   hasAttachments?: boolean;
   internetMessageId?: string;
-  source?: 'mail' | 'teams' | 'other';
+  source?: import('../types').SourceKind;
   /** 'internal' = 内部スレッド (社内向け) / 'external' = 外部スレッド (顧客向け)。
    *  type='note' のときは無視される。Teams 自動同期では syncInbox が設定する。 */
   threadKind?: 'internal' | 'external';
@@ -127,7 +128,7 @@ export interface Repository {
       fromName?: string | null;
       fromEmail?: string | null;
       sentAt?: string;
-      source?: 'mail' | 'teams' | 'other';
+      source?: import('../types').SourceKind;
     },
   ): Promise<void>;
   deleteComment(id: number): Promise<void>;

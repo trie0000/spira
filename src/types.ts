@@ -4,6 +4,12 @@ export type TicketStatus = '新規' | '対応中' | '確認待ち' | '完了';
 export type Priority    = 'High' | 'Medium' | 'Low';
 export type CommentType = 'received' | 'note';
 export type InboxState  = 'unprocessed' | 'auto-linked' | 'manual-linked' | 'created';
+/** チケット / コメントの起源を表すソース種別。
+ *  - 'mail'  : メール (Outlook 経由)
+ *  - 'forms' : Microsoft Forms 経由
+ *  - 'teams' : Teams スレッド経由
+ *  - 'other' : 電話・口頭・社内システム転記等のその他 */
+export type SourceKind = 'mail' | 'forms' | 'teams' | 'other';
 
 export interface Ticket {
   id: number;                  // SP の Id を流用、`#001` 表示
@@ -26,6 +32,9 @@ export interface Ticket {
   dueDate?: string;            // ISO datetime
   rawSubject?: string;
   initialConversationId?: string;
+  /** チケットの起源ソース。新規起票時に設定 (inbox 由来なら推定、新規ボタンなら
+   *  ユーザー選択)。チケット詳細プロパティから後で変更可能。 */
+  source?: SourceKind;
   isDeleted?: boolean;
   deletedAt?: string;
   createdAt: string;
@@ -61,7 +70,7 @@ export interface Comment {
    *   - 'teams' : pasted from Teams via the "履歴を追加" modal.
    *   - 'other' : any other manual entry (phone, in-person, etc.).
    *  Legacy comments without this field render with the mail icon. */
-  source?: 'mail' | 'teams' | 'other';
+  source?: SourceKind;
   /** スレッド種別:
    *   - 'internal' : 内部スレッド (社内議論用、Tickets.internalThreadId 由来)
    *   - 'external' : 外部スレッド (顧客/ユーザー向け、Tickets.userThreadId 由来、

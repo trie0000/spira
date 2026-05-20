@@ -194,6 +194,7 @@ function asTicket(it: SpListItem): Ticket {
     dueDate: it.DueDate ? String(it.DueDate) : undefined,
     rawSubject: it.RawSubject ? String(it.RawSubject) : undefined,
     initialConversationId: it.InitialConversationId ? String(it.InitialConversationId) : undefined,
+    source: normalizeSource(it.Source),
     isDeleted: Boolean(it.IsDeleted),
     deletedAt: it.DeletedAt ? String(it.DeletedAt) : undefined,
     createdAt: it.Created,
@@ -282,8 +283,8 @@ function asComment(it: SpListItem): Comment {
   };
 }
 
-function normalizeSource(v: unknown): 'mail' | 'teams' | 'other' | undefined {
-  if (v === 'mail' || v === 'teams' || v === 'other') return v;
+function normalizeSource(v: unknown): 'mail' | 'forms' | 'teams' | 'other' | undefined {
+  if (v === 'mail' || v === 'forms' || v === 'teams' || v === 'other') return v;
   return undefined;
 }
 
@@ -337,6 +338,7 @@ function ticketBody(input: Partial<Ticket> | CreateTicketInput): Record<string, 
   if ('dueDate' in input) b.DueDate = input.dueDate ?? null;
   if ('rawSubject' in input) b.RawSubject = input.rawSubject ?? null;
   if ('initialConversationId' in input) b.InitialConversationId = input.initialConversationId ?? null;
+  if ('source' in input) b.Source = (input as { source?: string }).source ?? null;
   if ('isDeleted' in input) b.IsDeleted = input.isDeleted ?? false;
   if ('deletedAt' in input) b.DeletedAt = input.deletedAt ?? null;
   if ('customerTeam' in input) b.CustomerTeam = input.customerTeam ?? null;
@@ -1407,6 +1409,8 @@ function ticketFieldSpecs(): FieldSpec[] {
     { name: 'DueDate', type: 'DateTime' },
     { name: 'RawSubject', type: 'Text' },
     { name: 'InitialConversationId', type: 'Text' },
+    // チケットの起源ソース (mail / forms / teams / other)。詳細プロパティから変更可能。
+    { name: 'Source', type: 'Text' },
     { name: 'IsDeleted', type: 'Boolean' },
     { name: 'DeletedAt', type: 'DateTime' },
     // Teams 連携 (Forms → Spira → Teams 運用案)

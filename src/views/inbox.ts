@@ -373,7 +373,7 @@ function renderSubBar(visibleCount: number): HTMLElement {
 
   return el('div', { class: 'spira-subbar' + (selCount > 0 ? ' selected' : '') }, [
     el('div', { class: 'spira-subbar-title' }, [
-      el('span', { class: 'spira-subbar-name' }, ['受信メール']),
+      el('span', { class: 'spira-subbar-name' }, ['受信一覧']),
       el('span', { class: 'spira-subbar-count' }, [`${visibleCount} 件`]),
     ]),
     el('div', { style: 'flex:1' }),
@@ -616,7 +616,7 @@ function renderExpandedRow(m: InboxMail): HTMLElement {
  *  受信箱由来 (m.id > 0) の場合は mail ソース固定で、件名・本文・送信者
  *  などが事前入力される。 */
 export function openNewTicketModal(m: InboxMail): void {
-  type Source = 'mail' | 'teams' | 'other';
+  type Source = 'mail' | 'forms' | 'teams' | 'other';
   const users = getState().users;
   const fromInbox = m.id > 0;
 
@@ -642,8 +642,9 @@ export function openNewTicketModal(m: InboxMail): void {
   const applyParsedEml = (parsed: ReturnType<typeof parseEml>): void => {
     // .eml が落ちてきたら、現在のソース選択に関わらず "mail" 固定にする
     // (Teams / その他 を選択中に Outlook ファイルを落とした場合の事故防止)。
-    // 受信箱由来モーダル (sourceSel.disabled=true) では既に mail なので no-op。
-    if (!sourceSel.disabled && sourceSel.value !== 'mail') {
+    // .eml / .msg ドロップ時はメールとして取り込むのが妥当なので、現在の
+    // ソース選択が mail でなければ mail に切り替える。
+    if (sourceSel.value !== 'mail') {
       sourceSel.value = 'mail';
       sourceSel.dispatchEvent(new Event('change', { bubbles: true }));
     }
@@ -801,13 +802,21 @@ export function openNewTicketModal(m: InboxMail): void {
     if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
   };
 
-  // ソース選択 (受信箱由来は mail に強制)
+  // ソース選択 — 受信箱由来 (Forms / Teams / 通常メール) を判定して初期値を
+  // 設定するが、ユーザは自由に変更可能 (誤判定や手動修正のため)。
+  const inferInitialSource = (): 'mail' | 'forms' | 'teams' | 'other' => {
+    if (!fromInbox) return 'other';
+    if (isFormsSource(m)) return 'forms';
+    if (isTeamsSource(m)) return 'teams';
+    return 'mail';
+  };
+  const initialSrc = inferInitialSource();
   const sourceSel = el('select', { class: 'spira-input', style: 'width:200px;min-width:0' }, [
-    el('option', { value: 'mail',  selected: true }, ['メール']),
-    el('option', { value: 'teams' }, ['Teams']),
-    el('option', { value: 'other' }, ['その他']),
+    el('option', { value: 'mail',  ...(initialSrc === 'mail'  ? { selected: 'selected' } : {}) }, ['メール']),
+    el('option', { value: 'forms', ...(initialSrc === 'forms' ? { selected: 'selected' } : {}) }, ['Forms']),
+    el('option', { value: 'teams', ...(initialSrc === 'teams' ? { selected: 'selected' } : {}) }, ['Teams']),
+    el('option', { value: 'other', ...(initialSrc === 'other' ? { selected: 'selected' } : {}) }, ['その他']),
   ]) as HTMLSelectElement;
-  if (fromInbox) sourceSel.disabled = true;
 
   // 送信者
   const authorInput = el('input', {
@@ -904,7 +913,10 @@ export function openNewTicketModal(m: InboxMail): void {
       bodyArea.placeholder = 'Teams で右クリック→コピーしたチャットを貼り付け';
     } else {
       authorInput.placeholder = '送信者名 (任意)';
-      bodyArea.placeholder = src === 'mail' ? 'メール本文' : '本文 / メモ';
+      bodyArea.placeholder =
+        src === 'mail'  ? 'メール本文' :
+        src === 'forms' ? 'Forms 応答の本文 (HTML or テキスト)' :
+        '本文 / メモ';
     }
     updatePreview();
   });
@@ -1165,6 +1177,7 @@ export function openNewTicketModal(m: InboxMail): void {
           dueDate: dueInput.value ? new Date(dueInput.value).toISOString() : undefined,
           rawSubject: m.subject || undefined,
           initialConversationId: m.conversationId,
+          source: src,
         });
 
         // ソース別: 初期履歴コメントを追加
@@ -1191,8 +1204,9 @@ export function openNewTicketModal(m: InboxMail): void {
               console.warn('[spira] addComment failed for teams message:', e);
             }
           }
-        } else if (src === 'mail') {
-          // 受信箱由来は HTML 本文をそのまま使う。手動入力時は textarea を採用。
+        } else if (src === 'mail' || src === 'forms') {
+          // mail / forms どちらも HTML 本文をそのまま履歴として登録する流れ。
+          // 受信箱由来 (PA 経由) なら m.bodyHtml をそのまま、手動入力時は textarea を採用。
           const content = fromInbox ? (m.bodyHtml || m.bodyText) : bodyArea.value;
           const isHtml = fromInbox ? !!m.bodyHtml : false;
           if (content.trim()) {
@@ -1204,7 +1218,7 @@ export function openNewTicketModal(m: InboxMail): void {
               sourceEmailId: fromInbox ? m.id : undefined,
               hasAttachments: fromInbox ? m.hasAttachments : undefined,
               internetMessageId: fromInbox ? m.internetMessageId : undefined,
-              source: 'mail',
+              source: src,
             });
           }
         } else {

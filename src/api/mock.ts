@@ -262,6 +262,7 @@ export class MockRepository implements Repository {
       dueDate: input.dueDate,
       rawSubject: input.rawSubject,
       initialConversationId: input.initialConversationId,
+      source: input.source,
       createdAt: now(),
       updatedAt: now(),
     };
