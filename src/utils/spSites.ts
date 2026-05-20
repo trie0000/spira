@@ -8,10 +8,20 @@
 //   - 選択サイトに Spira のリストが既に作成されているかチェックする
 
 const STORAGE_KEY = 'spira:selected-site-url';
+// 過去に Spira を起動したサイトの履歴 (新しい順、最大 RECENT_LIMIT 件)。
+// Search API がそのサイトを返してくれないテナントでも、ユーザーが「前回開いた
+// サイト」をモーダルのリストから 1 クリックで選び直せるようにするために使う。
+const RECENT_KEY = 'spira:recent-site-urls';
+const RECENT_LIMIT = 8;
 
 export interface SpSite {
   url: string;
   title: string;
+}
+
+export interface RecentSite extends SpSite {
+  /** 最終利用時刻 (ISO)。ソート用。 */
+  lastUsedAt: string;
 }
 
 /** ユーザーがアクセス可能な SP サイト一覧を取得。
@@ -64,10 +74,62 @@ export function getSelectedSiteUrl(): string | null {
   catch { return null; }
 }
 
-/** 選択された SP サイト URL を保存。 */
-export function setSelectedSiteUrl(url: string): void {
+/** 選択された SP サイト URL を保存 (+ recent 履歴にも追記)。 */
+export function setSelectedSiteUrl(url: string, title?: string): void {
   try { localStorage.setItem(STORAGE_KEY, url); }
   catch { /* noop */ }
+  // 同時に recent 履歴へ最新利用として記録 (重複は捨てて先頭に持ってくる)。
+  // title が分かっていなければ後から fetchSiteTitle で書き戻す呼び出し側に任せる。
+  pushRecentSite(url, title ?? url);
+}
+
+/** recent 履歴を取得 (新しい順)。 */
+export function getRecentSites(): RecentSite[] {
+  try {
+    const raw = localStorage.getItem(RECENT_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    const out: RecentSite[] = [];
+    for (const it of parsed) {
+      if (!it || typeof it !== 'object') continue;
+      const r = it as Partial<RecentSite>;
+      if (!r.url) continue;
+      out.push({
+        url: String(r.url),
+        title: String(r.title ?? r.url),
+        lastUsedAt: String(r.lastUsedAt ?? ''),
+      });
+    }
+    // 安全のため新しい順にソート
+    out.sort((a, b) => (b.lastUsedAt || '').localeCompare(a.lastUsedAt || ''));
+    return out;
+  } catch { return []; }
+}
+
+/** recent 履歴に 1 件追記 (重複 url は捨てて先頭に)。 */
+function pushRecentSite(url: string, title: string): void {
+  try {
+    const existing = getRecentSites().filter(s => s.url !== url);
+    const next: RecentSite[] = [
+      { url, title, lastUsedAt: new Date().toISOString() },
+      ...existing,
+    ].slice(0, RECENT_LIMIT);
+    localStorage.setItem(RECENT_KEY, JSON.stringify(next));
+  } catch { /* noop */ }
+}
+
+/** 表示用タイトルを後から更新する (起動完了後に fetchSiteTitle で取得できた
+ *  ときに recent の title を上書きするための補助)。 */
+export function refreshRecentSiteTitle(url: string, title: string): void {
+  try {
+    const list = getRecentSites();
+    let changed = false;
+    for (const r of list) {
+      if (r.url === url && r.title !== title) { r.title = title; changed = true; }
+    }
+    if (changed) localStorage.setItem(RECENT_KEY, JSON.stringify(list));
+  } catch { /* noop */ }
 }
 
 /** 指定サイトに Spira の基本リスト (Tickets) が既に存在するかチェック。

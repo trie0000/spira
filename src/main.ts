@@ -225,8 +225,12 @@ export async function mount(): Promise<void> {
       repo.getCurrentUser(),
       (async () => {
         if (overrideSiteUrl) {
-          const { fetchSiteTitle } = await import('./utils/spSites');
-          return fetchSiteTitle(overrideSiteUrl);
+          const { fetchSiteTitle, refreshRecentSiteTitle } = await import('./utils/spSites');
+          const title = await fetchSiteTitle(overrideSiteUrl);
+          // 取れたタイトルで recent 履歴を上書き (次回の起動モーダルで
+          // 正しい表示名を出すため)。
+          if (title) refreshRecentSiteTitle(overrideSiteUrl, title);
+          return title;
         }
         return null;
       })(),

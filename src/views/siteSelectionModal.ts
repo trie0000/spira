@@ -12,9 +12,11 @@ import {
   listAccessibleSites,
   getSelectedSiteUrl,
   setSelectedSiteUrl,
+  getRecentSites,
   hasSpiraLists,
   detectCurrentSiteUrl,
   type SpSite,
+  type RecentSite,
 } from '../utils/spSites';
 
 export interface SiteSelectionResult {
@@ -34,6 +36,10 @@ export function openSiteSelectionModal(): Promise<SiteSelectionResult | null> {
     const tenantOrigin = (() => {
       try { return new URL(current).origin; } catch { return location.origin; }
     })();
+    // 最近 Spira を起動したサイト履歴 (新しい順)。
+    // Search API が返してくれないテナントでも前回サイトをワンクリックで
+    // 選び直せるようリスト先頭に固定で出す。
+    const recents: RecentSite[] = getRecentSites();
 
     let selectedUrl = saved ?? current;
     let sites: SpSite[] = [];
@@ -73,9 +79,107 @@ export function openSiteSelectionModal(): Promise<SiteSelectionResult | null> {
     const listHost = el('div', {
       style: 'flex:1;overflow-y:auto;padding:8px 0;min-height:200px',
     });
-    listHost.appendChild(el('div', {
-      style: 'padding:16px 20px;color:#777;font-size:13px',
-    }, ['サイト一覧を取得中…']));
+
+    /** 1 行 (radio + ラベル) を組み立て。 */
+    const buildRow = (site: SpSite, marker?: HTMLElement | null): HTMLElement => {
+      const id = `spira-site-${Math.random().toString(36).slice(2)}`;
+      const radio = el('input', {
+        type: 'radio', name: 'spira-site', id, value: site.url,
+        style: 'margin:0 10px 0 0;flex-shrink:0',
+      }) as HTMLInputElement;
+      if (site.url === selectedUrl) radio.checked = true;
+      radio.addEventListener('change', () => {
+        if (radio.checked) {
+          selectedUrl = site.url;
+          manualInput.value = '';
+        }
+      });
+      const row = el('label', {
+        for: id,
+        style:
+          'display:flex;align-items:center;gap:0;padding:8px 20px;' +
+          'cursor:pointer;font-size:13px;border-bottom:1px solid #f0f0f0',
+      }, [
+        radio,
+        el('span', { style: 'flex:1;min-width:0' }, [
+          el('div', { style: 'font-weight:500;display:flex;align-items:center;flex-wrap:wrap;gap:6px' }, [
+            el('span', {}, [site.title]),
+            ...(marker ? [marker] : []),
+            ...(site.url === current ? [
+              el('span', {
+                style: 'font-size:11px;color:#4a7c59;font-weight:400',
+              }, ['(現在のページ)']),
+            ] : []),
+          ]),
+          el('div', {
+            style: 'color:#888;font-size:11px;font-family:ui-monospace,monospace;word-break:break-all',
+          }, [site.url]),
+        ]),
+      ]);
+      row.addEventListener('click', (e) => {
+        if (e.target !== radio) radio.click();
+      });
+      return row;
+    };
+
+    /** セクションヘッダ。 */
+    const sectionHead = (label: string): HTMLElement => el('div', {
+      style:
+        'padding:6px 20px;font-size:11px;color:#777;text-transform:uppercase;' +
+        'letter-spacing:0.04em;font-weight:600;background:#fafafa;border-bottom:1px solid #f0f0f0',
+    }, [label]);
+
+    /** リスト全体を再描画。 recents + (取得済なら) search results をマージ表示。 */
+    const renderList = (fetched: SpSite[] | null): void => {
+      listHost.replaceChildren();
+      const recentUrlSet = new Set(recents.map(r => r.url));
+
+      // ── recents セクション (取得待ちでも先に出る) ──
+      if (recents.length > 0) {
+        listHost.appendChild(sectionHead('最近開いたサイト'));
+        for (const r of recents) {
+          const recentBadge = el('span', {
+            style:
+              'font-size:10px;color:#4a7c59;background:#e8f0ea;padding:1px 6px;' +
+              'border-radius:8px;font-weight:500',
+          }, ['前回']);
+          // 最新 (recents[0]) 以外は「前回」バッジを付けない
+          const marker = r === recents[0] ? recentBadge : null;
+          listHost.appendChild(buildRow(r, marker));
+        }
+      }
+
+      // ── search API セクション ──
+      if (fetched === null) {
+        // 取得中
+        listHost.appendChild(el('div', {
+          style: 'padding:16px 20px;color:#777;font-size:13px',
+        }, ['アクセス可能なサイト一覧を取得中…']));
+        return;
+      }
+      const others = fetched.filter(s => !recentUrlSet.has(s.url));
+      if (recents.length > 0 && others.length > 0) {
+        listHost.appendChild(sectionHead('アクセス可能なサイト'));
+      }
+      if (others.length === 0 && recents.length === 0) {
+        listHost.appendChild(el('div', {
+          style: 'padding:16px 20px;color:#777;font-size:13px;line-height:1.6',
+        }, [
+          'アクセス可能なサイトを検索 API から取得できませんでした。',
+          el('br', {}, []),
+          '下の入力欄に SP サイトの URL を直接貼り付けてください。',
+        ]));
+        return;
+      }
+      // current が含まれていれば先頭へ
+      const ordered = [...others];
+      const cIdx = ordered.findIndex(s => s.url === current);
+      if (cIdx > 0) ordered.unshift(ordered.splice(cIdx, 1)[0]!);
+      for (const site of ordered) listHost.appendChild(buildRow(site, null));
+    };
+
+    // 初期描画 (recents だけ、search 結果は取得中)
+    renderList(null);
 
     // 手入力 URL (Search API でヒットしないテナント外サイト等の fallback)
     const manualInput = el('input', {
@@ -140,7 +244,14 @@ export function openSiteSelectionModal(): Promise<SiteSelectionResult | null> {
         if (!ok) return;
       }
 
-      setSelectedSiteUrl(url);
+      // 表示用のタイトルを recent / search から拾えれば一緒に保存。
+      // 見つからない場合は URL を仮タイトルにし、起動完了後に
+      // fetchSiteTitle で書き戻す前提 (main.ts 側で refreshRecentSiteTitle)。
+      const title =
+        recents.find(r => r.url === url)?.title
+        ?? sites.find(s => s.url === url)?.title
+        ?? url;
+      setSelectedSiteUrl(url, title);
       backdrop.remove();
       document.removeEventListener('keydown', onKey);
       resolve({ siteUrl: url, initialized });
@@ -177,67 +288,12 @@ export function openSiteSelectionModal(): Promise<SiteSelectionResult | null> {
     backdrop.appendChild(modal);
     document.body.appendChild(backdrop);
 
-    // サイト一覧を非同期取得
+    // サイト一覧を非同期取得 → 取れたら再描画
     void listAccessibleSites(tenantOrigin).then((fetched) => {
       sites = fetched;
-      listHost.replaceChildren();
-      if (sites.length === 0) {
-        listHost.appendChild(el('div', {
-          style: 'padding:16px 20px;color:#777;font-size:13px;line-height:1.6',
-        }, [
-          'アクセス可能なサイトを検索 API から取得できませんでした。',
-          el('br', {}, []),
-          '下の入力欄に SP サイトの URL を直接貼り付けてください。',
-        ]));
-        return;
-      }
-      // 現在のサイトをリストの先頭に来るよう調整 (もし含まれていれば)
-      const orderedSites = [...sites];
-      const currentIdx = orderedSites.findIndex(s => s.url === current);
-      if (currentIdx > 0) {
-        orderedSites.unshift(orderedSites.splice(currentIdx, 1)[0]!);
-      }
-      // リスト描画
-      for (const site of orderedSites) {
-        const id = `spira-site-${Math.random().toString(36).slice(2)}`;
-        const radio = el('input', {
-          type: 'radio', name: 'spira-site', id, value: site.url,
-          style: 'margin:0 10px 0 0;flex-shrink:0',
-        }) as HTMLInputElement;
-        if (site.url === selectedUrl) radio.checked = true;
-        radio.addEventListener('change', () => {
-          if (radio.checked) {
-            selectedUrl = site.url;
-            manualInput.value = '';
-          }
-        });
-        const row = el('label', {
-          for: id,
-          style:
-            'display:flex;align-items:center;gap:0;padding:8px 20px;' +
-            'cursor:pointer;font-size:13px;border-bottom:1px solid #f0f0f0',
-        }, [
-          radio,
-          el('span', { style: 'flex:1;min-width:0' }, [
-            el('div', { style: 'font-weight:500' }, [
-              site.title,
-              ...(site.url === current ? [
-                el('span', {
-                  style: 'margin-left:8px;font-size:11px;color:#4a7c59;font-weight:400',
-                }, ['(現在のページ)']),
-              ] : []),
-            ]),
-            el('div', {
-              style: 'color:#888;font-size:11px;font-family:ui-monospace,monospace;word-break:break-all',
-            }, [site.url]),
-          ]),
-        ]);
-        row.addEventListener('click', (e) => {
-          // ラベルの click が radio に伝わるはずだが、念のため明示
-          if (e.target !== radio) radio.click();
-        });
-        listHost.appendChild(row);
-      }
+      renderList(sites);
+    }).catch(() => {
+      renderList([]);
     });
   });
 }
