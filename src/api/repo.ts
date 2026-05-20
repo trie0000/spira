@@ -141,7 +141,8 @@ export interface Repository {
    *  通常版と違って自己治癒 (重複コメント DELETE) を行わない。 */
   listCommentsForLookup?(ticketId: number): Promise<import('../types').Comment[]>;
   markInboxProcessed(id: number, patch: { ticketId: number; result: InboxState }): Promise<void>;
-  hideInboxItems(ids: number[]): Promise<void>;
+  /** 「管理外」マーク。reason を渡すと ExclusionReason 列に記録。 */
+  hideInboxItems(ids: number[], reason?: string): Promise<void>;
   unhideInboxItems(ids: number[]): Promise<void>;
   /** InboxMails リストから物理削除。auto-link 後やノイズメールの掃除で使う。 */
   deleteInboxMail(id: number): Promise<void>;

@@ -84,6 +84,21 @@ export async function hasSpiraLists(siteUrl: string): Promise<boolean> {
   }
 }
 
+/** SP サイトの表示名 (web.Title) を REST で取得。失敗時は null。 */
+export async function fetchSiteTitle(siteUrl: string): Promise<string | null> {
+  try {
+    const res = await fetch(
+      `${siteUrl}/_api/web?$select=Title`,
+      { credentials: 'include', headers: { Accept: 'application/json;odata=nometadata' } },
+    );
+    if (!res.ok) return null;
+    const json = await res.json() as { Title?: string };
+    return json.Title?.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
 /** location から現在の SP サイト URL を推定 (フォールバック用)。 */
 export function detectCurrentSiteUrl(): string {
   const ctx = (window as unknown as { _spPageContextInfo?: { webAbsoluteUrl?: string } })._spPageContextInfo;

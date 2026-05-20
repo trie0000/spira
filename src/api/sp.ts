@@ -342,6 +342,7 @@ function asInbox(it: SpListItem): InboxMail {
     processedAt: it.ProcessedAt ? String(it.ProcessedAt) : undefined,
     processResult: it.ProcessResult ? (String(it.ProcessResult) as InboxState) : undefined,
     isHidden: Boolean(it.IsHidden),
+    exclusionReason: it.ExclusionReason ? String(it.ExclusionReason) : undefined,
     internetMessageId: it.InternetMessageId ? String(it.InternetMessageId) : undefined,
   };
 }
@@ -1146,23 +1147,26 @@ export class SpRepository implements Repository {
     return all.map(asInbox);
   }
 
-  async hideInboxItems(ids: number[]): Promise<void> {
+  async hideInboxItems(ids: number[], reason?: string): Promise<void> {
+    const reasonTrim = (reason ?? '').trim();
     for (const id of ids) {
-      await this.tx.update(this.listPath(this.cfg.listInbox), id, { IsHidden: true });
+      const patch: Record<string, unknown> = { IsHidden: true };
+      if (reasonTrim) patch.ExclusionReason = reasonTrim;
+      await this.tx.update(this.listPath(this.cfg.listInbox), id, patch);
     }
     if (ids.length > 0) {
       void emitAudit({
         action: 'inbox.hide',
         ticketId: 0,
         targetType: 'inbox',
-        details: { ids, count: ids.length },
+        details: { ids, count: ids.length, reason: reasonTrim || undefined },
       });
     }
   }
 
   async unhideInboxItems(ids: number[]): Promise<void> {
     for (const id of ids) {
-      await this.tx.update(this.listPath(this.cfg.listInbox), id, { IsHidden: false });
+      await this.tx.update(this.listPath(this.cfg.listInbox), id, { IsHidden: false, ExclusionReason: null });
     }
   }
 
@@ -1726,6 +1730,9 @@ function inboxFieldSpecs(): FieldSpec[] {
     { name: 'ProcessedAt', type: 'DateTime' },
     { name: 'ProcessResult', type: 'Choice', choices: ['auto-linked', 'manual-linked', 'created'] },
     { name: 'IsHidden', type: 'Boolean' },
+    // 「管理外」マーク時の理由メモ (UI 上は IsHidden=true と同時に書き込み)。
+    // 後から「なぜチケット管理対象外にしたか」を追跡できる監査用。
+    { name: 'ExclusionReason', type: 'Note' },
     { name: 'InternetMessageId', type: 'Text' },
   ];
 }

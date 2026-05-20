@@ -249,12 +249,12 @@ function renderToolbar(allMails: InboxMail[]): HTMLElement {
 
   const showHiddenToggle = el('button', {
     class: `spira-btn spira-btn--sm ${inboxFilter.includeHidden ? 'spira-btn--secondary' : 'spira-btn--ghost'}`,
-    title: inboxFilter.includeHidden ? '非表示メールを一覧から外す' : '非表示メールも一時的に表示',
+    title: inboxFilter.includeHidden ? '管理外メールを一覧から外す' : '管理外メールも一時的に表示',
     onclick: () => {
       inboxFilter.includeHidden = !inboxFilter.includeHidden;
       setState({});
     },
-  }, [inboxFilter.includeHidden ? '✓ 非表示も表示' : '非表示も表示']);
+  }, [inboxFilter.includeHidden ? '✓ 管理外も表示' : '管理外も表示']);
 
   const toolbar = el('div', { class: 'spira-toolbar' }, [
     filterBtn,
@@ -418,7 +418,16 @@ function renderSubBar(visibleCount: number): HTMLElement {
       el('button', {
         class: 'spira-btn spira-btn--secondary spira-btn--sm',
         onclick: () => onBulkHide(),
-      }, [`${selCount} 件を非表示`]),
+      }, [`${selCount} 件を管理外`]),
+      el('button', {
+        class: 'spira-btn spira-btn--sm',
+        style: 'background:#dc2626;color:#fff;border:0',
+        title: '受信一覧から物理削除 (元に戻せません)',
+        onclick: () => onBulkDelete(),
+      }, [
+        el('span', { html: icon('trash'), style: 'display:inline-flex;width:14px;height:14px' }),
+        `${selCount} 件削除`,
+      ]),
     );
   }
 
@@ -432,24 +441,84 @@ function renderSubBar(visibleCount: number): HTMLElement {
   ]);
 }
 
+/** 「管理外」マークの理由入力モーダル。reason を引数に取って実処理する。 */
+function openExclusionReasonModal(args: {
+  title: string;
+  countLabel: string;
+  onSubmit: (reason: string) => Promise<void>;
+}): void {
+  const ta = el('textarea', {
+    class: 'spira-input',
+    rows: '4',
+    placeholder: '例: スパムメール / テスト送信 / 別チケットで対応中 など',
+    style: 'width:100%;font:13px/1.6 ui-monospace,Menlo,monospace;resize:vertical',
+  }) as HTMLTextAreaElement;
+  const body = el('div', { style: 'min-width:480px;display:flex;flex-direction:column;gap:var(--s-3)' }, [
+    el('p', { style: 'margin:0;font-size:var(--fs-sm);line-height:1.7;color:var(--ink)' }, [
+      `${args.countLabel} を ` ,
+      el('strong', {}, ['チケット管理対象外']),
+      ' にします。',
+      el('br'),
+      el('span', { style: 'color:var(--ink-3);font-size:var(--fs-xs)' }, [
+        '(チケット起票や紐付けは行いません。受信一覧上では IsHidden=true となります。',
+        '「管理外も表示」トグルで後から確認可能です)',
+      ]),
+    ]),
+    el('label', { style: 'font-size:var(--fs-sm);color:var(--ink)' }, ['管理外にする理由 (任意)']),
+    ta,
+  ]);
+  openModal(getRoot(), {
+    title: args.title,
+    body,
+    primaryLabel: '管理外にする',
+    onPrimary: async () => {
+      await args.onSubmit(ta.value.trim());
+    },
+  });
+  setTimeout(() => ta.focus(), 30);
+}
+
 function onBulkHide(): void {
   const ids = Array.from(selectedInboxIds);
   if (ids.length === 0) return;
-  confirmModal(getRoot(), {
-    title: 'まとめて非表示',
-    message: `${ids.length} 件を一覧から非表示にします。\n（チケット起票や紐付けは行いません。受信メールリスト上では IsHidden = true になります）`,
-    primaryLabel: '非表示にする',
-    primaryVariant: 'primary',
-    onConfirm: async () => {
+  openExclusionReasonModal({
+    title: 'まとめて管理外',
+    countLabel: `${ids.length} 件`,
+    onSubmit: async (reason) => {
       try {
-        await getRepo().hideInboxItems(ids);
-        toast(getRoot(), `${ids.length} 件を非表示にしました`, 'ok');
+        await getRepo().hideInboxItems(ids, reason || undefined);
+        toast(getRoot(), `${ids.length} 件を管理外にしました`, 'ok');
         selectedInboxIds.clear();
         const fresh = await getRepo().listInbox({ unprocessedOnly: true });
         setState({ inboxCount: inboxRowsWithTag(fresh).length });
       } catch (e) {
         toast(getRoot(), `失敗: ${(e as Error).message}`, 'error');
       }
+    },
+  });
+}
+
+function onBulkDelete(): void {
+  const ids = Array.from(selectedInboxIds);
+  if (ids.length === 0) return;
+  confirmModal(getRoot(), {
+    title: '受信一覧から削除',
+    message: `${ids.length} 件を受信一覧リストから ★物理削除★ します。\n元に戻せません。\n` +
+             '(「管理外」と違って SP の InboxMails リストから完全に消えます)',
+    primaryLabel: '削除する',
+    primaryVariant: 'danger',
+    onConfirm: async () => {
+      const repo = getRepo();
+      let ok = 0; const errs: string[] = [];
+      for (const id of ids) {
+        try { await repo.deleteInboxMail(id); ok++; }
+        catch (e) { errs.push(`#${id}: ${(e as Error).message}`); }
+      }
+      if (ok > 0) toast(getRoot(), `${ok} 件を削除しました`, 'ok');
+      if (errs.length > 0) toast(getRoot(), `${errs.length} 件削除失敗`, 'warn');
+      selectedInboxIds.clear();
+      const fresh = await getRepo().listInbox({ unprocessedOnly: true });
+      setState({ inboxCount: inboxRowsWithTag(fresh).length });
     },
   });
 }
@@ -585,7 +654,8 @@ function renderHeaderRow(m: InboxMail): HTMLElement {
     isHidden ? el('span', {
       class: 'spira-badge spira-badge--muted',
       style: 'margin-right:var(--s-2);font-size:var(--fs-xs)',
-    }, ['非表示']) : '',
+      title: m.exclusionReason ? `管理外の理由: ${m.exclusionReason}` : 'チケット管理対象外',
+    }, ['管理外']) : '',
     ...(sourceBadge ? [sourceBadge] : []),
     m.subject,
   ]);
@@ -601,38 +671,68 @@ function renderHeaderRow(m: InboxMail): HTMLElement {
     }, ['⌬ 紐付け']),
   ];
   if (isHidden) {
+    const reasonTip = m.exclusionReason ? `\n理由: ${m.exclusionReason}` : '';
     actionBtns.push(el('button', {
       class: 'spira-btn spira-btn--ghost spira-btn--sm',
-      title: '一覧に再表示',
+      title: '管理対象に戻す' + reasonTip,
       onclick: async (e: Event) => {
         e.stopPropagation();
         try {
           await getRepo().unhideInboxItems([m.id]);
-          toast(getRoot(), '再表示しました', 'ok');
+          toast(getRoot(), '管理対象に戻しました', 'ok');
           const fresh = await getRepo().listInbox({ unprocessedOnly: true });
           setState({ inboxCount: inboxRowsWithTag(fresh).length });
         } catch (err) {
           toast(getRoot(), `失敗: ${(err as Error).message}`, 'error');
         }
       },
-    }, ['再表示']));
+    }, ['再対象化']));
   } else {
     actionBtns.push(el('button', {
       class: 'spira-btn spira-btn--ghost spira-btn--sm',
-      title: '一覧から非表示',
-      onclick: async (e: Event) => {
+      title: 'チケット管理対象外にする (理由を記録)',
+      onclick: (e: Event) => {
         e.stopPropagation();
-        try {
-          await getRepo().hideInboxItems([m.id]);
-          toast(getRoot(), '非表示にしました', 'ok');
-          const fresh = await getRepo().listInbox({ unprocessedOnly: true });
-          setState({ inboxCount: inboxRowsWithTag(fresh).length });
-        } catch (err) {
-          toast(getRoot(), `失敗: ${(err as Error).message}`, 'error');
-        }
+        openExclusionReasonModal({
+          title: 'チケット管理対象外',
+          countLabel: 'この受信エントリ',
+          onSubmit: async (reason) => {
+            await getRepo().hideInboxItems([m.id], reason || undefined);
+            toast(getRoot(), '管理外にしました', 'ok');
+            const fresh = await getRepo().listInbox({ unprocessedOnly: true });
+            setState({ inboxCount: inboxRowsWithTag(fresh).length });
+          },
+        });
       },
-    }, ['非表示']));
+    }, ['管理外']));
   }
+  // 物理削除 (ゴミ箱アイコン)。「管理外」と違って受信一覧リストから完全に消える。
+  actionBtns.push(el('button', {
+    class: 'spira-btn spira-btn--sm spira-btn--icon-trash',
+    style: 'flex-shrink:0',
+    title: '受信一覧から削除 (元に戻せません)',
+    'aria-label': '削除',
+    onclick: (e: Event) => {
+      e.stopPropagation();
+      confirmModal(getRoot(), {
+        title: '受信一覧から削除',
+        message: 'この受信エントリを ★物理削除★ します。\n元に戻せません。\n' +
+                 '(「管理外」と違って SP の InboxMails リストから完全に消えます)',
+        primaryLabel: '削除',
+        primaryVariant: 'danger',
+        onConfirm: async () => {
+          try {
+            await getRepo().deleteInboxMail(m.id);
+            toast(getRoot(), '削除しました', 'ok');
+            const fresh = await getRepo().listInbox({ unprocessedOnly: true });
+            setState({ inboxCount: inboxRowsWithTag(fresh).length });
+          } catch (err) {
+            toast(getRoot(), `削除失敗: ${(err as Error).message}`, 'error');
+          }
+        },
+      });
+    },
+  }, [el('span', { html: icon('trash'), style: 'display:inline-flex;width:14px;height:14px' })]));
 
   const tr = el('tr', {
     class: 'spira-tk-row' + (selectedInboxIds.has(m.id) ? ' selected' : '') + (isHidden ? ' spira-row-hidden' : ''),
@@ -671,6 +771,7 @@ function renderExpandedRow(m: InboxMail): HTMLElement {
     meta('件名', m.subject),
     meta('ConversationId', m.conversationId ?? '(なし)'),
     meta('添付', m.hasAttachments ? 'あり (OWA で確認)' : 'なし'),
+    ...(m.isHidden ? [meta('管理外の理由', m.exclusionReason ?? '(理由未記入)')] : []),
     el('div', { style: 'margin-top:var(--s-3)' }, [previewBody]),
   ]);
   return el('tr', { class: 'spira-inbox-expanded' }, [cell]);

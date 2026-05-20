@@ -145,18 +145,27 @@ export async function mount(): Promise<void> {
       if (msgs.length > 0) toast(root, `初期セットアップ完了 — ${msgs.join(' / ')}`, 'ok', 8000);
     }
 
-    // load counts & users & current user
-    const [inbox, trash, users, currentUser] = await Promise.all([
+    // load counts & users & current user + site title (ワークスペース表記用)
+    const [inbox, trash, users, currentUser, siteTitle] = await Promise.all([
       repo.listInbox({ unprocessedOnly: true }),
       repo.listDeletedTickets(),
       repo.listSiteUsers(),
       repo.getCurrentUser(),
+      (async () => {
+        if (overrideSiteUrl) {
+          const { fetchSiteTitle } = await import('./utils/spSites');
+          return fetchSiteTitle(overrideSiteUrl);
+        }
+        return null;
+      })(),
     ]);
     setState({
       inboxCount: inboxRowsWithTag(inbox).length,
       trashCount: trash.length,
       users,
       currentUser,
+      siteTitle,
+      siteUrl: overrideSiteUrl ?? null,
       ready: true,
     });
 

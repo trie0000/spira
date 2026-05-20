@@ -20,6 +20,10 @@ interface State {
   users: SiteUser[];
   /** 現在ログインしているユーザー (bootstrap で取得)。 */
   currentUser: SiteUser | null;
+  /** 現在接続中の SP サイトの表示名 (workspace 表記)。bootstrap 時に取得。 */
+  siteTitle: string | null;
+  /** 現在の SP サイト URL (workspace 表記のリンク用)。 */
+  siteUrl: string | null;
   // bootstrap status
   ready: boolean;
   errorBanner: string | null;
@@ -40,6 +44,8 @@ const state: State = {
   trashCount: 0,
   users: [],
   currentUser: null,
+  siteTitle: null,
+  siteUrl: null,
   ready: false,
   errorBanner: null,
   updateBanner: null,

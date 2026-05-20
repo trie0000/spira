@@ -114,6 +114,9 @@ export interface InboxMail {
   processedAt?: string;
   processResult?: InboxState;
   isHidden?: boolean;
+  /** 「管理外」マーク時に記録した理由メモ (isHidden=true と同時に書き込み)。
+   *  チケット管理対象外にした経緯を後追いできるようにするための監査情報。 */
+  exclusionReason?: string;
   internetMessageId?: string;
 }
 

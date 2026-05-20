@@ -472,22 +472,29 @@ export class MockRepository implements Repository {
     if (opts.unprocessedOnly) all = all.filter(m => !m.isProcessed);
     return [...all].sort((a, b) => b.receivedAt.localeCompare(a.receivedAt));
   }
-  async hideInboxItems(ids: number[]): Promise<void> {
+  async hideInboxItems(ids: number[], reason?: string): Promise<void> {
+    const reasonTrim = (reason ?? '').trim();
     for (const m of store.inbox) {
-      if (ids.includes(m.id)) m.isHidden = true;
+      if (ids.includes(m.id)) {
+        m.isHidden = true;
+        if (reasonTrim) m.exclusionReason = reasonTrim;
+      }
     }
     if (ids.length > 0) {
       void emitAudit({
         action: 'inbox.hide',
         ticketId: 0,
         targetType: 'inbox',
-        details: { ids, count: ids.length },
+        details: { ids, count: ids.length, reason: reasonTrim || undefined },
       });
     }
   }
   async unhideInboxItems(ids: number[]): Promise<void> {
     for (const m of store.inbox) {
-      if (ids.includes(m.id)) m.isHidden = false;
+      if (ids.includes(m.id)) {
+        m.isHidden = false;
+        m.exclusionReason = undefined;
+      }
     }
   }
   async deleteInboxMail(id: number): Promise<void> {

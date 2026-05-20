@@ -315,8 +315,30 @@ function renderTopbar(root: HTMLElement): HTMLElement {
     }, [displayName || email || 'ログイン情報なし']),
   ]);
 
+  // ワークスペース表記 (現在接続中の SP サイトの Title)。クリックで SP サイトを
+  // 新規タブで開く。bootstrap で siteTitle が取れていない場合は非表示。
+  const s = getState();
+  const workspaceChip = s.siteTitle
+    ? el('a', {
+        class: 'spira-topbar-workspace',
+        href: s.siteUrl ?? '#',
+        target: '_blank',
+        rel: 'noopener noreferrer',
+        title: `ワークスペース: ${s.siteTitle}${s.siteUrl ? '\n' + s.siteUrl : ''}\nクリックで SP サイトを開く`,
+        style:
+          'display:inline-flex;align-items:center;gap:6px;padding:4px 10px;' +
+          'margin-left:var(--s-3);background:var(--paper-2);border:1px solid var(--line);' +
+          'border-radius:var(--r-2);color:var(--ink-2);font-size:var(--fs-xs);' +
+          'text-decoration:none;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap',
+      }, [
+        el('span', { style: 'font-size:11px;color:var(--ink-3)' }, ['📁']),
+        el('span', { style: 'overflow:hidden;text-overflow:ellipsis' }, [s.siteTitle]),
+      ])
+    : null;
+
   return el('header', { class: 'spira-topbar', role: 'banner' }, [
     el('div', { class: 'spira-topbar-brand' }, ['Spira']),
+    ...(workspaceChip ? [workspaceChip] : []),
     el('div', { class: 'spira-topbar-spacer' }),
     el('div', { class: 'spira-topbar-actions' }, [
       userChip,
