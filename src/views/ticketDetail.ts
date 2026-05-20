@@ -789,14 +789,15 @@ function buildTicketActions(
   ]);
 
   // 「⋯」(3 点リーダ) メニュー — 利用頻度の低い操作 (Teams スレッド起票・
-  // エクスポート・プロパティ) を畳んで、ヘッダのボタン列をスッキリ見せる。
-  // 各メニュー項目は対応する元ボタンの click() を dispatch するだけなので、
-  // ボタン側に書かれている onclick (起票確認モーダル / setState 等) は全部
-  // そのまま動く。Teams ボタンはラベル / title が DeepLink の有無で変わる
-  // ので、メニューを開く瞬間に元ボタンの現在ラベルを読み取って表示する。
+  // エクスポート・プロパティ・Forms 回答一覧) を畳んで、ヘッダのボタン列を
+  // スッキリ見せる。各メニュー項目は対応する元ボタンの click() を dispatch
+  // するだけなので、ボタン側に書かれている onclick (起票確認モーダル /
+  // setState 等) は全部そのまま動く。Teams ボタンはラベル / title が
+  // DeepLink の有無で変わるので、メニューを開く瞬間に元ボタンの現在ラベルを
+  // 読み取って表示する。
   const kebabBtn = el('button', {
     class: 'spira-btn spira-btn--ghost spira-btn--sm',
-    title: 'その他のアクション (Teams スレッド起票 / エクスポート / プロパティ)',
+    title: 'その他のアクション (Teams スレッド起票 / エクスポート / プロパティ ほか)',
     'aria-label': 'その他のアクション',
     onclick: (e: Event) => {
       e.stopPropagation();
@@ -812,12 +813,24 @@ function buildTicketActions(
         }
         return (btn.textContent ?? '').trim();
       };
-      openKebabMenu(kebabBtn, [
+      const items: KebabMenuItem[] = [
         { iconName: 'chat',     label: labelOf(userThreadBtn),     title: userThreadBtn.getAttribute('title') ?? undefined,     onSelect: () => userThreadBtn.click() },
         { iconName: 'chat',     label: labelOf(internalThreadBtn), title: internalThreadBtn.getAttribute('title') ?? undefined, onSelect: () => internalThreadBtn.click() },
-        { iconName: 'external', label: 'エクスポート',              title: exportBtn.getAttribute('title') ?? undefined,         onSelect: () => exportBtn.click() },
-        { iconName: 'gear',     label: 'プロパティ',                title: propertiesBtn.getAttribute('title') ?? undefined,     onSelect: () => propertiesBtn.click() },
-      ]);
+      ];
+      // Forms 起票チケットなら回答一覧リンクをメニュー先頭付近に挿入
+      if (formsBtn) {
+        items.push({
+          iconName: 'external',
+          label: 'Forms 回答一覧',
+          title: formsBtn.getAttribute('title') ?? undefined,
+          onSelect: () => formsBtn.click(),
+        });
+      }
+      items.push(
+        { iconName: 'external', label: 'エクスポート', title: exportBtn.getAttribute('title') ?? undefined,     onSelect: () => exportBtn.click() },
+        { iconName: 'gear',     label: 'プロパティ',   title: propertiesBtn.getAttribute('title') ?? undefined, onSelect: () => propertiesBtn.click() },
+      );
+      openKebabMenu(kebabBtn, items);
     },
   }, [
     // 縦 3 点リーダ風の見た目 (•••)。CSS の letter-spacing で間隔を作って
@@ -825,15 +838,12 @@ function buildTicketActions(
     el('span', { style: 'font-size:18px;line-height:1;letter-spacing:2px;font-weight:700' }, ['⋯']),
   ]);
 
-  // ヘッダ表示: AI / 件名コピー / 返信メール作成 / [Forms (起票時のみ)] /
-  //            ⋯ (Teams 起票・エクスポート・プロパティ) / 削除
-  // userThreadBtn / internalThreadBtn / exportBtn / propertiesBtn は DOM に
-  // 直接配置しないが、変数として保持しておくことで kebab メニューから
-  // click() で動作させられる。
-  const buttons: HTMLElement[] = [aiBtn, copySubjectBtn, replyBtn];
-  if (formsBtn) buttons.push(formsBtn);
-  buttons.push(kebabBtn, deleteBtn);
-  return buttons;
+  // ヘッダ表示: AI / 件名コピー / 返信メール作成 / ⋯ / 削除
+  // (Teams 起票 / Forms 回答一覧 / エクスポート / プロパティ は ⋯ に集約)
+  // formsBtn / userThreadBtn / internalThreadBtn / exportBtn / propertiesBtn
+  // は DOM に直接配置せず、変数として保持して kebab メニューから click()
+  // で動作させる。
+  return [aiBtn, copySubjectBtn, replyBtn, kebabBtn, deleteBtn];
 }
 
 /** ⋯ (3 点リーダ) ボタンの下に開くドロップダウンメニュー。
@@ -1133,12 +1143,21 @@ function openReplyComposerModal(activeT: Ticket, target: ReplyComposerTarget): v
     statusLine,
   ]);
 
-  /** ボディの HTML 化 (改行 → <br>、HTML タグ含むなら原文尊重)。 */
+  /** ボディの HTML 化。
+   *  - HTML タグ (<p>, <br>, <strong> 等) を含む入力は原文尊重 (operator が
+   *    手書きで HTML を書いた場合)
+   *  - そうでない素のプレーンテキストは、各行を <p> で個別にラップする。
+   *    これにより Outlook 側で paragraph break (¶) として認識され、編集
+   *    記号モードでも矢印 ↓ (soft return / <br>) ではなく改行マークになる。
+   *  - 空行は <p>&nbsp;</p> にして Outlook が段落を維持できるよう
+   *    nbsp で底上げ (空 <p> だと Outlook が崩しがち)。 */
   const composeBodyHtml = (raw: string): string => {
     const hasHtml = /<\/?(?:p|br|strong|em|a|ul|ol|li|h\d|div|span)\b/i.test(raw);
     if (hasHtml) return raw;
     const esc = raw.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    return `<p>${esc.replace(/\n/g, '<br>')}</p>`;
+    // 改行コードは \r\n / \r も \n に正規化してから split
+    const lines = esc.replace(/\r\n?/g, '\n').split('\n');
+    return lines.map(line => line.length === 0 ? '<p>&nbsp;</p>' : `<p>${line}</p>`).join('');
   };
 
   openModal(getRoot(), {
