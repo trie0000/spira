@@ -1639,6 +1639,32 @@ function buildPaFlowsBodyImpl(root: HTMLElement): HTMLElement {
       el('li', {}, [el('strong', {}, ['③ Forms 取り込み']), ' — Microsoft Forms 応答を InboxMails に追加 (任意)']),
       el('li', {}, [el('strong', {}, ['④ Teams 返信同期']), ' — 管理チャネルの返信を InboxMails 経由でチケットに自動反映 (任意)']),
     ]),
+    el('div', {
+      style: 'background:var(--bg-soft);border-left:3px solid var(--accent);padding:var(--s-3) var(--s-4);margin:var(--s-3) 0;border-radius:4px;font-size:var(--fs-sm);line-height:1.7;color:var(--ink)',
+    }, [
+      el('strong', {}, ['★ 全パラメータを fx 式で記述']),
+      el('br', {}),
+      'このヘルプの設定値は ',
+      el('strong', {}, ['すべて fx (式) タブにそのまま貼り付け']),
+      ' できる式に統一しています。動的コンテンツ パネルは PA 新デザイナーやテナント差で表示が揺れるため、',
+      '「式タブにコードを貼って保存」だけで誰でも同じ構成を再現できることを優先しました。',
+      el('br', {}),
+      '・入力フォームをクリック → 右上の ',
+      code('式 (fx)'),
+      ' タブを開く → 表内のコードを丸ごとコピペ → 「OK」または「追加」',
+      el('br', {}),
+      '・SP の選択肢 (Choice) 列は ',
+      code("?['Value']"),
+      ' を後ろに付けて文字列として取り出す (例: ',
+      code("triggerOutputs()?['body/Status']?['Value']"),
+      ')',
+      el('br', {}),
+      '・テナントによって path の大小 (例: ',
+      code('body/Id'),
+      ' vs ',
+      code('body/id'),
+      ') が違う場合があるので、保存実行 → 出力 JSON を確認 → 差し替えで対応。',
+    ]),
     p('下の各セクションをクリックして手順を表示できます。'),
   ]);
 
@@ -1682,30 +1708,33 @@ function buildPaFlowsBodyImpl(root: HTMLElement): HTMLElement {
   ]);
 
   // Column mapping table — matches inboxFieldSpecs() in api/sp.ts
+  // ★ すべての値は fx タブにそのまま貼り付け可能な式で記述している。
+  //   動的コンテンツ名は環境差で揺れるが、fx 式なら誰でも同じ設定を
+  //   再現できる (テナント差で path が違うときは hint 側の代替を試す)。
   const mappingTable = el('table', {
     style: 'width:100%;border-collapse:collapse;font-size:12px;margin-top:var(--s-2)',
   }, [
     el('thead', {}, [
       el('tr', {}, [
         el('th', { style: 'text-align:left;padding:6px 10px;border-bottom:2px solid var(--line);font-size:11px;color:var(--ink-3);text-transform:uppercase' }, ['列名 (SP)']),
-        el('th', { style: 'text-align:left;padding:6px 10px;border-bottom:2px solid var(--line);font-size:11px;color:var(--ink-3);text-transform:uppercase' }, ['動的コンテンツ / 値']),
+        el('th', { style: 'text-align:left;padding:6px 10px;border-bottom:2px solid var(--line);font-size:11px;color:var(--ink-3);text-transform:uppercase' }, ['fx 式 (値の入力欄 → 式タブに貼り付け)']),
       ]),
     ]),
     el('tbody', {}, [
-      row('Title', 'Subject から (式: trigger().subject)', '実質ダミー。SP の必須列なので埋めるだけ。'),
-      row('Subject', 'Subject', 'メール件名そのまま。'),
-      row('BodyHtml', 'Body', 'HTML 形式の本文。Spira がサニタイズして表示。'),
-      row('BodyText', 'Body Preview', 'プレーン テキスト本文 (短縮版で OK)。'),
-      row('FromEmail', 'From', '差出人アドレス。内部/外部判定にも使われます。'),
-      row('FromName', 'From - Name', '差出人表示名。'),
-      row('HasAttachments', 'Has Attachment', 'true/false。'),
-      row('ConversationId', 'Conversation Id', 'スレッド ID。受信パネルで会話単位の紐付けに使用。'),
-      row('ReceivedAt', 'Received Time', 'このメールボックスにメールが到着した時刻。表示・ソート用。'),
-      row('SentAt', '※ 任意 — 後段の「メールの取得 (V2)」アクションを経由', '送信者が「送信」した時刻。重複起票判定の主キー (送信者+送信時刻一致)。`When a new email arrives (V3)` トリガの body には sentDateTime が含まれない実装が多いため、確実に取るならトリガ直後に「メールの取得 (V2)」を挟む手順を推奨 (表下のサンプル参照)。空のまま運用しても動作はする (Spira は SentAt が空なら ReceivedAt にフォールバックして比較する)。'),
-      row('OwaLink', "(式) concat('https://outlook.office.com/mail/inbox/id/', encodeUriComponent(triggerOutputs()?['body/Id']))", 'メッセージ ID から OWA URL を構築。動的コンテンツ「Web Link」は V3 トリガでは出ないので必ず「式」タブで入力。'),
-      row('IsProcessed', 'false (固定)', 'Spira 側で取り込み完了時に true に更新。'),
-      row('IsHidden', 'false (固定)', '非表示フラグ。'),
-      row('InternetMessageId', 'Internet Message Id', 'メールの一意 ID。重複防止に使用。'),
+      row('Title', "triggerOutputs()?['body/Subject']", '実質ダミー (SP の必須列)。Subject と同じ値で OK。'),
+      row('Subject', "triggerOutputs()?['body/Subject']", 'メール件名そのまま。'),
+      row('BodyHtml', "triggerOutputs()?['body/Body']", 'HTML 形式の本文。Spira がサニタイズして表示。'),
+      row('BodyText', "triggerOutputs()?['body/BodyPreview']", 'プレーン テキスト本文 (短縮版で OK)。'),
+      row('FromEmail', "triggerOutputs()?['body/From']", '差出人アドレス。内部/外部判定にも使う。'),
+      row('FromName', "coalesce(triggerOutputs()?['body/From'], '')", '★ V3 トリガでは「From - Name」を fx で安定して取る path が無い。とりあえずアドレスを入れておけば、Spira 側が AD 表示名にフォールバックして補完する。表示名が必要なら「メールの取得 (V2)」を挟んで body(\'メールの取得\')?[\'From\']?[\'EmailAddress\']?[\'Name\'] 等を試す。'),
+      row('HasAttachments', "triggerOutputs()?['body/HasAttachment']", 'true/false。'),
+      row('ConversationId', "triggerOutputs()?['body/ConversationId']", 'スレッド ID。受信パネルで会話単位の紐付けに使用。'),
+      row('ReceivedAt', "triggerOutputs()?['body/DateTimeReceived']", 'このメールボックスにメールが到着した時刻。表示・ソート用。テナントによっては body/ReceivedDateTime / body/receivedDateTime も。'),
+      row('SentAt', "body('メールの取得')?['DateTimeSent']", '★ STEP 2 「メールの取得 (V2)」の出力から取る前提。SentAt は Spira の重複起票判定 (送信者+送信時刻一致) の主キー。空でも動くが、別人の同タイミングメールで誤判定の可能性。アクション名を変えた場合は body(\'<アクション名>\')?[\'DateTimeSent\'] に合わせる。トリガ直挿しなら triggerOutputs()?[\'body/sentDateTime\'] / triggerOutputs()?[\'body/DateTimeSent\'] を順に試す。'),
+      row('OwaLink', "concat('https://outlook.office.com/mail/inbox/id/', encodeUriComponent(triggerOutputs()?['body/Id']))", 'メッセージ ID から OWA URL を構築。V3 トリガでは「Web Link」動的コンテンツが出ないので fx 必須。'),
+      row('IsProcessed', 'false', 'Spira 側で取り込み完了時に true に更新。値タブに直接入力でも fx に false を貼り付けでも可。'),
+      row('IsHidden', 'false', '非表示フラグ。同上。'),
+      row('InternetMessageId', "triggerOutputs()?['body/InternetMessageId']", 'メールの一意 ID。重複防止に使用 (必須)。'),
     ]),
   ]);
 
@@ -1717,7 +1746,7 @@ function buildPaFlowsBodyImpl(root: HTMLElement): HTMLElement {
       action: 'メールの取得 (V2) — Get email (V2)',
       note: 'V3 トリガの body には sentDateTime が含まれないことが多いので、トリガー直後にこのアクションを挟むと安定して取得できます。SentAt は Spira の重複起票判定 (送信者 + 送信時刻一致) に使う主キーなので入れることを推奨。空でも動作はしますが、別人の同タイミングメールで誤判定の可能性あり。',
       params: [
-        { field: 'Message Id', value: "triggerOutputs()?['body/Id']", type: 'dynamic', hint: 'トリガーの動的コンテンツ「Message Id」をそのまま選択。' },
+        { field: 'Message Id', value: "triggerOutputs()?['body/Id']", type: 'expression', hint: 'fx タブに貼り付け (動的コンテンツ「Message Id」と同義)。' },
       ],
     }),
     stepCard({
@@ -1896,7 +1925,7 @@ function buildPaFlowsBodyImpl(root: HTMLElement): HTMLElement {
       action: 'コントロール / 条件 (Condition)',
       note: '同じ行への再実行・誤投稿を防ぐため、Status が Pending のときだけ続行。以降のステップは全て「はいの場合」分岐内に配置。\n\n⚠ Status は SP の Choice (選択肢) 列です。動的コンテンツから取り出すときに 必ず「Status Value」を選んでください (= 文字列を返す)。「Status」を選ぶと {Value: "Pending"} のオブジェクトが返り、比較に失敗します。',
       params: [
-        { field: '左辺 (Choose a value)', value: 'Status Value', type: 'dynamic', hint: '動的コンテンツパネルから「Status Value」を選択。「Status」ではない。新デザイナーで表示されない場合は式タブで triggerBody()?[\'Status\']?[\'Value\'] (新) または triggerOutputs()?[\'body/Status\']?[\'Value\'] (旧) を入力。' },
+        { field: '左辺 (Choose a value)', value: "triggerOutputs()?['body/Status']?['Value']", type: 'expression', hint: 'fx タブに貼り付け。SP の Choice 列は {Value: "Pending"} のオブジェクトを返すので必ず ?[\'Value\'] で文字列を取り出す。新デザイナーで body/Status が解決できないテナントは triggerBody()?[\'Status\']?[\'Value\'] を試す。' },
         { field: '比較演算子', value: 'is equal to', type: 'choose' },
         { field: '右辺 (Choose a value)', value: 'Pending', type: 'static' },
       ],
@@ -1911,7 +1940,7 @@ function buildPaFlowsBodyImpl(root: HTMLElement): HTMLElement {
       params: [
         { field: 'Site Address', value: 'https://<tenant>.sharepoint.com/sites/<site>', type: 'choose' },
         { field: 'List Name', value: 'Tickets', type: 'choose' },
-        { field: 'Id', value: "triggerOutputs()?['body/TicketId']", type: 'dynamic' },
+        { field: 'Id', value: "triggerOutputs()?['body/TicketId']", type: 'expression', hint: 'fx タブに貼り付け。' },
       ],
     }),
 
@@ -1945,7 +1974,7 @@ function buildPaFlowsBodyImpl(root: HTMLElement): HTMLElement {
       action: 'コントロール / Switch',
       note: 'ThreadType が internal / user で書き戻す列名が変わるため、Switch で分岐させると見通しが良い。各分岐の中に次のステップ (項目の更新) を配置。\n\n⚠ ThreadType も Choice (選択肢) 列です。スイッチ対象は必ず「ThreadType Value」 (文字列) を使うこと。',
       params: [
-        { field: 'スイッチ対象 (On)', value: 'ThreadType Value', type: 'dynamic', hint: '動的コンテンツから「ThreadType Value」。新デザイナーで表示されない場合は式タブで triggerBody()?[\'ThreadType\']?[\'Value\']。' },
+        { field: 'スイッチ対象 (On)', value: "triggerOutputs()?['body/ThreadType']?['Value']", type: 'expression', hint: 'fx タブに貼り付け。SP の Choice 列なので必ず ?[\'Value\'] で文字列を取り出す。' },
         { field: 'Case 1 — 等しい', value: 'internal', type: 'static', hint: 'この中で Tickets を InternalThreadId / InternalChannelId / InternalDeepLink で更新。' },
         { field: 'Case 2 — 等しい', value: 'user', type: 'static', hint: 'この中で Tickets を UserThreadId / UserChannelId / UserDeepLink で更新。' },
       ],
@@ -1960,13 +1989,13 @@ function buildPaFlowsBodyImpl(root: HTMLElement): HTMLElement {
       params: [
         { field: 'Site Address', value: 'https://<tenant>.sharepoint.com/sites/<site>', type: 'choose' },
         { field: 'List Name', value: 'Tickets', type: 'choose' },
-        { field: 'Id', value: "triggerOutputs()?['body/TicketId']", type: 'dynamic' },
+        { field: 'Id', value: "triggerOutputs()?['body/TicketId']", type: 'expression' },
         { field: 'Title', value: "body('項目の取得')?['Title']", type: 'expression', hint: 'Title は SP 必須列なので既存値を渡し直す。' },
         { field: 'InternalThreadId (internal 分岐のみ)', value: "outputs('チャネル内でメッセージを投稿する')?['body/messageId']", type: 'expression' },
-        { field: 'InternalChannelId (internal 分岐のみ)', value: "triggerOutputs()?['body/ChannelId']", type: 'dynamic' },
+        { field: 'InternalChannelId (internal 分岐のみ)', value: "triggerOutputs()?['body/ChannelId']", type: 'expression' },
         { field: 'InternalDeepLink (internal 分岐のみ)', value: "outputs('チャネル内でメッセージを投稿する')?['body/linkToMessage']", type: 'expression' },
         { field: 'UserThreadId (user 分岐のみ)', value: "outputs('チャネル内でメッセージを投稿する')?['body/messageId']", type: 'expression' },
-        { field: 'UserChannelId (user 分岐のみ)', value: "triggerOutputs()?['body/ChannelId']", type: 'dynamic' },
+        { field: 'UserChannelId (user 分岐のみ)', value: "triggerOutputs()?['body/ChannelId']", type: 'expression' },
         { field: 'UserDeepLink (user 分岐のみ)', value: "outputs('チャネル内でメッセージを投稿する')?['body/linkToMessage']", type: 'expression' },
       ],
     }),
@@ -1980,7 +2009,7 @@ function buildPaFlowsBodyImpl(root: HTMLElement): HTMLElement {
       params: [
         { field: 'Site Address', value: 'https://<tenant>.sharepoint.com/sites/<site>', type: 'choose' },
         { field: 'List Name', value: 'TeamsPostRequests', type: 'choose' },
-        { field: 'Id', value: "triggerOutputs()?['body/ID']", type: 'dynamic', hint: '※ ID は大文字 (Title と同じ自動採番列)。' },
+        { field: 'Id', value: "triggerOutputs()?['body/ID']", type: 'expression', hint: '※ ID は大文字 (Title と同じ自動採番列)。fx タブに貼り付け。' },
       ],
     }),
 
@@ -1991,7 +2020,7 @@ function buildPaFlowsBodyImpl(root: HTMLElement): HTMLElement {
       note: 'ステップ 4 (Teams 投稿) が失敗したときに、TeamsPostRequests 行を更新するパスを別途用意。「Configure run after」で「has failed」「has timed out」を ON にして繋ぐ。',
       params: [
         { field: '対象アクション', value: '項目の更新 (TeamsPostRequests)', type: 'choose' },
-        { field: 'Id', value: "triggerOutputs()?['body/ID']", type: 'dynamic' },
+        { field: 'Id', value: "triggerOutputs()?['body/ID']", type: 'expression' },
         { field: 'Status', value: 'Failed', type: 'static' },
         { field: 'ErrorMessage', value: "outputs('チャネル内でメッセージを投稿する')?['body']", type: 'expression', hint: 'Teams API のエラー本文。手動確認後に行を削除 or 再 Pending に戻す運用が安全。' },
       ],
@@ -2060,17 +2089,17 @@ function buildPaFlowsBodyImpl(root: HTMLElement): HTMLElement {
       ]),
     ]),
     el('tbody', {}, [
-      row('Title', "concat('[Forms] ', <件名相当の質問への回答>)", 'SP 必須列。一覧での識別用なので件名と同じで OK。'),
-      row('Subject', "concat('[Forms] ', <件名相当の質問への回答>)", 'Spira の受信メール一覧に表示される件名。'),
-      row('BodyHtml', "Q&A を HTML 整形した文字列", '質問ラベル + 回答を <p><strong>カテゴリ:</strong> ...</p> 形式で並べる。Spira の起票モーダルが「カテゴリ:」「影響度:」ラベルを自動抽出。'),
-      row('BodyText', "Q&A を改行区切りのテキストにした文字列", 'フォールバック用。HTML が無いケースでも同じ抽出が動くようにしておくと安心。'),
-      row('FromEmail', "回答者のメールアドレス", 'Forms「応答者の Email」動的コンテンツを使用。匿名 Form の場合は空欄でも OK。'),
-      row('FromName', "回答者の表示名", 'AD ユーザ情報から取得 (Office 365 ユーザー「ユーザー プロファイル取得」アクションで補完)。'),
+      row('Title', "concat('[Forms] ', outputs('応答の詳細を取得')?['body/<件名相当の質問の internal name>'])", 'SP 必須列。Subject と同じで OK。<件名相当の質問> 部分はテスト実行 → Outputs JSON で実際の internal name に置換。'),
+      row('Subject', "concat('[Forms] ', outputs('応答の詳細を取得')?['body/<件名相当の質問の internal name>'])", 'Spira の受信メール一覧に表示される件名。'),
+      row('BodyHtml', "outputs('BodyHtml を組み立てる')", '★ STEP 4 で組み立てた Compose の出力を fx で直参照。Compose のアクション名と一致させる。'),
+      row('BodyText', "outputs('BodyHtml を組み立てる')", 'フォールバック用。Compose の HTML をそのまま入れても、Spira は HTML/text 両対応。別途プレーン用 Compose を作って参照しても可。'),
+      row('FromEmail', "outputs('応答の詳細を取得')?['body/responder']", '回答者のメール (UPN)。匿名 Form なら空文字 \'\' を fx に貼る。'),
+      row('FromName', "body('ユーザー_プロファイル__V2__の取得')?['displayName']", 'STEP 3 のユーザー プロファイル (V2) 出力から表示名。アクション名は実物に合わせる (日本語ローカライズでは「ユーザー プロファイル (V2) の取得」だが内部識別子は空白がアンスコ化される)。匿名 Form なら空文字 \'\'。'),
       row('ReceivedAt', 'utcNow()', '受信時刻として PA 実行時を入れる。'),
-      row('SentAt', "triggerOutputs()?['body/submitDate']", '応答送信時刻。Forms 動的コンテンツ「Submit Date」から取得。'),
-      row('ConversationId', "concat('forms-', <formId>, '-', <responseId>)", '★ 必須。Spira はこの forms- プレフィクスで Forms 経由メールを判別し、起票モーダルにフォーム回答を自動展開します。'),
-      row('InternetMessageId', "concat('forms-', <responseId>, '@<tenant>')", '重複防止用の擬似 Message-Id。formId/responseId のセットでユニーク。'),
-      row('HasAttachments', 'false', 'Forms 応答に添付がある場合は別途処理が必要 (基本 false)。'),
+      row('SentAt', "triggerOutputs()?['body/submitDate']", '応答送信時刻。出ない場合は triggerOutputs()?[\'body/resourceData/submitDate\'] や outputs(\'応答の詳細を取得\')?[\'body/submitDate\'] を試す。'),
+      row('ConversationId', "concat('forms-', triggerOutputs()?['body/formsId'], '-', triggerOutputs()?['body/resourceData/responseId'])", '★ 必須。Spira はこの forms- プレフィクスで Forms 経由を判別し、起票モーダルにフォーム回答を自動展開。'),
+      row('InternetMessageId', "concat('forms-', triggerOutputs()?['body/resourceData/responseId'], '@', 'forms.office.com')", '重複防止用の擬似 Message-Id。responseId 単体でユニークなのでテナント値は固定文字列で OK。'),
+      row('HasAttachments', 'false', 'Forms 応答に添付がある場合は別途処理 (基本 false)。'),
       row('IsProcessed', 'false', '初期値。Spira が起票時に true に更新。'),
       row('IsHidden', 'false', '通常は false。'),
     ]),
@@ -2107,7 +2136,7 @@ function buildPaFlowsBodyImpl(root: HTMLElement): HTMLElement {
       note: 'これを通すことで、各質問の回答が動的コンテンツとして個別に参照できるようになる。',
       params: [
         { field: 'Form Id', value: '(同じフォームを選択)', type: 'choose' },
-        { field: 'Response Id', value: "triggerOutputs()?['body/resourceData/responseId']", type: 'dynamic', hint: 'トリガーの動的コンテンツ「Response Id」を選択。テナントによっては body/responseId の場合もある。' },
+        { field: 'Response Id', value: "triggerOutputs()?['body/resourceData/responseId']", type: 'expression', hint: 'fx タブに貼り付け。テナントによっては body/responseId に変えて試す。' },
       ],
     }),
 
@@ -2287,7 +2316,7 @@ function buildPaFlowsBodyImpl(root: HTMLElement): HTMLElement {
       action: '条件 (Condition)',
       note: '行 (Row) を 2 つ作り「すべての条件 (And)」で連結。新デザイナーは条件内で式直書きすると評価不能になるので、参照は動的コンテンツ + 単純比較で組む。',
       params: [
-        { field: '行 1 / 値 1', value: 'ReplyLen の Outputs (動的コンテンツから選択)', type: 'dynamic', hint: 'STEP 3 でリネームしたアクション名がそのまま候補に出る。Outputs をクリック。' },
+        { field: '行 1 / 値 1', value: "outputs('ReplyLen')", type: 'expression', hint: 'fx タブに貼り付け。STEP 3 のアクション名 (リネーム後の ReplyLen) と一致させる。' },
         { field: '行 1 / 演算子', value: '次の値より大きい (is greater than)', type: 'choose' },
         { field: '行 1 / 値 2', value: '0', type: 'static', hint: '直接入力。返信なら length > 0、親なら length = 0 で除外される。' },
         { field: '行 2 / 値 1 (fx タブ)', value: "body('GetMessage')?['from']?['user']?['userIdentityType']", type: 'expression', hint: '動的コンテンツに「User identity type」が出ていればそれをクリックでも可。' },
