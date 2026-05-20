@@ -130,12 +130,12 @@ if (-not $SkipCertCheck -and $env:SPIRA_AI_SKIP_CERT_CHECK -eq '1') {
 # ─── Pre-flight checks ──────────────────────────────────────────────────────
 
 if (-not $Target) {
+    # AI gateway を使わない運用 (Outlook 返信中継だけ使う等) を許可。
+    # /spira/* のローカル機能だけで起動する。
+    Write-Host '注意: AI gateway URL (-Target) が未指定です。' -ForegroundColor Yellow
+    Write-Host '  AI 中継 (Azure OpenAI 互換 forwarding) は無効化されます。'
+    Write-Host '  /spira/outlook/reply / /spira/health のローカル機能は通常通り動作します。'
     Write-Host ''
-    Write-Host 'エラー: ゲートウェイ URL が未指定です。' -ForegroundColor Red
-    Write-Host '  -Target https://gateway.example.com/myapi'
-    Write-Host '  または環境変数 SPIRA_AI_TARGET で指定してください。'
-    Write-Host ''
-    exit 1
 }
 
 if (-not $NoProxy -and -not $Proxy) {
@@ -168,11 +168,17 @@ $client = New-Object System.Net.Http.HttpClient($handler)
 $client.Timeout = [TimeSpan]::FromMinutes(10)  # AI 応答は数分かかる場合あり
 
 # ─── Target URL parsing ─────────────────────────────────────────────────────
+# AI gateway を使わない運用 (Outlook 中継のみ) では $Target が空。
+# その場合は forwarding 不可なので targetPath を空のままにし、
+# Invoke-RelayRequest 側で 502 を返す。
 
-$Target = $Target.TrimEnd('/')
-$targetUri = [Uri]$Target
-$targetPath = $targetUri.AbsolutePath  # 例: "/myapi"
-if ($targetPath -eq '/') { $targetPath = '' }
+$targetPath = ''
+if ($Target) {
+    $Target = $Target.TrimEnd('/')
+    $targetUri = [Uri]$Target
+    $targetPath = $targetUri.AbsolutePath
+    if ($targetPath -eq '/') { $targetPath = '' }
+}
 
 # ─── HttpListener setup ─────────────────────────────────────────────────────
 
@@ -194,17 +200,23 @@ $baseUrlShort  = "http://localhost:$Port"
 $baseUrlMirror = if ($targetPath) { "$baseUrlShort$targetPath" } else { $baseUrlShort }
 
 Write-Host ('─' * 72)
-Write-Host '  Spira AI relay (PowerShell)'
+Write-Host '  Spira relay (PowerShell) — AI + Outlook'
 Write-Host ('─' * 72)
 Write-Host "  listen  : http://127.0.0.1:$Port"
-Write-Host "  target  : $Target"
+Write-Host ("  target  : " + $(if ($Target) { $Target } else { '(AI 中継 OFF)' }))
 Write-Host "  proxy   : $(if ($NoProxy -or -not $Proxy) { '(直接接続)' } else { $Proxy })"
 if ($SkipCertCheck) { Write-Host '  ⚠ SSL 検証スキップ中 (-SkipCertCheck)' -ForegroundColor Yellow }
 Write-Host ('─' * 72)
-Write-Host 'Spira の「AI 設定」モーダルでベース URL に下記いずれかを入力:'
-Write-Host "  A: $baseUrlShort"
-if ($baseUrlShort -ne $baseUrlMirror) {
-    Write-Host "  B: $baseUrlMirror    (実 URL のパスを保ったまま localhost に置換、視認性◎)"
+Write-Host 'ローカル機能エンドポイント (Spira UI が直接叩く):'
+Write-Host "  GET  $baseUrlShort/spira/health"
+Write-Host "  POST $baseUrlShort/spira/outlook/reply"
+if ($Target) {
+    Write-Host ''
+    Write-Host 'Spira の「AI 設定」モーダルでベース URL に下記いずれかを入力:'
+    Write-Host "  A: $baseUrlShort"
+    if ($baseUrlShort -ne $baseUrlMirror) {
+        Write-Host "  B: $baseUrlMirror    (実 URL のパスを保ったまま localhost に置換、視認性◎)"
+    }
 }
 Write-Host ('─' * 72)
 Write-Host 'Ctrl+C で終了' -ForegroundColor DarkGray
@@ -247,6 +259,159 @@ function Send-Error {
     finally { try { $Response.OutputStream.Close() } catch { } }
 }
 
+# ─── Local handlers: /spira/* (no upstream forwarding) ─────────────────────
+#
+# AI gateway への透過 forwarding とは別に、Spira UI が直接叩く
+# ローカル機能 (= Outlook クライアント操作 / 死活確認) もこの relay で
+# 受ける。/spira/* で始まるパスは forwarding せず、PowerShell 内で処理。
+#   - GET  /spira/health           : 死活確認 (Spira UI のフォールバック判定)
+#   - POST /spira/outlook/reply    : 指定 InternetMessageId に対する正規 Reply
+#                                    下書きを Outlook デスクトップで開く
+
+function Send-Json {
+    param(
+        [System.Net.HttpListenerResponse]$Response,
+        [int]$Status,
+        [object]$Body
+    )
+    $json  = ($Body | ConvertTo-Json -Compress -Depth 6)
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($json)
+    try {
+        $Response.StatusCode    = $Status
+        Add-CorsHeaders -Response $Response
+        $Response.ContentType   = 'application/json; charset=utf-8'
+        $Response.ContentLength64 = $bytes.Length
+        $Response.OutputStream.Write($bytes, 0, $bytes.Length)
+    } catch { }
+    finally { try { $Response.OutputStream.Close() } catch { } }
+}
+
+# 指定 InternetMessageId に一致するメールを Outlook ストア全体から探す。
+# 1) まず GetDefaultFolder(Inbox) を Items.Find で軽く探索 (高速、典型ケース)
+# 2) ヒットしなければ AdvancedSearch で Store ごとに SearchSubFolders=true。
+#    operator の個人ルールでサブフォルダに振り分けられたメールも見つかる。
+# 戻り値: 見つかった MailItem (COM) または $null
+function Find-OutlookMessageByInternetMessageId {
+    param(
+        $Outlook,
+        [string]$InternetMessageId
+    )
+    $ns   = $Outlook.GetNamespace('MAPI')
+    $tag  = 'http://schemas.microsoft.com/mapi/proptag/0x1035001E'
+    $dasl = '@SQL="' + $tag + '" = ''' + ($InternetMessageId -replace "'", "''") + ''''
+
+    # 1) Inbox 直探索 (Items.Find は高速)
+    try {
+        $inbox = $ns.GetDefaultFolder(6)  # olFolderInbox
+        $hit   = $inbox.Items.Find($dasl)
+        if ($hit) { return $hit }
+    } catch { }
+
+    # 2) 全 Store / 全フォルダの AdvancedSearch (Inbox 外への振り分け対応)
+    try {
+        foreach ($store in $ns.Stores) {
+            $root = $null
+            try { $root = $store.GetRootFolder() } catch { continue }
+            if (-not $root) { continue }
+            $scope = "'" + $root.FolderPath + "'"
+            $search = $null
+            try {
+                $search = $Outlook.AdvancedSearch($scope, $dasl, $true, 'spira-find')
+            } catch { continue }
+            # AdvancedSearch は非同期。完了イベントを Bind せず簡易ポーリング。
+            $waitMs = 0
+            while ($waitMs -lt 5000) {
+                Start-Sleep -Milliseconds 100
+                $waitMs += 100
+                try {
+                    if ($search.Results -and $search.Results.Count -gt 0) {
+                        return $search.Results.Item(1)
+                    }
+                } catch { }
+            }
+        }
+    } catch { }
+    return $null
+}
+
+# /spira/outlook/reply 本体。
+# 入力 JSON: { inReplyTo: string, bodyHtml: string, cc?: string[] }
+function Invoke-OutlookReplyHandler {
+    param(
+        [System.Net.HttpListenerRequest]$Request,
+        [System.Net.HttpListenerResponse]$Response
+    )
+
+    if ($Request.HttpMethod.ToUpper() -ne 'POST') {
+        Send-Json -Response $Response -Status 405 `
+            -Body @{ ok = $false; error = @{ code = 'method_not_allowed'; detail = 'POST only' } }
+        return
+    }
+
+    # JSON 入力読込
+    $payload = $null
+    try {
+        $reader = New-Object System.IO.StreamReader($Request.InputStream, $Request.ContentEncoding)
+        $raw    = $reader.ReadToEnd()
+        $reader.Dispose() | Out-Null
+        if ($raw) { $payload = $raw | ConvertFrom-Json }
+    } catch {
+        Send-Json -Response $Response -Status 400 `
+            -Body @{ ok = $false; error = @{ code = 'bad_json'; detail = $_.Exception.Message } }
+        return
+    }
+    if (-not $payload -or -not $payload.inReplyTo) {
+        Send-Json -Response $Response -Status 400 `
+            -Body @{ ok = $false; error = @{ code = 'missing_field'; detail = 'inReplyTo is required' } }
+        return
+    }
+
+    # Outlook COM 取得 (起動中ならアタッチ、止まっていれば起動)
+    $outlook = $null
+    try {
+        try { $outlook = [Runtime.InteropServices.Marshal]::GetActiveObject('Outlook.Application') }
+        catch { $outlook = New-Object -ComObject Outlook.Application }
+    } catch {
+        Send-Json -Response $Response -Status 500 `
+            -Body @{ ok = $false; error = @{ code = 'outlook_not_available'; detail = $_.Exception.Message } }
+        return
+    }
+
+    # 元メール検索
+    $orig = $null
+    try {
+        $orig = Find-OutlookMessageByInternetMessageId -Outlook $outlook -InternetMessageId $payload.inReplyTo
+    } catch { }
+    if (-not $orig) {
+        Send-Json -Response $Response -Status 404 `
+            -Body @{ ok = $false; error = @{ code = 'message_not_found'; detail = "InternetMessageId not found in any local Outlook store: $($payload.inReplyTo)" } }
+        return
+    }
+
+    # 正規 Reply 下書きを生成 + 編集本文を冒頭に prepend + Cc 追記 + Display
+    try {
+        $reply = $orig.Reply()
+        $bodyHtml = "$($payload.bodyHtml)"
+        if ($bodyHtml) {
+            # Outlook が自動生成する引用本文の上に prepend
+            $reply.HTMLBody = $bodyHtml + $reply.HTMLBody
+        }
+        if ($payload.cc) {
+            foreach ($addr in $payload.cc) {
+                if ($addr) {
+                    ($reply.Recipients.Add([string]$addr)).Type = 2  # olCC
+                }
+            }
+            $null = $reply.Recipients.ResolveAll()
+        }
+        $reply.Display()
+        Send-Json -Response $Response -Status 200 -Body @{ ok = $true }
+    } catch {
+        Send-Json -Response $Response -Status 500 `
+            -Body @{ ok = $false; error = @{ code = 'outlook_reply_failed'; detail = $_.Exception.Message } }
+    }
+}
+
 # ─── Request handler ────────────────────────────────────────────────────────
 
 function Invoke-RelayRequest {
@@ -263,6 +428,26 @@ function Invoke-RelayRequest {
         $response.StatusCode = 204
         Add-CorsHeaders -Response $response
         $response.OutputStream.Close()
+        return
+    }
+
+    # ── ローカル機能エンドポイント (/spira/*) は upstream に流さない ──
+    $path = $request.Url.AbsolutePath
+    if ($path -eq '/spira/health') {
+        Send-Json -Response $response -Status 200 -Body @{ ok = $true; relay = 'spira-ai-relay'; version = 1 }
+        return
+    }
+    if ($path -eq '/spira/outlook/reply') {
+        Invoke-OutlookReplyHandler -Request $request -Response $response
+        return
+    }
+
+    # ── AI gateway 未設定なら 502 ──
+    # /spira/* (ローカル機能) は前段で処理済み。ここに来るのは AI 系の
+    # リクエストなので、forward 先が無ければ素直にエラーを返す。
+    if (-not $Target) {
+        Send-Error -Response $response -Status 502 -Code 'no_upstream' `
+            -Detail 'AI gateway (-Target) が未設定です。AI チャット機能を使うには relay 起動時に -Target を指定してください。'
         return
     }
 

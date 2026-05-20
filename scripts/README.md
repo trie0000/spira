@@ -1,8 +1,15 @@
-# Spira AI relay — Pure PowerShell
+# Spira relay — Pure PowerShell (AI + Outlook)
 
-ブラウザの Spira から社内 AI ゲートウェイをオンプレ プロキシ経由で呼び出す
-ための、ローカル PC で動く HTTP リレー。**Python 等の外部ランタイム不要**で、
-Windows 標準の PowerShell + .NET (HttpClient / HttpListener) だけで動く。
+ブラウザの Spira からローカル PC 上で動く 2 種類の機能を提供する HTTP リレー:
+
+1. **AI gateway 中継** — 社内 AI ゲートウェイ (Azure OpenAI 互換) へオンプレ
+   プロキシ経由で呼び出しを転送 (`/openai/...` 等を upstream に forward)
+2. **Outlook 返信下書き** — Spira UI からのリクエストで Outlook デスクトップに
+   「特定の InternetMessageId への正規 Reply 下書き」を開く (`/spira/outlook/reply`)
+3. **死活確認** — `GET /spira/health` で起動中かどうかを Spira UI が確認
+
+**Python 等の外部ランタイム不要**で、Windows 標準の PowerShell + .NET
+(HttpClient / HttpListener) + Outlook COM だけで動く。
 
 ## 必要な構成
 
@@ -11,13 +18,14 @@ Spira (bookmarklet)
         │  http://localhost:18080
         ▼
 spira-ai-relay.ps1   (PowerShell on local PC)
-        │  https via proxy
-        ▼
-社内 AI ゲートウェイ (Azure OpenAI 互換)
+   ├─ /spira/outlook/reply   → Outlook COM (.Reply / .Display)
+   ├─ /spira/health          → 起動応答
+   └─ それ以外               → https via proxy → 社内 AI ゲートウェイ
 ```
 
 ブラウザは loopback (`127.0.0.1`) には到達できるので、リレーが両端の橋渡しを
-する。社内プロキシ経由の認証も PS 側で完結。
+する。社内プロキシ経由の認証も PS 側で完結。Outlook 返信は COM 経由でローカルの
+Outlook クライアントに描画する (relay 内で完結、upstream には行かない)。
 
 ## ファイル
 
@@ -48,7 +56,7 @@ SPIRA_AI_PORT=18080
 # SPIRA_AI_SKIP_CERT_CHECK=1   ← 自己署名証明書のみ (検証用)
 ```
 
-- `SPIRA_AI_TARGET` — 社内 AI ゲートウェイの URL (パス込み)
+- `SPIRA_AI_TARGET` — 社内 AI ゲートウェイの URL (パス込み)。**未設定でも relay は起動可能**で、その場合 AI 中継は無効、Outlook 返信中継だけ有効になる
 - `SPIRA_AI_PROXY` — オンプレ プロキシ URL (不要なら行ごと削除)
 - `SPIRA_AI_PORT` — ローカル listen ポート (既定 18080)
 
@@ -106,6 +114,35 @@ PowerShell から直接呼ぶ場合は引数で指定可:
 |------|------|
 | `-NoProxy` | プロキシ無しで直接ゲートウェイへ (デバッグ用途) |
 | `-SkipCertCheck` | ⚠ 自己署名証明書のゲートウェイ用。本番では使わない |
+
+## Outlook 返信中継について
+
+Spira の「📧 返信メール作成」ボタンが、外部対応経緯の最後のメールを
+返信対象として relay に POST する流れ:
+
+```
+[Spira UI] 「Outlook で下書きを開く」 → POST /spira/outlook/reply
+        { inReplyTo: "<RFC 822 InternetMessageId>",
+          bodyHtml: "<p>...</p>", cc: ["..."] }
+        │
+[relay] Outlook.Application を COM で取得
+        │
+        ├─ Inbox.Items.Find (高速)
+        └─ AdvancedSearch (全ストア再帰、個人ルール振り分け先も対象)
+        │  ↑ InternetMessageId をキーに DASL クエリで検索
+        │
+        $orig.Reply() で正規返信下書きを生成 (In-Reply-To / References 自動付与)
+        $reply.HTMLBody = bodyHtml + $reply.HTMLBody (引用部分の上に prepend)
+        $reply.Display()   ← Outlook ウィンドウが開く
+```
+
+要件:
+- **Windows + Outlook デスクトップ クライアント** (COM が必要)
+- relay と Outlook は **同じユーザセッション** で動作 (= operator の PC)
+- 元メールが operator の Outlook 内に存在すること (Inbox / サブフォルダ / PST 含む)
+
+見つからない / Outlook 未起動 / relay 停止のいずれの場合も Spira UI は
+OWA Compose にフォールバックして新規メール作成を開く (件名タグ付き)。
 
 ## タスクスケジューラで常駐させる
 
