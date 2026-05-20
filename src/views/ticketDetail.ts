@@ -23,6 +23,7 @@ import { getDepartmentOptions, getInquiryCategoryOptions } from '../utils/option
 import { createDateTime } from '../components/datetime';
 import { parseTeamsPaste, resolveTeamsTimeToISO, normalizeForDedup, detectLeadingOrphan } from '../lib/teams-paste';
 import { parseEml, parseOutlookDragText, parseMsgFile, looksLikeEml, looksLikeOutlookDrag } from '../lib/eml-parser';
+import { getFormsAnalyticsUrl } from '../utils/formsSettings';
 import { createAiChatPane, isAiPanelOpen, toggleAiPanel } from './aiChat';
 import type { Ticket, Comment } from '../types';
 
@@ -34,6 +35,58 @@ import type { Ticket, Comment } from '../types';
 let pendingScrollCommentId: number | null = null;
 export function requestScrollToComment(commentId: number): void {
   pendingScrollCommentId = commentId;
+}
+
+/** Forms 起票チケット用の「回答一覧を開く」バナーを生成する。
+ *  conversationId から responseId を抽出して表示。設定済み URL があれば
+ *  リンク化、未設定なら設定への案内を表示。 */
+async function buildFormsLinkBanner(t: Ticket): Promise<HTMLElement | null> {
+  const conv = t.initialConversationId ?? '';
+  // forms-<formId>-<responseId> 形式から各 ID を抽出 (responseId が無い古い
+  // データでも壊れないように optional 化)
+  let responseId = '';
+  if (conv.startsWith('forms-')) {
+    const rest = conv.slice('forms-'.length);
+    const lastDash = rest.lastIndexOf('-');
+    if (lastDash > 0) responseId = rest.slice(lastDash + 1);
+  }
+  const analyticsUrl = await getFormsAnalyticsUrl();
+
+  const respIdSpan = responseId
+    ? el('span', { style: 'color:var(--ink-3);font-size:var(--fs-xs);font-family:ui-monospace,Menlo,monospace' }, [`回答 ID: ${responseId}`])
+    : null;
+
+  if (analyticsUrl) {
+    return el('div', {
+      style: 'display:flex;align-items:center;gap:var(--s-3);padding:var(--s-2) var(--s-5);' +
+             'background:rgba(160,90,140,0.08);border-bottom:1px solid var(--line);font-size:var(--fs-sm)',
+    }, [
+      el('span', {}, ['📋']),
+      el('a', {
+        href: analyticsUrl,
+        target: '_blank',
+        rel: 'noopener noreferrer',
+        style: 'color:var(--accent-strong);text-decoration:underline',
+      }, ['Forms 回答一覧を開く']),
+      ...(respIdSpan ? [respIdSpan] : []),
+      el('span', { style: 'flex:1' }),
+      el('span', { style: 'color:var(--ink-3);font-size:var(--fs-xs)' }, ['※ 管理者ビューで該当 ID の行を検索してください']),
+    ]);
+  }
+
+  // 未設定 → 設定への誘導
+  return el('div', {
+    style: 'display:flex;align-items:center;gap:var(--s-3);padding:var(--s-2) var(--s-5);' +
+           'background:var(--paper-2);border-bottom:1px solid var(--line);font-size:var(--fs-sm);color:var(--ink-3)',
+  }, [
+    el('span', {}, ['📋']),
+    el('span', {}, ['Forms 起票チケット']),
+    ...(respIdSpan ? [respIdSpan] : []),
+    el('span', { style: 'flex:1' }),
+    el('span', { style: 'font-size:var(--fs-xs)' }, [
+      '※ 「設定 → Forms 連携」で URL を登録すると回答一覧リンクを表示できます',
+    ]),
+  ]);
 }
 
 export async function renderTicketDetail(ticketId: number): Promise<HTMLElement> {
@@ -78,6 +131,16 @@ export async function renderTicketDetail(ticketId: number): Promise<HTMLElement>
     }, ['更新']),
   ]);
 
+  // Forms 起票チケットなら回答一覧へのリンクを表示 (設定済みなら直リンク、
+  // 未設定なら設定への誘導)。source が forms か、ConversationId 規約から判定。
+  const isFormsTicket =
+    t.source === 'forms' ||
+    !!(t.initialConversationId && t.initialConversationId.startsWith('forms-'));
+  const formsBanner = el('div', { style: 'display:none' });
+  if (isFormsTicket) {
+    void buildFormsLinkBanner(t).then((b) => { if (b) formsBanner.replaceWith(b); });
+  }
+
   const wrap = el('div', {
     class: 'spira-main-wrap',
     style: 'display:flex;flex-direction:column;height:100%;min-height:0',
@@ -85,6 +148,7 @@ export async function renderTicketDetail(ticketId: number): Promise<HTMLElement>
     await renderTabStrip(t, latestReceived),
     renderTicketHeader(t, latestReceived),
     refreshBanner,
+    formsBanner,
     renderSplitPanes(t, comments, prevLastSeen),
   ]);
 

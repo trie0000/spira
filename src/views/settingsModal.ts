@@ -14,6 +14,7 @@ import { toast } from '../components/toast';
 import { getRepo } from '../api/repo';
 import { isDeveloperMode, setDeveloperMode } from '../utils/devMode';
 import { getFontSize, setFontSize, type FontSize } from '../utils/fontSize';
+import { getFormsAnalyticsUrl, setFormsAnalyticsUrl, extractFormId, normalizeAnalyticsUrl } from '../utils/formsSettings';
 
 // 既存設定モーダル群
 import {
@@ -184,6 +185,89 @@ async function renderSyncIntervalPanel(): Promise<SettingPanel> {
   return { body, save };
 }
 
+// ── インライン: Forms 連携 ─────────────────────────────────────────
+async function renderFormsSettingsPanel(): Promise<SettingPanel> {
+  const current = (await getFormsAnalyticsUrl()) ?? '';
+
+  const urlInput = el('input', {
+    type: 'url',
+    class: 'spira-input',
+    placeholder: 'https://forms.office.com/Pages/AnalysisPage.aspx?id=...',
+    value: current,
+    style: 'width:100%;font-family:ui-monospace,Menlo,monospace;font-size:12px',
+  }) as HTMLInputElement;
+
+  const previewLabel = el('span', { style: 'color:var(--ink-3);font-size:var(--fs-xs);width:80px;flex-shrink:0' }, ['Form ID:']);
+  const previewValue = el('code', {
+    style: 'font-family:ui-monospace,Menlo,monospace;font-size:12px;background:var(--paper-2);padding:2px 6px;border-radius:3px;word-break:break-all',
+  }, ['(未入力)']);
+  const previewRow = el('div', {
+    style: 'display:flex;gap:var(--s-2);align-items:center;margin-top:var(--s-2);min-height:24px',
+  }, [previewLabel, previewValue]);
+
+  const refreshPreview = (): void => {
+    const fid = extractFormId(urlInput.value);
+    if (fid) {
+      previewValue.textContent = fid;
+      previewValue.style.color = 'var(--ink-2)';
+    } else if (urlInput.value.trim()) {
+      previewValue.textContent = '⚠ URL から id= が抽出できません';
+      previewValue.style.color = 'var(--danger)';
+    } else {
+      previewValue.textContent = '(未入力)';
+      previewValue.style.color = 'var(--ink-3)';
+    }
+  };
+  refreshPreview();
+  urlInput.addEventListener('input', refreshPreview);
+
+  const clearBtn = el('button', {
+    type: 'button',
+    class: 'spira-btn spira-btn--ghost spira-btn--sm',
+    onclick: () => { urlInput.value = ''; refreshPreview(); },
+  }, ['クリア']);
+
+  const save = async (): Promise<void> => {
+    const raw = urlInput.value.trim();
+    if (!raw) {
+      await setFormsAnalyticsUrl(null);
+      toast(getRoot(), 'Forms URL の登録を解除しました', 'ok');
+      return;
+    }
+    if (!extractFormId(raw)) {
+      toast(getRoot(), 'URL から Form ID を抽出できません。`id=<...>` を含む URL を貼り付けてください', 'error');
+      throw new Error('invalid');
+    }
+    // 保存は正規化済み URL (AnalysisPage 形式) で揃える
+    await setFormsAnalyticsUrl(normalizeAnalyticsUrl(raw));
+    toast(getRoot(), 'Forms 回答一覧 URL を保存しました', 'ok');
+  };
+
+  const body = el('div', {}, [
+    el('h2', { style: TITLE }, ['Forms 連携']),
+    el('div', { style: DESC }, [
+      'Forms 起票チケットの本文に「回答一覧を開く」リンクを表示するための URL を 1 つ登録します。',
+      el('br'),
+      'Forms 管理画面で対象フォームを開いた状態のブラウザ URL バーから ',
+      el('code', { style: 'background:var(--paper-2);padding:1px 6px;border-radius:3px;font-size:0.92em' }, ['?id=<長い文字列>']),
+      ' を含む URL を丸ごとコピーして貼り付けてください。',
+      el('br'),
+      '保存時に AnalysisPage 形式 (',
+      el('code', { style: 'background:var(--paper-2);padding:1px 6px;border-radius:3px;font-size:0.92em' }, ['https://forms.office.com/Pages/AnalysisPage.aspx?id=...']),
+      ') に整形されます。',
+    ]),
+    el('div', { style: 'display:flex;flex-direction:column;gap:var(--s-2)' }, [
+      el('label', { style: 'font-size:var(--fs-sm);color:var(--ink)' }, ['Forms URL']),
+      el('div', { style: 'display:flex;gap:var(--s-2);align-items:flex-start' }, [
+        el('div', { style: 'flex:1;min-width:0' }, [urlInput]),
+        clearBtn,
+      ]),
+      previewRow,
+    ]),
+  ]);
+  return { body, save };
+}
+
 // ── インライン: 文字サイズ ─────────────────────────────────────────
 function renderFontSizePanel(): SettingPanel {
   const current = getFontSize();
@@ -345,6 +429,11 @@ function buildGroups(): SettingGroup[] {
               body, save,
             });
           },
+        },
+        {
+          key: 'forms',
+          label: 'Forms 連携',
+          render: () => renderFormsSettingsPanel(),
         },
         {
           key: 'sync-interval',
