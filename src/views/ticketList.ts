@@ -10,6 +10,7 @@ import { formatTicketIdShort } from '../utils/ticketTag';
 import { isInternalAuthor } from '../utils/members';
 import { findTag } from '../utils/tagDictionary';
 import { renderTagPill } from './shell';
+import { getDepartmentOptions, getInquiryCategoryOptions } from '../utils/optionLists';
 import { getLastSeen, hasNewSince } from '../utils/seenState';
 import type { Ticket, TicketStatus, Priority, Comment } from '../types';
 
@@ -633,19 +634,44 @@ function openInlineSelectMenu<T extends string>(
   options: T[],
   current: T | undefined,
   onSelect: (v: T) => void,
+  opts?: { clearLabel?: string; onClear?: () => void },
 ): void {
   document.querySelectorAll('.spira-inline-menu').forEach(n => n.remove());
+  const items: HTMLElement[] = [];
+  // 「未設定にする」項目を先頭に追加 (オプション扱い)。
+  // 部門 / 種別など、空に戻したい列のために使う。
+  if (opts?.clearLabel && opts?.onClear) {
+    const cleared = current == null || current === '';
+    items.push(el('div', {
+      class: 'spira-menu-item' + (cleared ? ' spira-menu-item--current' : ''),
+      style: 'color:var(--ink-3);font-style:italic',
+      onclick: (e: Event) => {
+        e.stopPropagation();
+        menu.remove();
+        opts.onClear?.();
+      },
+    }, [opts.clearLabel]));
+  }
+  for (const opt of options) {
+    items.push(el('div', {
+      class: 'spira-menu-item' + (opt === current ? ' spira-menu-item--current' : ''),
+      onclick: (e: Event) => {
+        e.stopPropagation();
+        menu.remove();
+        onSelect(opt);
+      },
+    }, [opt]));
+  }
+  // 候補が空のとき (= 設定で 1 件も登録されていない) のガイダンス。
+  if (items.length === 0) {
+    items.push(el('div', {
+      style: 'padding:8px 12px;color:var(--ink-3);font-size:var(--fs-sm)',
+    }, ['候補がありません。設定から追加してください。']));
+  }
   const menu = el('div', {
     class: 'spira-menu spira-inline-menu',
-    style: 'position:fixed;z-index:2147483700;min-width:140px',
-  }, options.map(opt => el('div', {
-    class: 'spira-menu-item' + (opt === current ? ' spira-menu-item--current' : ''),
-    onclick: (e: Event) => {
-      e.stopPropagation();
-      menu.remove();
-      onSelect(opt);
-    },
-  }, [opt])));
+    style: 'position:fixed;z-index:2147483700;min-width:140px;max-height:320px;overflow-y:auto',
+  }, items);
   const rect = anchor.getBoundingClientRect();
   menu.style.top = `${rect.bottom + 4}px`;
   menu.style.left = `${rect.left}px`;
@@ -861,13 +887,49 @@ function renderRow(t: Ticket, meta?: TicketMeta): HTMLElement {
   const internalCell = threadLinkCell(t.internalDeepLink, '🏢', '内部スレッドを開く');
   const userCell = threadLinkCell(t.userDeepLink, '👥', '外部スレッドを開く');
 
-  // 部門 / 種別 セル (テキスト表示、未設定は灰色)
-  const textCell = (val: string | undefined): HTMLElement =>
-    val
-      ? el('td', { style: 'font-size:var(--fs-sm);white-space:nowrap;max-width:140px;overflow:hidden;text-overflow:ellipsis' }, [val])
-      : el('td', { style: 'color:var(--ink-4);text-align:center' }, ['—']);
-  const categoryCell = textCell(t.inquiryCategory);
-  const deptCell = textCell(t.department);
+  // 部門 / 種別 セル — インライン編集対応。クリックで選択肢メニューを開く。
+  // 候補は設定 (utils/optionLists) から取得。未設定にも戻せる (clearLabel)。
+  const inlineEditableCell = (
+    val: string | undefined,
+    options: string[],
+    fieldLabel: string,
+    fieldKey: 'department' | 'inquiryCategory',
+  ): HTMLElement => {
+    const display = val
+      ? el('span', {
+          style: 'display:inline-block;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:middle',
+          title: val,
+        }, [val])
+      : el('span', { style: 'color:var(--ink-4)' }, ['—']);
+    return el('td', {
+      style: 'font-size:var(--fs-sm);cursor:pointer',
+      title: `クリックで${fieldLabel}を変更`,
+      onclick: (e: Event) => {
+        e.stopPropagation();
+        const anchor = e.currentTarget as HTMLElement;
+        openInlineSelectMenu<string>(
+          anchor,
+          options,
+          val,
+          async (next) => {
+            await inlineUpdate(t, { [fieldKey]: next } as Partial<Ticket>, fieldLabel);
+          },
+          {
+            clearLabel: '— 未設定にする',
+            onClear: async () => {
+              await inlineUpdate(t, { [fieldKey]: undefined } as Partial<Ticket>, fieldLabel);
+            },
+          },
+        );
+      },
+    }, [display]);
+  };
+  const categoryCell = inlineEditableCell(
+    t.inquiryCategory, getInquiryCategoryOptions(), '種別', 'inquiryCategory',
+  );
+  const deptCell = inlineEditableCell(
+    t.department, getDepartmentOptions(), '部門', 'department',
+  );
 
   const isClosed = t.status === '完了';
   return el('tr', {
