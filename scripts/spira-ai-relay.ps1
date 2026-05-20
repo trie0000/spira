@@ -311,23 +311,28 @@ function Find-OutlookMessageBySenderAndTime {
     if (-not $FromEmail -or -not $SentAtIso) { return $null }
     $ns = $Outlook.GetNamespace('MAPI')
 
-    # 送信時刻の前後 1 分でレンジ検索 (clock skew / 秒切り捨て差吸収)
+    # MAPI も Spira の sentAt も秒精度で揃うので、秒単位の完全一致で検索する。
+    # レンジ検索は不要 (同じメールなら同じ送信秒、送信者も完全一致するはず)。
     $sent = $null
     try { $sent = [DateTime]::Parse($SentAtIso).ToUniversalTime() } catch { return $null }
-    $from = $sent.AddMinutes(-1).ToString('yyyy-MM-dd HH:mm:ss')
-    $to   = $sent.AddMinutes( 1).ToString('yyyy-MM-dd HH:mm:ss')
+    $exact = $sent.ToString('yyyy-MM-dd HH:mm:ss')
 
-    # DASL 句: SentOn (PR_CLIENT_SUBMIT_TIME) のレンジ + sender email
-    # PR_SENT_REPRESENTING_SMTP_ADDRESS (0x5D02001F) を使うと SMTP 表記で
-    # ヒットしやすい (EX 形式の /o=ExchangeLabs/... を回避)。
-    $tagTime   = 'urn:schemas:httpmail:datereceived'   # 受信時刻ベース (一致しやすい)
-    $tagTime2  = 'urn:schemas:httpmail:date'           # 送信時刻
-    $tagSender = 'http://schemas.microsoft.com/mapi/proptag/0x5D01001F'  # PR_SENT_REPRESENTING_SMTP_ADDRESS
+    # DASL タグ:
+    #   PR_SENT_REPRESENTING_SMTP_ADDRESS (0x5D01001F) — 送信者の SMTP アドレス
+    #     (EX 形式 /o=ExchangeLabs/... を回避して SMTP 表記でヒットさせる)
+    #   urn:schemas:httpmail:date         — 送信時刻 (PR_CLIENT_SUBMIT_TIME)
+    #   urn:schemas:httpmail:datereceived — 受信時刻 (送信時刻が PA で取れて
+    #     いない / 取りこぼしのフォールバック用)
+    $tagSent     = 'urn:schemas:httpmail:date'
+    $tagReceived = 'urn:schemas:httpmail:datereceived'
+    $tagSender   = 'http://schemas.microsoft.com/mapi/proptag/0x5D01001F'
 
     $safeFrom = ($FromEmail -replace "'", "''").Trim()
-    # 時刻はまず送信時刻 (Date) で広く、ダメなら受信時刻でも試す。
-    $daslPrimary = "@SQL=""$tagSender"" = '$safeFrom' AND ""$tagTime2"" >= '$from' AND ""$tagTime2"" <= '$to'"
-    $daslSecondary = "@SQL=""$tagSender"" = '$safeFrom' AND ""$tagTime"" >= '$from' AND ""$tagTime"" <= '$to'"
+    # 送信時刻 (= sentAt の正攻法) で完全一致、ダメなら受信時刻でも試す
+    # (PA フロー① で sentDateTime ではなく receivedDateTime を入れている
+    #  運用のフォールバック)。
+    $daslPrimary   = "@SQL=""$tagSender"" = '$safeFrom' AND ""$tagSent"" = '$exact'"
+    $daslSecondary = "@SQL=""$tagSender"" = '$safeFrom' AND ""$tagReceived"" = '$exact'"
 
     # 1) Inbox を Restrict で絞ってから最新を取る (Items.Find / Restrict は同等)
     try {

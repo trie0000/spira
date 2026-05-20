@@ -140,7 +140,7 @@ OWA ベースの操作は一切無い (relay 経由のみ)。
         │
         ├─ Inbox.Items.Restrict (高速)
         │   DASL: PR_SENT_REPRESENTING_SMTP_ADDRESS = '<fromEmail>'
-        │       AND 受信時刻が <sentAt ± 1 分> の範囲
+        │       AND 送信時刻 = '<sentAt 秒精度>' (= 完全一致)
         └─ AdvancedSearch (全ストア再帰、ルールでサブフォルダに振り分け済も対象)
         │
         $orig.Reply() で正規返信下書きを生成
