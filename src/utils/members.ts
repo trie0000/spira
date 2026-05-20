@@ -47,11 +47,54 @@ export function isInternalMember(email?: string | null): boolean {
   return getInternalMembers().includes(email.trim().toLowerCase());
 }
 
+/** 名前文字列の比較用バリアント列挙。
+ *
+ *  Teams チャット由来の送信者名は AD displayName と「同じ人なのに微妙に違う」
+ *  形で渡されることが多い:
+ *    - "山田 太郎 (Yamada Taro)" vs "山田 太郎" vs "Yamada Taro"
+ *    - "John Smith (山田)" vs "John Smith" vs "山田"
+ *    - 全角/半角の空白・括弧の混在
+ *    - 大文字小文字 (アルファベット表記)
+ *
+ *  なのでマッチング時は「いずれかのバリアントが一致したら同一人物」と
+ *  判定するため、文字列を以下の候補に展開する:
+ *    1. 正規化済みフル文字列 (lowercase + 全角→半角の空白/括弧 + 余分な空白圧縮)
+ *    2. 括弧部分を除外した文字列 (例: "山田 太郎")
+ *    3. 各括弧の中身 (例: "Yamada Taro")
+ *  返り値は重複を除いた配列。 */
+export function nameVariants(raw: string | null | undefined): string[] {
+  const s = (raw ?? '').trim();
+  if (!s) return [];
+  const base = s
+    .replace(/　/g, ' ')   // 全角スペース → 半角
+    .replace(/[（]/g, '(')     // 全角開き括弧
+    .replace(/[）]/g, ')')     // 全角閉じ括弧
+    .replace(/\s+/g, ' ')      // 連続空白を 1 つに
+    .toLowerCase()
+    .trim();
+  if (!base) return [];
+  const variants = new Set<string>();
+  variants.add(base);
+  // 括弧部分を抜いた本体
+  const stripped = base.replace(/\s*\([^)]*\)\s*/g, ' ').replace(/\s+/g, ' ').trim();
+  if (stripped) variants.add(stripped);
+  // 各括弧の中身
+  const parenMatches = base.match(/\(([^)]+)\)/g);
+  if (parenMatches) {
+    for (const m of parenMatches) {
+      const inner = m.slice(1, -1).trim();
+      if (inner) variants.add(inner);
+    }
+  }
+  return Array.from(variants);
+}
+
 /** Check whether a comment author is internal. Order of resolution:
  *    1. fromEmail in the internal-members list → internal
- *    2. fromName matches an AD user's displayName whose email is in
- *       the internal-members list → internal (covers Teams paste etc.)
- *    3. fromName in the override list → internal (manual edge cases)
+ *    2. fromName matches an AD user's displayName (バリアント比較; 大小・全角半角・
+ *       括弧の有無を吸収) whose email is in the internal-members list → internal
+ *       (Teams paste 等の表示名揺れに対応)
+ *    3. fromName のいずれかのバリアントが override list に含まれる → internal
  *
  *  Caller supplies the AD users list (typically `getState().users`) so
  *  this util stays free of cross-module state imports. */
@@ -61,15 +104,31 @@ export function isInternalAuthor(
 ): boolean {
   if (author.fromEmail && isInternalMember(author.fromEmail)) return true;
 
-  const name = (author.fromName ?? '').trim().toLowerCase();
-  if (!name) return false;
+  const authorVariants = nameVariants(author.fromName);
+  if (authorVariants.length === 0) return false;
+  const authorSet = new Set(authorVariants);
 
   if (adUsers && adUsers.length) {
-    const match = adUsers.find(u => u.displayName.trim().toLowerCase() === name);
-    if (match && isInternalMember(match.email)) return true;
+    for (const u of adUsers) {
+      const userVariants = nameVariants(u.displayName);
+      for (const v of userVariants) {
+        if (authorSet.has(v)) {
+          if (isInternalMember(u.email)) return true;
+          break; // 同じ AD ユーザに別バリアントを試しても無駄
+        }
+      }
+    }
   }
 
-  if (getInternalDisplayNames().includes(name)) return true;
+  // override 名前リストもバリアント比較で照合 (legacy エントリは生文字列で
+  // 保存されている可能性があるので、保存値側もバリアント化して比較)。
+  const overrides = getInternalDisplayNames();
+  for (const n of overrides) {
+    const ov = nameVariants(n);
+    for (const v of ov) {
+      if (authorSet.has(v)) return true;
+    }
+  }
 
   return false;
 }
