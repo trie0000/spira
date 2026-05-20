@@ -284,16 +284,12 @@ function buildGroups(): SettingGroup[] {
           label: 'チケット ID 形式',
           render: (root) => {
             const { body, save } = buildTicketIdFormatPanel(root);
-            const saveBtn = el('button', {
-              class: 'spira-btn spira-btn--primary',
-              style: 'margin-top:var(--s-4)',
-              onclick: async () => { try { await save(); } catch { /* */ } },
-            }, ['保存']);
-            return el('div', {}, [
-              el('h2', { style: TITLE }, ['チケット ID 形式']),
-              body,
-              saveBtn,
-            ]);
+            return inlinePanel({
+              title: 'チケット ID 形式',
+              hint: '件名タグ (例: [CASE#00001]) の接頭辞を設定します。' +
+                '起票時の自動付与・メール件名のタグ解析・Teams スレッド連携の全箇所で使われます。',
+              body, save,
+            });
           },
         },
         {

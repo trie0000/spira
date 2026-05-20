@@ -28,7 +28,7 @@ const KBD = (s: string): HTMLElement => el('span', {
 function renderUserTab(): HTMLElement {
   return el('div', { style: 'max-width:760px' }, [
     el('p', { style: P }, [
-      el('strong', {}, ['Spira (読み: スパイラ)']),
+      el('strong', {}, ['Spira (読み: エスピラ)']),
       ' は SharePoint / Power Automate / Microsoft Teams を組み合わせた、',
       el('strong', {}, ['メール・Forms・Teams を 1 つのチケットに束ねる軽量な対応管理ツール']),
       ' です。専用サーバ不要、ブックマークレット 1 つで起動します。',
@@ -228,7 +228,7 @@ function renderArchDiagram(): HTMLElement {
 function renderTechTab(): HTMLElement {
   return el('div', { style: 'max-width:920px' }, [
     el('p', { style: P }, [
-      el('strong', {}, ['Spira (読み: スパイラ)']),
+      el('strong', {}, ['Spira (読み: エスピラ)']),
       ' のアーキ概要・データソース・管理者操作の解説。',
       el('strong', {}, ['追加サーバ / 専用ライセンス不要']),
       ' で、SharePoint + Power Automate Standard tier のみで完結します。',
@@ -480,7 +480,7 @@ export function openAboutModal(): void {
   ]);
 
   openModal(getRoot(), {
-    title: '📘 Spira (スパイラ) について',
+    title: '📘 Spira (エスピラ) について',
     body,
     size: 'xl',
     primaryLabel: '閉じる',
