@@ -400,7 +400,12 @@ function Invoke-OutlookReplyHandler {
 
     $payload = $null
     try {
-        $reader = New-Object System.IO.StreamReader($Request.InputStream, $Request.ContentEncoding)
+        # JSON 本文は常に UTF-8 として読む。
+        # HttpListenerRequest.ContentEncoding は Content-Type に charset が
+        # 無いとき OS の既定 (日本語 Windows なら CP932) を返してしまうため、
+        # それを使うと UTF-8 の日本語が文字化けして JSON パースが落ちる。
+        # Spira (ブラウザ fetch) は仕様通り UTF-8 で送信するので、明示固定で OK。
+        $reader = New-Object System.IO.StreamReader($Request.InputStream, [System.Text.Encoding]::UTF8)
         $raw    = $reader.ReadToEnd()
         $reader.Dispose() | Out-Null
         if ($raw) { $payload = $raw | ConvertFrom-Json }
@@ -475,7 +480,12 @@ function Invoke-OutlookNewHandler {
 
     $payload = $null
     try {
-        $reader = New-Object System.IO.StreamReader($Request.InputStream, $Request.ContentEncoding)
+        # JSON 本文は常に UTF-8 として読む。
+        # HttpListenerRequest.ContentEncoding は Content-Type に charset が
+        # 無いとき OS の既定 (日本語 Windows なら CP932) を返してしまうため、
+        # それを使うと UTF-8 の日本語が文字化けして JSON パースが落ちる。
+        # Spira (ブラウザ fetch) は仕様通り UTF-8 で送信するので、明示固定で OK。
+        $reader = New-Object System.IO.StreamReader($Request.InputStream, [System.Text.Encoding]::UTF8)
         $raw    = $reader.ReadToEnd()
         $reader.Dispose() | Out-Null
         if ($raw) { $payload = $raw | ConvertFrom-Json }
