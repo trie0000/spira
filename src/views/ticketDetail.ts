@@ -788,10 +788,115 @@ function buildTicketActions(
     'エクスポート',
   ]);
 
-  const buttons: HTMLElement[] = [aiBtn, copySubjectBtn, replyBtn, userThreadBtn, internalThreadBtn];
+  // 「⋯」(3 点リーダ) メニュー — 利用頻度の低い操作 (Teams スレッド起票・
+  // エクスポート・プロパティ) を畳んで、ヘッダのボタン列をスッキリ見せる。
+  // 各メニュー項目は対応する元ボタンの click() を dispatch するだけなので、
+  // ボタン側に書かれている onclick (起票確認モーダル / setState 等) は全部
+  // そのまま動く。Teams ボタンはラベル / title が DeepLink の有無で変わる
+  // ので、メニューを開く瞬間に元ボタンの現在ラベルを読み取って表示する。
+  const kebabBtn = el('button', {
+    class: 'spira-btn spira-btn--ghost spira-btn--sm',
+    title: 'その他のアクション (Teams スレッド起票 / エクスポート / プロパティ)',
+    'aria-label': 'その他のアクション',
+    onclick: (e: Event) => {
+      e.stopPropagation();
+      const labelOf = (btn: HTMLElement): string => {
+        // ボタンの直下 <span> の中で SVG を持たない (= テキスト用) を探す。
+        // 無ければ textContent にフォールバック。
+        const spans = Array.from(btn.querySelectorAll<HTMLSpanElement>(':scope > span'));
+        for (const s of spans) {
+          if (!s.querySelector('svg')) {
+            const t = s.textContent?.trim();
+            if (t) return t;
+          }
+        }
+        return (btn.textContent ?? '').trim();
+      };
+      openKebabMenu(kebabBtn, [
+        { iconName: 'chat',     label: labelOf(userThreadBtn),     title: userThreadBtn.getAttribute('title') ?? undefined,     onSelect: () => userThreadBtn.click() },
+        { iconName: 'chat',     label: labelOf(internalThreadBtn), title: internalThreadBtn.getAttribute('title') ?? undefined, onSelect: () => internalThreadBtn.click() },
+        { iconName: 'external', label: 'エクスポート',              title: exportBtn.getAttribute('title') ?? undefined,         onSelect: () => exportBtn.click() },
+        { iconName: 'gear',     label: 'プロパティ',                title: propertiesBtn.getAttribute('title') ?? undefined,     onSelect: () => propertiesBtn.click() },
+      ]);
+    },
+  }, [
+    // 縦 3 点リーダ風の見た目 (•••)。CSS の letter-spacing で間隔を作って
+    // フォント依存を最小化。
+    el('span', { style: 'font-size:18px;line-height:1;letter-spacing:2px;font-weight:700' }, ['⋯']),
+  ]);
+
+  // ヘッダ表示: AI / 件名コピー / 返信メール作成 / [Forms (起票時のみ)] /
+  //            ⋯ (Teams 起票・エクスポート・プロパティ) / 削除
+  // userThreadBtn / internalThreadBtn / exportBtn / propertiesBtn は DOM に
+  // 直接配置しないが、変数として保持しておくことで kebab メニューから
+  // click() で動作させられる。
+  const buttons: HTMLElement[] = [aiBtn, copySubjectBtn, replyBtn];
   if (formsBtn) buttons.push(formsBtn);
-  buttons.push(exportBtn, propertiesBtn, deleteBtn);
+  buttons.push(kebabBtn, deleteBtn);
   return buttons;
+}
+
+/** ⋯ (3 点リーダ) ボタンの下に開くドロップダウンメニュー。
+ *  ticketDetail.ts 内で使う簡易ポップオーバー (ticketList の
+ *  openInlineSelectMenu と似た構成だが、こちらはアイコン + ラベルの
+ *  「メニュー項目」UI に特化)。外クリック / Esc で閉じる。 */
+interface KebabMenuItem {
+  iconName: string;
+  label: string;
+  title?: string;
+  onSelect: () => void;
+}
+function openKebabMenu(anchor: HTMLElement, items: KebabMenuItem[]): void {
+  document.querySelectorAll('.spira-kebab-menu').forEach(n => n.remove());
+  const root = getRoot();
+  const menu = el('div', {
+    class: 'spira-menu spira-kebab-menu',
+    style:
+      'position:fixed;z-index:2147483700;min-width:220px;' +
+      'background:var(--paper);border:1px solid var(--line);border-radius:var(--r-2);' +
+      'box-shadow:0 4px 12px rgba(0,0,0,0.12);padding:4px 0',
+  }, items.map(it => el('div', {
+    class: 'spira-menu-item',
+    style:
+      'display:flex;align-items:center;gap:8px;padding:6px 12px;' +
+      'cursor:pointer;font-size:var(--fs-sm);color:var(--ink);white-space:nowrap',
+    title: it.title ?? '',
+    onclick: (e: Event) => {
+      e.stopPropagation();
+      menu.remove();
+      try { it.onSelect(); } catch (err) { console.warn('[spira/kebab] action failed:', err); }
+    },
+  }, [
+    el('span', { html: icon(it.iconName), style: 'display:inline-flex;width:14px;height:14px;flex-shrink:0;color:var(--ink-2)' }),
+    el('span', { style: 'flex:1' }, [it.label]),
+  ])));
+
+  const rect = anchor.getBoundingClientRect();
+  // メニューはアンカーの右端に揃える (画面右端でも溢れないように)
+  menu.style.top  = `${rect.bottom + 4}px`;
+  menu.style.left = `${Math.max(8, rect.right - 220)}px`;
+  root.appendChild(menu);
+
+  setTimeout(() => {
+    const closer = (e: Event): void => {
+      if (menu.contains(e.target as Node)) return;
+      cleanup();
+    };
+    const keyCloser = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') {
+        e.stopImmediatePropagation();
+        cleanup();
+      }
+    };
+    const cleanup = (): void => {
+      menu.remove();
+      document.removeEventListener('click', closer);
+      document.removeEventListener('keydown', keyCloser, true);
+    };
+    document.addEventListener('click', closer);
+    // Esc は capture phase で取って、上位の modal Esc に到達させない。
+    document.addEventListener('keydown', keyCloser, true);
+  }, 0);
 }
 
 /** Forms 回答一覧へのリンクボタン。クリックで設定済み URL を新規タブで開く。
