@@ -74,16 +74,25 @@ export function nameVariants(raw: string | null | undefined): string[] {
     .trim();
   if (!base) return [];
   const variants = new Set<string>();
-  variants.add(base);
+  // バリアント生成ヘルパー: 文字列を「そのまま」と「全空白除去」の 2 形で追加。
+  // 「山田 太郎」と「山田太郎」、「John Smith」と「JohnSmith」を同一視するため。
+  const addBoth = (v: string): void => {
+    const t = v.trim();
+    if (!t) return;
+    variants.add(t);
+    const noSpace = t.replace(/\s+/g, '');
+    if (noSpace && noSpace !== t) variants.add(noSpace);
+  };
+  addBoth(base);
   // 括弧部分を抜いた本体
   const stripped = base.replace(/\s*\([^)]*\)\s*/g, ' ').replace(/\s+/g, ' ').trim();
-  if (stripped) variants.add(stripped);
+  if (stripped) addBoth(stripped);
   // 各括弧の中身
   const parenMatches = base.match(/\(([^)]+)\)/g);
   if (parenMatches) {
     for (const m of parenMatches) {
       const inner = m.slice(1, -1).trim();
-      if (inner) variants.add(inner);
+      if (inner) addBoth(inner);
     }
   }
   return Array.from(variants);
