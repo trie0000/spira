@@ -2306,7 +2306,23 @@ export function createNoteEditor(opts: NoteEditorOptions = {}): NoteEditor {
     // position the caret next to a chip. Opening is reserved for
     // double-click (handled below).
     const fileChip = target.closest('a.ne-file');
-    if (fileChip) e.preventDefault();
+    if (fileChip) { e.preventDefault(); return; }
+    // 通常のアンカー (オートリンク含む) は contenteditable 内ではブラウザ
+    // 既定だと単独クリックで遷移しない。ユーザの期待 (クリックで開く) に
+    // 合わせて、Alt キーが押されていない通常クリックなら新規タブで開く。
+    //   - Alt+click: ブラウザ既定 (キャレット配置) を許可。リンク近傍に
+    //     カーソルを置きたいときの逃げ道。
+    //   - Cmd/Ctrl+click: ブラウザ既定の「新規タブで開く」が走るので何も
+    //     しない (preventDefault しない)。
+    const anchor = target.closest('a[href]') as HTMLAnchorElement | null;
+    if (anchor && !anchor.classList.contains('ne-file')) {
+      // Cmd/Ctrl/Shift/Middle はブラウザ既定に委ねる。
+      if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+      if (e.altKey) return;
+      e.preventDefault();
+      const href = anchor.getAttribute('href') ?? '';
+      if (href) window.open(href, '_blank', 'noopener,noreferrer');
+    }
   });
 
   // File chip double-click → open the file in a new tab. Without the

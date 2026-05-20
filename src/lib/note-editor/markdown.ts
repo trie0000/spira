@@ -276,10 +276,77 @@ function inlineMdToHtml(s: string): string {
         `<span class="ne-file-name">${name}</span></a>`
       );
     }
-    return `<a href="${h}">${t}</a>`;
+    return `<a href="${h}" target="_blank" rel="noopener noreferrer">${t}</a>`;
   });
+  // 裸 URL のオートリンク。`[label](url)` で既に処理済みの <a> 内や
+  // <code>...</code> 内は対象外。skip 区間は走査時にスキップする。
+  out = autolinkBareUrls(out);
   out = out.replace(/  \n/g, '<br>');
   return out;
+}
+
+/** プレーンテキスト中の http(s) URL を <a> タグに変換する。
+ *  既存の <a>...</a>、<code>...</code>、<pre>...</pre> の内側はスキップする。
+ *  HTML 属性値 (= タグ内) もスキップ。Markdown→HTML の最後で呼ぶ前提。 */
+function autolinkBareUrls(html: string): string {
+  // URL: http(s)://〜 で末尾の句読点 (.,;:!?] }) ` " ' >) は含めない。
+  // 末尾の閉じ括弧類だけ別マッチで弾く方が単純なので、greedy 部分は
+  // [^\s<>"')]+ で取って末尾の punctuation を後段で1文字戻す方式。
+  const URL_RE = /https?:\/\/[^\s<>"'`\])]+/g;
+  const TAG_RE = /<\/?([a-zA-Z][a-zA-Z0-9-]*)(?:\s[^>]*)?>/y;
+  const SKIP_TAGS = new Set(['a', 'code', 'pre']);
+
+  let result = '';
+  let i = 0;
+  const n = html.length;
+  while (i < n) {
+    const ch = html[i];
+    if (ch === '<') {
+      // タグの開始を検出。
+      TAG_RE.lastIndex = i;
+      const m = TAG_RE.exec(html);
+      if (m) {
+        const tagName = m[1]!.toLowerCase();
+        const isOpen = !m[0].startsWith('</');
+        if (isOpen && SKIP_TAGS.has(tagName)) {
+          // 対応する閉じタグまでまるごとコピー (autolink 対象外)。
+          const closeTok = `</${tagName}>`;
+          const closeIdx = html.toLowerCase().indexOf(closeTok, i + m[0].length);
+          if (closeIdx >= 0) {
+            const end = closeIdx + closeTok.length;
+            result += html.slice(i, end);
+            i = end;
+            continue;
+          }
+        }
+        // それ以外の単独タグ (ブロック要素 / void 要素含む) はそのままコピー。
+        result += m[0];
+        i += m[0].length;
+        continue;
+      }
+      // タグとしてパースできなかった `<` はリテラル扱い (実用上ほぼ無いはず)。
+      result += ch;
+      i++;
+      continue;
+    }
+    // 次のタグまでをテキスト区間として処理。
+    const nextLt = html.indexOf('<', i);
+    const end = nextLt === -1 ? n : nextLt;
+    const segment = html.slice(i, end);
+    result += segment.replace(URL_RE, (raw) => {
+      // 末尾の句読点を URL から外す (慣用的に文末ドット等を含めないため)。
+      let url = raw;
+      let trail = '';
+      while (url.length > 0 && /[.,;:!?)]$/.test(url)) {
+        trail = url.slice(-1) + trail;
+        url = url.slice(0, -1);
+      }
+      if (!url) return raw;
+      return `<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>${trail}`;
+    });
+    i = end;
+  }
+  return result;
 }
 
 function tableMdToHtml(lines: string[], widths: number[] = [], hasHeader = false): string {

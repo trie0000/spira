@@ -174,6 +174,24 @@
   outline-offset: 2px;
 }
 
+/* 通常リンク (オートリンク / [text](url) どちらも対象)。ファイルチップ
+   `.ne-file` は別スタイル (上書きされる) なので影響なし。クリックで
+   新規タブ遷移するハンドラは editor.ts の click listener 側で実装。 */
+.ne-prose a[href]:not(.ne-file),
+.ne-content a[href]:not(.ne-file) {
+  color: var(--ne-accent, #3a6dd9);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+  word-break: break-all;
+}
+.ne-prose a[href]:not(.ne-file):hover,
+.ne-content a[href]:not(.ne-file):hover {
+  color: var(--ne-accent, #3a6dd9);
+  text-decoration: underline;
+  filter: brightness(0.85);
+}
+
 /* File attachment chip (Excel/PDF/Word/etc. linked into the memo). The
    underlying anchor stays a real <a target="_blank">, so click handling
    is the browser's responsibility — no JS hook needed. */
