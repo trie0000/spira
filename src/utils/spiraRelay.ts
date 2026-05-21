@@ -61,14 +61,23 @@ export interface RelayResult {
 
 /** /spira/outlook/reply: 既存メールへの正規 Reply 下書きを Outlook で開く。
  *
- *  メール検索キーは「送信時刻 (sentAtIso) + 送信者 (fromEmail)」の組み合わせ。
- *  Outlook の MAPI も Spira の sentAt も秒精度で揃うので完全一致で照合。
- *  InternetMessageId は不要。 */
+ *  メール検索キーは優先順位付き:
+ *   1) internetMessageId (RFC 5322 Message-ID) — 世界一意。operator が個人
+ *      ルールでどのフォルダに振り分けていても確実にヒットする最強キー。
+ *      Spira は PA フロー① が取り込み時に Comments.internetMessageId に保存。
+ *   2) 送信時刻 (sentAtIso) + 送信者 (fromEmail) — message-id が欠落する
+ *      .msg ドラッグ / 手動起票のフォールバック。
+ *  relay 側は 1 → 2 の順で検索し、最初にヒットした 1 通に対して .Reply()。 */
 export async function openOutlookReplyDraft(input: {
-  /** 元メールの送信時刻 (ISO 8601 文字列)。 */
-  sentAtIso: string;
-  /** 元メールの送信者メールアドレス (= 申請者の email)。 */
-  fromEmail: string;
+  /** 元メールの世界一意 ID (RFC 5322 Message-ID)。最優先の検索キー。 */
+  internetMessageId?: string;
+  /** 元メールの送信時刻 (ISO 8601 文字列)。フォールバック検索キー。 */
+  sentAtIso?: string;
+  /** 元メールの送信者メールアドレス (= 申請者の email)。フォールバック検索キー。 */
+  fromEmail?: string;
+  /** 下書きに反映する To。未指定なら relay が .Reply() の自動 To (元送信者)
+   *  を保持。指定時は relay 側で受信者を再構築してこの To に置き換える。 */
+  to?: string;
   /** 返信本文 (HTML)。Outlook の引用部分の上に prepend される。 */
   bodyHtml: string;
   /** 追加 Cc アドレス (任意)。元メールから引き継いだ Cc に追記される。 */
@@ -84,8 +93,10 @@ export async function openOutlookReplyDraft(input: {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        sentAtIso: input.sentAtIso,
-        fromEmail: input.fromEmail,
+        internetMessageId: input.internetMessageId ?? '',
+        sentAtIso: input.sentAtIso ?? '',
+        fromEmail: input.fromEmail ?? '',
+        to: input.to ?? '',
         bodyHtml: input.bodyHtml,
         cc: input.cc ?? [],
         replyTo: input.replyTo ?? [],

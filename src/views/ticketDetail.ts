@@ -85,6 +85,7 @@ export async function renderTicketDetail(ticketId: number): Promise<HTMLElement>
         mode: 'reply',
         toEmail: latestExternalMail.fromEmail!,
         toName: latestExternalMail.fromName ?? '',
+        sourceMessageId: latestExternalMail.internetMessageId,
         sourceSentAt: latestExternalMail.sentAt,
         defaultSubject: `Re: ${formatTicketTag(t.id)} ${t.title}`,
         defaultBody: '',
@@ -93,6 +94,7 @@ export async function renderTicketDetail(ticketId: number): Promise<HTMLElement>
         mode: 'new',
         toEmail: t.reporterEmail ?? '',
         toName: t.reporterName ?? '',
+        sourceMessageId: undefined,
         sourceSentAt: undefined,
         defaultSubject: `${formatTicketTag(t.id)} ${t.title}`,
         defaultBody: buildNewReplyTemplate(t),
@@ -1014,7 +1016,10 @@ interface ReplyComposerTarget {
   mode: 'reply' | 'new';
   toEmail: string;
   toName: string;
-  /** reply モード時の元メール送信時刻 (relay の検索キー)。 */
+  /** reply モード: 元メールの世界一意 ID (RFC 5322 Message-ID)。
+   *  relay の最優先検索キー。ML 受信メールなら PA フロー①が保存済み。 */
+  sourceMessageId: string | undefined;
+  /** reply モード: 元メール送信時刻 (relay のフォールバック検索キー)。 */
   sourceSentAt: string | undefined;
   defaultSubject: string;
   defaultBody: string;
@@ -1136,7 +1141,9 @@ function openReplyComposerModal(activeT: Ticket, target: ReplyComposerTarget): v
       el('span', {}, [`元メール送信時刻: ${fmtDate(target.sourceSentAt)}`]),
       el('br', {}, []),
       el('span', { style: 'color:var(--ink-3)' }, [
-        '検索キー: 送信時刻 + 送信者 (operator の Outlook 内を全フォルダ検索)',
+        target.sourceMessageId
+          ? '検索キー: メッセージ ID (世界一意) → operator の Outlook 内を全フォルダ検索。確実にこのメールへの返信下書きを生成します。'
+          : '検索キー: 送信時刻 + 送信者 (operator の Outlook 内を全フォルダ検索)',
       ]),
     ] : []),
     ...(!isReply ? [
@@ -1200,8 +1207,13 @@ function openReplyComposerModal(activeT: Ticket, target: ReplyComposerTarget): v
       const replyTo = replyToAddresses;
       const result = isReply
         ? await openOutlookReplyDraft({
+            // 最優先キー: 世界一意の Message-ID (ML 受信メールは PA が保存済み)。
+            internetMessageId: target.sourceMessageId,
+            // フォールバックキー: 送信時刻 + 送信者。
             sentAtIso: target.sourceSentAt ?? '',
             fromEmail: target.toEmail,
+            // モーダルで編集した To を確実に反映 (relay 側で受信者を再構築)。
+            to,
             bodyHtml,
             cc,
             replyTo,
@@ -1226,7 +1238,7 @@ function openReplyComposerModal(activeT: Ticket, target: ReplyComposerTarget): v
       if (result.errorCode === 'relay-unreachable') {
         msg = `ローカル中継 (${getRelayOrigin()}) に接続できません。spira-ai-relay.ps1 を起動してから再試行してください。`;
       } else if (result.errorCode === 'message-not-found') {
-        msg = '元メールが Outlook 内で見つかりませんでした (送信時刻 + 送信者で検索)。' +
+        msg = '元メールが Outlook 内で見つかりませんでした (メッセージ ID / 送信時刻+送信者で検索)。' +
               'operator の Outlook に元メールが届いていない / 完全削除済みの可能性があります。';
       } else if (result.errorCode === 'outlook-not-running') {
         msg = 'Outlook クライアントが起動していない可能性があります。Outlook を起動してから再試行してください。';

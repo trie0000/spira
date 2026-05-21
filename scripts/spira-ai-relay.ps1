@@ -304,66 +304,95 @@ function Get-OutlookOrNull {
     } catch { return $null }
 }
 
-# 「送信時刻 (分単位) + 送信者メール」で operator の Outlook ストア全体を
-# 検索する。Spira 側は Comments.sentAt (ISO 8601) + Comments.fromEmail を
-# 持っているので、これだけで一意に決まる前提。
-# 1) Inbox 直探索 (Items.Restrict)
-# 2) ヒット無しなら AdvancedSearch で全 Store / 全フォルダ再帰
+# operator の Outlook ストア全体から返信対象メールを検索する。
+#
+# 検索キーの優先順位 (上から順に試行、最初にヒットしたものを採用):
+#   1) InternetMessageId (RFC 5322 Message-ID ヘッダ)
+#        - メール 1 通ごとに世界で一意。どのメールボックス / どのフォルダに
+#          コピーされても同じ値を持つため、operator が個人ルールでサブフォルダ
+#          に振り分けていても確実にヒットする最強キー。
+#        - Spira は PA フロー① が triggerOutputs()['body/InternetMessageId']
+#          を Comments.internetMessageId に保存しているので ML 受信メールでは
+#          必ず使える。
+#   2) 送信時刻 (秒精度) + 送信者 SMTP
+#        - .msg ドラッグ / 手動起票で message-id が欠落しているケースの
+#          フォールバック。送信者 + 送信秒が同じメールは現実的に一意。
+#
+# 各キーごとに:
+#   a) Inbox 直探索 (Items.Restrict、高速)
+#   b) ヒット無しなら AdvancedSearch で全 Store / 全フォルダ再帰
 # 戻り値: 見つかった MailItem (COM) または $null
-function Find-OutlookMessageBySenderAndTime {
+function Find-OutlookMessage {
     param(
         $Outlook,
+        [string]$InternetMessageId,
         [string]$FromEmail,
         [string]$SentAtIso
     )
-    if (-not $FromEmail -or -not $SentAtIso) { return $null }
     $ns = $Outlook.GetNamespace('MAPI')
 
-    # MAPI も Spira の sentAt も秒精度で揃うので、秒単位の完全一致で検索する。
-    # レンジ検索は不要 (同じメールなら同じ送信秒、送信者も完全一致するはず)。
-    $sent = $null
-    try { $sent = [DateTime]::Parse($SentAtIso).ToUniversalTime() } catch { return $null }
-    $exact = $sent.ToString('yyyy-MM-dd HH:mm:ss')
+    # --- 検索 DASL のリストを優先順位順に組み立てる ---------------------
+    $daslList = @()
 
-    # DASL タグ:
+    # 1) InternetMessageId (message-id ヘッダ)。
+    #    urn:schemas:mailheader:message-id と PR_INTERNET_MESSAGE_ID
+    #    (0x1035001F) の両タグを試す (ストアにより露出するタグが異なる)。
+    #    値はブラケット <...> 付き / 無しの両表記を試す (取り込み経路で揺れる)。
+    if ($InternetMessageId) {
+        $mid = ([string]$InternetMessageId).Trim()
+        $midNoBracket = $mid.Trim('<', '>')
+        $variants = @($mid)
+        if ($midNoBracket -ne $mid) { $variants += $midNoBracket }
+        $variants += "<$midNoBracket>"
+        $variants = $variants | Select-Object -Unique
+        $tagMidHdr  = 'urn:schemas:mailheader:message-id'
+        $tagMidProp = 'http://schemas.microsoft.com/mapi/proptag/0x1035001F'
+        foreach ($v in $variants) {
+            $safeMid = ($v -replace "'", "''")
+            $daslList += "@SQL=""$tagMidHdr"" = '$safeMid'"
+            $daslList += "@SQL=""$tagMidProp"" = '$safeMid'"
+        }
+    }
+
+    # 2) 送信時刻 (秒精度・完全一致) + 送信者 SMTP のフォールバック。
     #   PR_SENT_REPRESENTING_SMTP_ADDRESS (0x5D01001F) — 送信者の SMTP アドレス
-    #     (EX 形式 /o=ExchangeLabs/... を回避して SMTP 表記でヒットさせる)
     #   urn:schemas:httpmail:date         — 送信時刻 (PR_CLIENT_SUBMIT_TIME)
-    #   urn:schemas:httpmail:datereceived — 受信時刻 (送信時刻が PA で取れて
-    #     いない / 取りこぼしのフォールバック用)
-    $tagSent     = 'urn:schemas:httpmail:date'
-    $tagReceived = 'urn:schemas:httpmail:datereceived'
-    $tagSender   = 'http://schemas.microsoft.com/mapi/proptag/0x5D01001F'
+    #   urn:schemas:httpmail:datereceived — 受信時刻 (sentAt が取れていない運用の保険)
+    if ($FromEmail -and $SentAtIso) {
+        $sent = $null
+        try { $sent = [DateTime]::Parse($SentAtIso).ToUniversalTime() } catch { $sent = $null }
+        if ($sent) {
+            $exact       = $sent.ToString('yyyy-MM-dd HH:mm:ss')
+            $tagSent     = 'urn:schemas:httpmail:date'
+            $tagReceived = 'urn:schemas:httpmail:datereceived'
+            $tagSender   = 'http://schemas.microsoft.com/mapi/proptag/0x5D01001F'
+            $safeFrom    = ($FromEmail -replace "'", "''").Trim()
+            $daslList += "@SQL=""$tagSender"" = '$safeFrom' AND ""$tagSent"" = '$exact'"
+            $daslList += "@SQL=""$tagSender"" = '$safeFrom' AND ""$tagReceived"" = '$exact'"
+        }
+    }
 
-    $safeFrom = ($FromEmail -replace "'", "''").Trim()
-    # 送信時刻 (= sentAt の正攻法) で完全一致、ダメなら受信時刻でも試す
-    # (PA フロー① で sentDateTime ではなく receivedDateTime を入れている
-    #  運用のフォールバック)。
-    $daslPrimary   = "@SQL=""$tagSender"" = '$safeFrom' AND ""$tagSent"" = '$exact'"
-    $daslSecondary = "@SQL=""$tagSender"" = '$safeFrom' AND ""$tagReceived"" = '$exact'"
+    if ($daslList.Count -eq 0) { return $null }
 
-    # 1) Inbox を Restrict で絞ってから最新を取る (Items.Find / Restrict は同等)
+    # --- a) Inbox を Restrict で絞る (高速) ----------------------------
     try {
         $inbox = $ns.GetDefaultFolder(6)  # olFolderInbox
-        foreach ($dasl in @($daslPrimary, $daslSecondary)) {
+        foreach ($dasl in $daslList) {
             try {
                 $sub = $inbox.Items.Restrict($dasl)
-                if ($sub.Count -ge 1) {
-                    # 複数ヒット時は送信時刻が一番近いものを採用 (理論上 1 件のはず)
-                    return $sub.Item(1)
-                }
+                if ($sub.Count -ge 1) { return $sub.Item(1) }
             } catch { }
         }
     } catch { }
 
-    # 2) 全 Store / 全フォルダの AdvancedSearch
+    # --- b) 全 Store / 全フォルダの AdvancedSearch ---------------------
     try {
         foreach ($store in $ns.Stores) {
             $root = $null
             try { $root = $store.GetRootFolder() } catch { continue }
             if (-not $root) { continue }
             $scope = "'" + $root.FolderPath + "'"
-            foreach ($dasl in @($daslPrimary, $daslSecondary)) {
+            foreach ($dasl in $daslList) {
                 $search = $null
                 try {
                     $search = $Outlook.AdvancedSearch($scope, $dasl, $true, 'spira-find')
@@ -385,7 +414,14 @@ function Find-OutlookMessageBySenderAndTime {
 }
 
 # POST /spira/outlook/reply
-# 入力 JSON: { sentAtIso: string, fromEmail: string, bodyHtml: string, cc?: string[] }
+# 入力 JSON: {
+#   internetMessageId?: string,  // 最優先の検索キー (RFC 5322 Message-ID)
+#   sentAtIso?: string,          // フォールバック検索キー (送信時刻)
+#   fromEmail?: string,          // フォールバック検索キー (送信者 SMTP)
+#   to?: string,                 // 反映する To (未指定なら自動 To を保持)
+#   cc?: string[], replyTo?: string[], bodyHtml: string
+# }
+# internetMessageId か (sentAtIso + fromEmail) のいずれかは必須。
 function Invoke-OutlookReplyHandler {
     param(
         [System.Net.HttpListenerRequest]$Request,
@@ -414,9 +450,13 @@ function Invoke-OutlookReplyHandler {
             -Body @{ ok = $false; error = @{ code = 'bad_json'; detail = $_.Exception.Message } }
         return
     }
-    if (-not $payload -or -not $payload.sentAtIso -or -not $payload.fromEmail) {
+    # 検索キーは InternetMessageId が最優先、無ければ sentAt + fromEmail。
+    # どちらか一方でも揃っていればよい。
+    $hasMid  = [bool]$payload.internetMessageId
+    $hasTime = ($payload.sentAtIso -and $payload.fromEmail)
+    if (-not $hasMid -and -not $hasTime) {
         Send-Json -Response $Response -Status 400 `
-            -Body @{ ok = $false; error = @{ code = 'missing_field'; detail = 'sentAtIso and fromEmail are required' } }
+            -Body @{ ok = $false; error = @{ code = 'missing_field'; detail = 'internetMessageId, or (sentAtIso + fromEmail), is required' } }
         return
     }
 
@@ -429,12 +469,13 @@ function Invoke-OutlookReplyHandler {
 
     $orig = $null
     try {
-        $orig = Find-OutlookMessageBySenderAndTime -Outlook $outlook `
+        $orig = Find-OutlookMessage -Outlook $outlook `
+                  -InternetMessageId $payload.internetMessageId `
                   -FromEmail $payload.fromEmail -SentAtIso $payload.sentAtIso
     } catch { }
     if (-not $orig) {
         Send-Json -Response $Response -Status 404 `
-            -Body @{ ok = $false; error = @{ code = 'message_not_found'; detail = "Mail not found by sentAtIso=$($payload.sentAtIso) fromEmail=$($payload.fromEmail)" } }
+            -Body @{ ok = $false; error = @{ code = 'message_not_found'; detail = "Mail not found by messageId=$($payload.internetMessageId) sentAtIso=$($payload.sentAtIso) fromEmail=$($payload.fromEmail)" } }
         return
     }
 
@@ -451,12 +492,34 @@ function Invoke-OutlookReplyHandler {
             $styled = '<div style="font-family:''Yu Gothic UI'',''Meiryo UI'',''Yu Gothic'',sans-serif; font-size:10.5pt; color:#000;">' + $bodyHtml + '</div>'
             $reply.HTMLBody = $styled + $reply.HTMLBody
         }
+        # 宛先 (To/Cc) を Spira モーダルの編集値で確実に再構築する。
+        # payload.to が来ている場合は .Reply() が自動で入れた To (元送信者)
+        # を一旦クリアして、operator が UI で確定した To / Cc をそのまま
+        # 下書きに反映する (= 「ちゃんと反映された形で」)。
+        # payload.to が無い場合 (後方互換) は自動 To を保持して Cc だけ追記。
+        $toList = @()
+        if ($payload.to) {
+            # To は ';' / ',' / 空白区切りの複数アドレスを許容
+            $toList = @(([string]$payload.to) -split '[;,\s]+' | Where-Object { $_ })
+        }
+        if ($toList.Count -gt 0) {
+            # 既存 (自動生成された) 受信者を全削除してから再構築
+            for ($i = $reply.Recipients.Count; $i -ge 1; $i--) {
+                try { $reply.Recipients.Remove($i) } catch { }
+            }
+            foreach ($addr in $toList) {
+                ($reply.Recipients.Add([string]$addr)).Type = 1  # olTo
+            }
+        }
         if ($payload.cc) {
             foreach ($addr in $payload.cc) {
                 if ($addr) {
                     ($reply.Recipients.Add([string]$addr)).Type = 2  # olCC
                 }
             }
+        }
+        # 受信者を 1 つでも触ったら解決をかける
+        if ($toList.Count -gt 0 -or $payload.cc) {
             $null = $reply.Recipients.ResolveAll()
         }
         # Reply-To 設定 (Spira 設定の「メール返信 — 共通 ML」)。

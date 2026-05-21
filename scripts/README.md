@@ -124,7 +124,7 @@ OWA ベースの操作は一切無い (relay 経由のみ)。
 ### モード判定 (Spira UI 側)
 
 - 外部対応経緯に source=mail の受信履歴がある
-   → **reply モード** (`POST /spira/outlook/reply`、検索キー: 送信時刻 + 送信者)
+   → **reply モード** (`POST /spira/outlook/reply`、検索キー: Message-ID 優先)
 - 受信メール履歴ゼロ / Forms 起票 / 手動起票 / Teams のみ
    → **new モード** (`POST /spira/outlook/new`、テンプレ件名・本文・宛先)
 
@@ -132,28 +132,41 @@ OWA ベースの操作は一切無い (relay 経由のみ)。
 
 ```
 [Spira UI] POST /spira/outlook/reply
-        { sentAtIso: "2026-05-19T10:30:00Z",
-          fromEmail: "alice@customer.example",
-          bodyHtml: "<p>回答...</p>", cc: ["..."] }
+        { internetMessageId: "<abc123@customer.example>",   ← 最優先キー
+          sentAtIso: "2026-05-19T10:30:00Z",                ← フォールバック
+          fromEmail: "alice@customer.example",              ← フォールバック
+          to: "alice@customer.example",                     ← To を確実に反映
+          bodyHtml: "<p>回答...</p>", cc: ["..."], replyTo: ["..."] }
         │
 [relay] Outlook.Application を COM で取得
-        │
-        ├─ Inbox.Items.Restrict (高速)
-        │   DASL: PR_SENT_REPRESENTING_SMTP_ADDRESS = '<fromEmail>'
-        │       AND 送信時刻 = '<sentAt 秒精度>' (= 完全一致)
-        └─ AdvancedSearch (全ストア再帰、ルールでサブフォルダに振り分け済も対象)
+        │   検索 DASL を優先順位順に組み立て (Find-OutlookMessage):
+        ├─ ① Message-ID  urn:schemas:mailheader:message-id
+        │                / PR_INTERNET_MESSAGE_ID (0x1035001F)
+        │                ブラケット <...> 有無の両表記を試行
+        ├─ ② 送信時刻+送信者  PR_SENT_REPRESENTING_SMTP_ADDRESS = '<fromEmail>'
+        │                     AND 送信時刻 = '<sentAt 秒精度>'
+        │   各キーで a) Inbox.Items.Restrict → b) AdvancedSearch (全ストア再帰)
         │
         $orig.Reply() で正規返信下書きを生成
+        受信者を再構築: 自動 To をクリア → payload.to を To、cc を Cc に追加
         $reply.HTMLBody = bodyHtml + $reply.HTMLBody (引用部の上に prepend)
-        $reply.Display()   ← Outlook ウィンドウが開く
+        $reply.ReplyRecipientNames = replyTo (Reply-To)
+        $reply.Display()   ← Outlook ウィンドウが開く (.Send() は絶対に呼ばない)
 ```
 
-検索キーを「送信時刻 + 送信者」にしたのは:
-- `InternetMessageId` は Spira 経由で取り込んだメール (PA フロー①) でしか
-  保存されておらず、.msg ドラッグや手動入力では欠落しがち
-- 送信時刻 (Comments.sentAt) + 送信者 (Comments.fromEmail) は **どの経路で
-  取り込んだメールでも必ず揃っている** ため、検索キーとして信頼できる
-- 送信者 + 分単位の時刻が同じメールは現実的には一意
+検索キーは **InternetMessageId (RFC 5322 Message-ID) を最優先**にしている:
+- メール 1 通ごとに世界で一意。**どのメールボックス / どのフォルダにコピー
+  されても同じ値**を持つため、operator が個人の振り分けルールでサブフォルダに
+  格納していても確実に 1 通へヒットする (最強キー)。
+- Spira は PA フロー① が `triggerOutputs()['body/InternetMessageId']` を
+  `Comments.internetMessageId` に保存済みなので、ML 受信メールでは常に使える。
+- `.msg` ドラッグ / 手動起票で message-id が欠落するケースのみ、
+  「送信時刻 (Comments.sentAt) + 送信者 (Comments.fromEmail)」にフォールバック。
+  送信者 + 送信秒が同じメールは現実的に一意。
+
+To / Cc は Spira モーダルで編集した値を relay に渡し、`.Reply()` が自動生成
+した受信者を一旦クリアしてから再構築する。これにより operator が UI で確定
+した宛先がそのまま下書きに反映される。
 
 ### new モード — 新規メール下書き
 
