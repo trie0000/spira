@@ -61,43 +61,62 @@ export async function renderTicketDetail(ticketId: number): Promise<HTMLElement>
 
   const latestReceived = comments.filter(c => c.type === 'received').slice(-1)[0];
 
-  // 返信メール作成の動作モードを決定。ボタンは常に活性化し、宛先が
-  // 取れなければ空欄でモーダルを開いて operator が手入力できるようにする
-  // (= ボタンが押せない状態は作らない)。
-  //   reply モード: 外部対応経緯に source=mail の受信履歴が 1 件以上ある
-  //                 → 最新の 1 件を返信対象として relay 経由で Outlook に
-  //                   正規 Reply 下書きを開かせる (検索キー: 送信時刻 + 送信者)
-  //   new モード:   メール履歴ゼロ → 新規メール下書き。
-  //                 件名: [#NNNNN] チケットタイトル
-  //                 本文: テンプレ回答文
-  //                 宛先: reporterEmail があればそれ、なければ空欄
-  const latestExternalMail = comments
-    .filter(c =>
-      c.type === 'received' &&
-      c.threadKind !== 'internal' &&
-      c.source === 'mail' &&
-      !!c.fromEmail &&
-      !!c.sentAt
-    )
-    .slice(-1)[0];
-  const replyTarget: ReplyComposerTarget = latestExternalMail
+  // 返信メール作成ボタンの「ステージ」と「動作モード」を決定する。
+  // ボタンは常に活性化し、宛先が取れなければ空欄でモーダルを開いて
+  // operator が手入力できるようにする (= ボタンが押せない状態は作らない)。
+  //
+  // 【ステージ判定】
+  //   外部対応経緯 (received + source=mail + threadKind!=internal) の中に
+  //   「内部メンバーが送信者」のメールが 1 件でもあれば、既に申請者へ返信
+  //   実績がある (= 送信メールが ML 経由で取り込まれて履歴に戻っている) と
+  //   みなす。
+  //     - 返信実績なし → stage='ack'  : ボタン「受付メールの作成」
+  //     - 返信実績あり → stage='reply': ボタン「返信メール作成」
+  //
+  // 【動作モード判定】
+  //   返信元となる「申請者(=非内部メンバー)からの最新受信メール」が存在し、
+  //   かつ送信時刻/送信者が揃っていれば reply モード (internetMessageId が
+  //   あればそれを最優先キーに relay が正規 Reply 下書きを生成)。
+  //   返信元メールが無い (Forms / Teams / その他起票) なら new モード。
+  const adUsers = getState().users;
+  const externalMails = comments.filter(c =>
+    c.type === 'received' &&
+    c.threadKind !== 'internal' &&
+    c.source === 'mail'
+  );
+  const isInternal = (c: Comment): boolean =>
+    isInternalAuthor({ fromEmail: c.fromEmail, fromName: c.fromName }, adUsers);
+  // 申請者(外部)からの受信メール = 内部メンバー送信でない & 返信に必要な情報あり
+  const inboundCustomerMails = externalMails.filter(c =>
+    !isInternal(c) && !!c.fromEmail && !!c.sentAt
+  );
+  const latestInbound = inboundCustomerMails.slice(-1)[0];
+  // 返信実績 = 内部メンバーが送信者の外部メールが履歴にある
+  const hasSentReply = externalMails.some(c => isInternal(c));
+  const stage: 'ack' | 'reply' = hasSentReply ? 'reply' : 'ack';
+  // ack ステージは初回受付テンプレを本文に入れる。reply ステージは空 (operator が書く)。
+  const stageBody = stage === 'ack' ? buildAckReplyTemplate(t) : '';
+
+  const replyTarget: ReplyComposerTarget = latestInbound
     ? {
         mode: 'reply',
-        toEmail: latestExternalMail.fromEmail!,
-        toName: latestExternalMail.fromName ?? '',
-        sourceMessageId: latestExternalMail.internetMessageId,
-        sourceSentAt: latestExternalMail.sentAt,
+        stage,
+        toEmail: latestInbound.fromEmail!,
+        toName: latestInbound.fromName ?? '',
+        sourceMessageId: latestInbound.internetMessageId,
+        sourceSentAt: latestInbound.sentAt,
         defaultSubject: `Re: ${formatTicketTag(t.id)} ${t.title}`,
-        defaultBody: '',
+        defaultBody: stageBody,
       }
     : {
         mode: 'new',
+        stage,
         toEmail: t.reporterEmail ?? '',
         toName: t.reporterName ?? '',
         sourceMessageId: undefined,
         sourceSentAt: undefined,
         defaultSubject: `${formatTicketTag(t.id)} ${t.title}`,
-        defaultBody: buildNewReplyTemplate(t),
+        defaultBody: stageBody,
       };
 
   // Snapshot the user's PREVIOUS last-seen timestamp for this ticket
@@ -673,21 +692,28 @@ function buildTicketActions(
   latestReceived: Comment | undefined,
   replyTarget: ReplyComposerTarget,
 ): HTMLElement[] {
-  // 返信メール作成ボタン: relay 経由で operator の Outlook クライアントに
-  // 下書きを開かせる。reply / new の 2 モード判定は renderTicketDetail 側
-  // で済んでおり、ここでは常時活性化する (宛先未取得でもモーダルで手入力可)。
+  // 受付/返信メール作成ボタン: relay 経由で operator の Outlook クライアントに
+  // 下書きを開かせる。stage (ack/reply) と mode (reply/new) は renderTicketDetail
+  // 側で済んでおり、ここでは常時活性化する (宛先未取得でもモーダルで手入力可)。
+  //   - stage='ack'   → 「受付メールの作成」(初回受付テンプレ入り)
+  //   - stage='reply' → 「返信メール作成」(本文は空)
+  const isAck = replyTarget.stage === 'ack';
+  const replyLabel = isAck ? '受付メールの作成' : '返信メール作成';
+  const who = replyTarget.toName || replyTarget.toEmail;
   const replyTitle = replyTarget.mode === 'reply'
-    ? `外部対応経緯の最後のメール (${replyTarget.toName || replyTarget.toEmail}) への返信下書きを Outlook で開きます`
+    ? (isAck
+        ? `申請者 (${who}) の受信メールへの返信として、受付メール下書きを Outlook で開きます (本文に初回受付テンプレ入り)`
+        : `申請者 (${who}) の受信メールへの返信下書きを Outlook で開きます (To/Cc は元メールから引き継ぎ)`)
     : replyTarget.toEmail
-      ? `申請者 (${replyTarget.toName || replyTarget.toEmail}) 宛に問い合わせ回答メール (新規) を Outlook で開きます。次の返信は件名タグで自動紐付けされます`
-      : '問い合わせ回答メール (新規) を Outlook で開きます。宛先はモーダルで入力してください';
+      ? `申請者 (${who}) 宛に${isAck ? '受付メール' : '回答メール'} (新規) を Outlook で開きます。次の返信は件名タグで自動紐付けされます`
+      : `${isAck ? '受付メール' : '回答メール'} (新規) を Outlook で開きます。宛先はモーダルで入力してください`;
   const replyBtn = el('button', {
     class: 'spira-btn spira-btn--ghost spira-btn--sm',
     title: replyTitle,
     onclick: () => openReplyComposerModal(activeT, replyTarget),
   }, [
     el('span', { html: icon('mail'), style: 'display:inline-flex;width:14px;height:14px' }),
-    '返信メール作成',
+    replyLabel,
   ]);
   void latestReceived; // 旧 OWA 検索ボタンで使っていた値。今は未使用だが署名互換のため残す。
 
@@ -1013,7 +1039,16 @@ function buildTeamsThreadButton(activeT: Ticket, threadType: 'internal' | 'user'
  *              次回の返信からは件名タグで自動 auto-link が効く。
  */
 interface ReplyComposerTarget {
+  /** メール下書きの作り方:
+   *   - 'reply' : 既存メール (internetMessageId / 送信時刻+送信者) への正規 Reply
+   *   - 'new'   : 新規メール (返信元メールが無い: Forms / Teams / 手動起票 等) */
   mode: 'reply' | 'new';
+  /** チケットの対応ステージ。ボタン文言・本文テンプレ・件名を切り替える:
+   *   - 'ack'   : まだ申請者へ返信していない → 「受付メールの作成」。
+   *               本文に初回受付テンプレを入れた状態で下書きを作る。
+   *   - 'reply' : 既に返信実績がある (内部メンバー送信の外部メールが履歴に
+   *               存在) → 「返信メール作成」。本文は空 (operator が書く)。 */
+  stage: 'ack' | 'reply';
   toEmail: string;
   toName: string;
   /** reply モード: 元メールの世界一意 ID (RFC 5322 Message-ID)。
@@ -1025,9 +1060,10 @@ interface ReplyComposerTarget {
   defaultBody: string;
 }
 
-/** 新規メール下書きに入れるデフォルトのテンプレ回答文。
+/** 初回「受付メール」のデフォルトのテンプレ本文 (ack ステージ用)。
+ *  reply モードでは引用部の上に、new モードでは新規本文として入る。
  *  チケットの件名を引用しつつ、admin がそのまま編集して送れる粒度に。 */
-function buildNewReplyTemplate(t: Ticket): string {
+function buildAckReplyTemplate(t: Ticket): string {
   const tag = formatTicketTag(t.id);
   return [
     `${t.reporterName ? `${t.reporterName} 様` : 'お客様'}`,
@@ -1046,13 +1082,18 @@ function buildNewReplyTemplate(t: Ticket): string {
 
 /** 申請者への返信メール作成モーダル。
  *
+ *  stage (ack/reply) × mode (reply/new) で文言・本文・件名が決まる:
+ *   - stage='ack'   : 「受付メールの作成」。本文に初回受付テンプレを入れる。
+ *   - stage='reply' : 「返信メール作成」。本文は空 (operator が書く)。
+ *
  *  動作は 2 モード:
- *   - reply: 外部対応経緯の最後のメール (source=mail) に対する正規 Reply。
- *            relay が「送信時刻 + 送信者」キーで operator の Outlook 内を
- *            検索 → .Reply() で下書き表示。In-Reply-To / References 自動付与。
- *   - new:   受信メール履歴の無いチケット (Forms / 手動 / Teams のみ) で、
+ *   - reply: 申請者の最新受信メール (source=mail) に対する正規 Reply。
+ *            relay が internetMessageId (最優先) / 送信時刻+送信者 (fallback)
+ *            キーで operator の Outlook 内を検索 → .Reply() で下書き表示。
+ *            In-Reply-To / References 自動付与。To/Cc は元メールの返信を継承。
+ *   - new:   返信元メールの無いチケット (Forms / 手動 / Teams のみ) で、
  *            申請者宛に新規メールを作成。件名にチケット ID タグ、本文に
- *            テンプレ回答文を入れた状態で Outlook 新規メール下書きを開く。
+ *            (ack なら) テンプレ回答文を入れた状態で Outlook 下書きを開く。
  *
  *  どちらも relay 経由 (Outlook クライアント必須)。relay が落ちている /
  *  Outlook が起動していない / 元メールが見つからない時は エラートーストで
@@ -1065,6 +1106,7 @@ function openReplyComposerModal(activeT: Ticket, target: ReplyComposerTarget): v
   const fromAddress = target.toEmail.trim();
   const fromName = target.toName.trim();
   const isReply = target.mode === 'reply';
+  const isAck = target.stage === 'ack';
 
   // 入力ウィジェット
   const toInput = el('input', {
@@ -1133,7 +1175,9 @@ function openReplyComposerModal(activeT: Ticket, target: ReplyComposerTarget): v
            'border-radius:var(--r-2);padding:6px 10px;font-size:var(--fs-xs);' +
            'color:var(--ink-3);line-height:1.5',
   }, [
-    el('span', {}, [isReply ? '🔁 返信対象 (外部対応経緯の最後のメール): ' : '✉ 新規メール作成 (受信メール履歴なし)。宛先: ']),
+    el('span', {}, [isReply
+      ? (isAck ? '🧾 受付メール作成 — 返信対象 (申請者の受信メール): ' : '🔁 返信対象 (申請者の最新受信メール): ')
+      : (isAck ? '🧾 受付メール作成 (新規・受信メール履歴なし)。宛先: ' : '✉ 新規メール作成 (受信メール履歴なし)。宛先: ')]),
     el('strong', { style: 'color:var(--ink-2)' }, [fromName || fromAddress || '(宛先未設定)']),
     ...(fromAddress && fromName ? [el('span', {}, [` <${fromAddress}>`])] : []),
     ...(isReply && target.sourceSentAt ? [
@@ -1181,7 +1225,9 @@ function openReplyComposerModal(activeT: Ticket, target: ReplyComposerTarget): v
   };
 
   openModal(getRoot(), {
-    title: isReply ? '📧 申請者に返信メールを作成 (Reply)' : '📧 申請者に問い合わせ回答メールを作成 (新規)',
+    title: isAck
+      ? (isReply ? '📧 申請者に受付メールを作成 (Reply 下書き)' : '📧 申請者に受付メールを作成 (新規)')
+      : (isReply ? '📧 申請者に返信メールを作成 (Reply)' : '📧 申請者に問い合わせ回答メールを作成 (新規)'),
     body,
     size: 'lg',
     primaryLabel: 'Outlook で下書きを開く',
